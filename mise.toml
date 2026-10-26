@@ -1,8 +1,9 @@
 [tools]
 # Keep the compiler aligned with Xila core. Native mise integration makes Cargo
 # commands use mr-boxington without a global shell setup or a second wrapper.
-rust = { version = "1.99.0", profile = "minimal", components = ["clippy", "rustfmt"], mr_boxington = true }
+rust = { version = "1.99.0", profile = "minimal", components = ["clippy", "rustfmt", "llvm-tools-preview"], mr_boxington = true }
 mr-boxington = "1.12.0"
+"cargo:cargo-llvm-cov" = "0.9.1"
 
 [tasks."format"]
 description = "Format every Rust crate in the workspace"
@@ -27,3 +28,11 @@ run = "cargo test --workspace --all-features --locked"
 [tasks."build"]
 description = "Build the workspace"
 run = "cargo build --workspace --all-features --locked"
+
+[tasks."coverage"]
+description = "Run Rust workspace tests with LLVM coverage instrumentation"
+run = "cargo llvm-cov --workspace --all-features"
+
+[tasks."coverage:lcov"]
+description = "Generate an LCOV report for Codecov"
+run = "cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info"
