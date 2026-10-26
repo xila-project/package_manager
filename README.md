@@ -1,5 +1,7 @@
 # Xila package manager
 
+[![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager)
+
 Shared Rust workspace for building, inspecting and eventually installing Xila application packages. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
 
 ## Workspace
