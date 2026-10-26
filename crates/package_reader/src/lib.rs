@@ -67,14 +67,14 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
             .map_err(|_| Error::InvalidArchive)?
             == SIGNATURE_PATH
     {
-            let bytes = candidate.data();
-            if bytes.len() != 64 {
-                return Err(Error::InvalidSignature);
-            }
-            let mut sig = [0u8; 64];
-            sig.copy_from_slice(bytes);
-            signature = Some(sig);
-            entry = entries.next();
+        let bytes = candidate.data();
+        if bytes.len() != 64 {
+            return Err(Error::InvalidSignature);
+        }
+        let mut sig = [0u8; 64];
+        sig.copy_from_slice(bytes);
+        signature = Some(sig);
+        entry = entries.next();
     }
 
     if let Some(key) = trusted {
