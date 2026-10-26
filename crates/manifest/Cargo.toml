@@ -1,5 +1,6 @@
 [package]
-name = "package_manifest"
+publish = false
+name = "xila-package-manifest"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
