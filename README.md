@@ -1,24 +1,33 @@
 # Xila package manager
 
-This repository contains the shared Rust workspace for Xila package-management
-libraries. Its crates are intended for reuse by both Xila core and the package
-repository tooling. Archive, manifest, and signature contracts are not defined
-by this initial scaffold.
+Shared Rust workspace for building, inspecting and eventually installing Xila application packages. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
 
 ## Workspace
 
-- `crates/package-manager`: initial `no_std` library scaffold without a public
-  package-format or verification API yet.
-- `Cargo.toml`: a virtual Cargo workspace. New libraries placed under `crates/`
-  are automatically picked up by its `crates/*` member pattern.
+| Crate | Responsibility |
+| --- | --- |
+| `verification` | `no_std` incremental SHA-256 and strict Ed25519 verification, migrated from Xila Core |
+| `package_manifest` | Shared versioned schema and validation via Miniserde JSON (`no_std + alloc`) |
+| `package_reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
+| `package_writer` | Host-only deterministic USTAR writer |
+| `package_builder` | Host-only `xila-package` executable to generate, update and package applications |
+| `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
-The workspace uses Rust 1.99.0 (2024 edition), aligned with Xila core. It does
-not need a C toolchain or native dependencies at this stage.
+**Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
+
+## Native packaging workflow
+
+```sh
+cargo run -p package_builder -- manifest generate ./app ./manifest.json xila.calculator 1.0.0 wasm32-wasip1 1
+cargo run -p package_builder -- manifest update ./app ./manifest.json
+cargo run -p package_builder -- pack ./app ./manifest.json ./calculator.xpk
+```
+
+The first version handles ordinary uncompressed files and produces development archives. An optional externally generated detached signature is supported, but publisher trust and key management are **not** implemented by this command.
 
 ## Development
 
-Install [mise](https://mise.jdx.dev/) **2026.9.2 or newer**, then from the
-repository root run:
+Install [mise](https://mise.jdx.dev/) 2026.9.2 or newer:
 
 ```sh
 mise trust
@@ -29,21 +38,8 @@ mise run test
 mise run format:check
 ```
 
-`mise run format` applies rustfmt changes. `mise run build` builds every crate.
+The workspace uses Rust 1.99.0 and [mr-boxington](https://mr-boxington.jdx.dev/) for compilation caching. The `mr_boxington = true` configuration avoids requiring a global Cargo wrapper. Use `mise exec -- cargo …` when the shell is not activated.
 
-The project pins both Rust and [mr-boxington](https://mr-boxington.jdx.dev/).
-The `mr_boxington = true` Rust tool option makes Cargo use the build cache in
-`mise run` and `mise exec -- cargo ...` without installing a global Cargo
-wrapper. In a shell without mise activation, call `mise exec -- cargo ...` to
-use the same toolchain and cache. Do not add `sccache` or another Rust compiler
-wrapper on top of mr-boxington.
+GitHub Actions runs formatting, compilation, Clippy, and tests for pull requests and main-branch pushes. The cache stores the Cargo target directory in target mode. Host-only dependencies must not be introduced into the microcontroller-facing crates.
 
-## Continuous integration
-
-GitHub Actions runs formatting, workspace checking, Clippy, and tests for pull
-requests and pushes to `main`. `jdx/mr-boxington-action` restores and saves the
-workspace's Cargo `target/` cache in `target` mode. Pull requests can restore
-existing cache entries; trusted pushes to the default branch can populate it.
-
-The initial library deliberately contains no manifest parser, archive logic, or
-cryptographic API: those should be designed and tested before implementation.
+See [verification migration notes](docs/verification-migration.md) for the cross-repository extraction and [Core issue #536](https://github.com/xila-project/core/issues/536) for related follow-up.
