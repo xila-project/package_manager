@@ -98,7 +98,7 @@ jobs:
           toolchain: "1.99.0"
           targets: ${{ matrix.target }}
       - name: Build native executable
-        run: cargo build --release --target ${{ matrix.target }} --package xila-package-builder
+        run: cargo build --locked --release --target ${{ matrix.target }} --package xila-package-builder
       - name: Package and upload Unix binary
         if: runner.os != 'Windows'
         shell: bash
