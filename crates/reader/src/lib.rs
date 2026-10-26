@@ -5,8 +5,8 @@
 extern crate alloc;
 
 use alloc::vec;
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
 use tar_no_std::TarArchiveRef;
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
 use xila_package_verification::{ContentVerifier, PublicKey};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -56,7 +56,8 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
         return Err(Error::InvalidManifest);
     }
     let raw_manifest = first.data();
-    let manifest = xila_package_manifest::decode(raw_manifest).map_err(|_| Error::InvalidManifest)?;
+    let manifest =
+        xila_package_manifest::decode(raw_manifest).map_err(|_| Error::InvalidManifest)?;
 
     let mut entry = entries.next();
     let mut signature = None;

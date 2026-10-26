@@ -1,8 +1,6 @@
 //! Host-side Xila package authoring tool. Archives are unsigned unless an
 //! externally generated 64-byte Ed25519 signature is explicitly supplied.
-use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
 use getargs_derive::{GetArgs, Subcommand};
-use xila_package_writer::SourceFile;
 use std::{
     env,
     fmt::Write as _,
@@ -10,7 +8,9 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
+use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
 use xila_package_verification::Sha256Verifier;
+use xila_package_writer::SourceFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -83,8 +83,8 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
 }
 
 fn write_manifest(output: &Path, manifest: &Manifest) -> Result<()> {
-    let text =
-        xila_package_manifest::encode(manifest).map_err(|_| invalid("manifest failed validation"))?;
+    let text = xila_package_manifest::encode(manifest)
+        .map_err(|_| invalid("manifest failed validation"))?;
     fs::write(output, text)?;
     Ok(())
 }
@@ -294,9 +294,10 @@ fn run() -> Result<()> {
                 target,
                 minimum_xila_abi,
             ),
-            ManifestOperation::Update { directory, manifest } => {
-                update(Path::new(directory), Path::new(manifest))
-            }
+            ManifestOperation::Update {
+                directory,
+                manifest,
+            } => update(Path::new(directory), Path::new(manifest)),
         },
         Command::Pack {
             directory,

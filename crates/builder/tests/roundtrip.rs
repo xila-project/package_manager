@@ -83,10 +83,17 @@ fn supports_derived_help_and_version() {
         vec!["pack", "--help"],
     ] {
         let output = Command::new(binary).args(arguments).output().unwrap();
-        assert!(output.status.success(), "{:?}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{:?}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(!output.stdout.is_empty());
     }
-    let output = Command::new(binary).args(["manifest", "generat"]).output().unwrap();
+    let output = Command::new(binary)
+        .args(["manifest", "generat"])
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("generate"));
 }

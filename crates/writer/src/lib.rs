@@ -1,9 +1,9 @@
 //! Deterministic host-only USTAR writer for the experimental Xila package profile.
 //! No PAX headers, GNU extended names, symlinks, or compression in this version.
 
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use std::io::{self, Write};
 use tar::{Builder, EntryType, Header};
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_verification::ContentVerifier;
 
 pub struct SourceFile<'a> {
@@ -64,7 +64,8 @@ pub fn write_package<W: Write>(
     payloads: &[SourceFile<'_>],
     signature: Option<&[u8; 64]>,
 ) -> io::Result<()> {
-    let json = xila_package_manifest::encode(manifest).map_err(|_| bad_input("invalid manifest"))?;
+    let json =
+        xila_package_manifest::encode(manifest).map_err(|_| bad_input("invalid manifest"))?;
     if payloads.len() != manifest.files.len() {
         return Err(bad_input("incorrect file count"));
     }
