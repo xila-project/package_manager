@@ -96,8 +96,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
+          targets: ${{ matrix.target }}
       - name: Build native executable
-        run: cargo build --release --package xila-package-builder
+        run: cargo build --release --target ${{ matrix.target }} --package xila-package-builder
       - name: Package and upload Unix binary
         if: runner.os != 'Windows'
         shell: bash
@@ -106,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           archive="xila-package-${TARGET}.tar.gz"
-          tar -czf "$archive" -C target/release xila-package
+          tar -czf "$archive" -C "target/$TARGET/release" xila-package
           shasum -a 256 "$archive" > "$archive.sha256"
           gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256"
       - name: Package and upload Windows binary
@@ -117,7 +118,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $archive = "xila-package-$env:TARGET.zip"
-          Compress-Archive -Path 'target/release/xila-package.exe' -DestinationPath $archive
+          Compress-Archive -Path 'target/$env:TARGET/release/xila-package.exe' -DestinationPath $archive
           $hash = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
           "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
           gh release upload "$env:RELEASE_TAG" "$archive" "$archive.sha256"
