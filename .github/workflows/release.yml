@@ -118,7 +118,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $archive = "xila-package-$env:TARGET.zip"
-          Compress-Archive -Path 'target/$env:TARGET/release/xila-package.exe' -DestinationPath $archive
+          Compress-Archive -Path "target/$env:TARGET/release/xila-package.exe" -DestinationPath $archive
           $hash = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
           "$hash  $archive" | Out-File -Encoding ascii "$archive.sha256"
           gh release upload "$env:RELEASE_TAG" "$archive" "$archive.sha256"
