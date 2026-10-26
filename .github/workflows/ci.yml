@@ -29,7 +29,11 @@ jobs:
           github-cache-mode: target
           cache-generation: v1-package-manager
       - name: Refresh dependency lockfile for added workspace crates
-        run: cargo generate-lockfile
+        run: |
+          cargo generate-lockfile
+          echo "BEGIN_GENERATED_CARGO_LOCKFILE"
+          cat Cargo.lock
+          echo "END_GENERATED_CARGO_LOCKFILE"
       - name: Check formatting
         run: mise run format:check
       - name: Check workspace
