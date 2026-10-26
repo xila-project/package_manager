@@ -1,0 +1,177 @@
+name: Package Xila Wasm (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      wasm-artifact:
+        description: "Required name of the Actions artifact containing the compiled Wasm"
+        required: true
+        type: string
+      wasm-path:
+        description: "Optional Wasm file path inside the downloaded artifact (autodetect if exactly one)"
+        required: false
+        type: string
+        default: ""
+      manifest-path:
+        description: "Relative path to the archive manifest JSON in the caller repository or manifest artifact"
+        required: true
+        type: string
+      manifest-artifact:
+        description: "Optional Actions artifact name containing a generated manifest"
+        required: false
+        type: string
+        default: ""
+      builder-ref:
+        description: "Git ref or preferably immutable commit of the package_manager builder"
+        required: false
+        type: string
+        default: "main"
+      artifact-name:
+        description: "Output Actions artifact name (must be unique when invoked multiple times)"
+        required: false
+        type: string
+        default: "xila-package"
+      upload-artifact:
+        description: "Upload the .xpk package and checksum as workflow artifacts"
+        required: false
+        type: boolean
+        default: true
+      publish-release:
+        description: "Attach the .xpk package and checksum to a tagged GitHub Release"
+        required: false
+        type: boolean
+        default: false
+      release-tag:
+        description: "Existing Git tag to publish to; must point at the caller workflow commit"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      filename:
+        description: "Generated package filename"
+        value: ${{ jobs.package.outputs.filename }}
+      sha256:
+        description: "SHA-256 of generated archive"
+        value: ${{ jobs.package.outputs.sha256 }}
+      artifact-name:
+        description: "Name of the Actions artifact containing the package (when upload is enabled)"
+        value: ${{ jobs.package.outputs.artifact_name }}
+
+jobs:
+  package:
+    name: Build and validate Xila package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      filename: ${{ steps.pack.outputs.filename }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      artifact_name: ${{ inputs.artifact-name }}
+    steps:
+      - name: Check out caller repository for manifest
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          path: caller
+      - name: Check out Xila package builder
+        uses: actions/checkout@v7
+        with:
+          repository: Xila-Project/package_manager
+          ref: ${{ inputs.builder-ref }}
+          persist-credentials: false
+          path: package-manager
+      - name: Fetch Wasm artifact from the caller run
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.wasm-artifact }}
+          path: ${{ runner.temp }}/xila-wasm-input
+      - name: Fetch optional generated manifest artifact
+        if: inputs.manifest-artifact != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.manifest-artifact }}
+          path: ${{ runner.temp }}/xila-manifest-input
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.0"
+      - name: Build host-only packaging tool
+        run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
+      - name: Stage Wasm, refresh manifest hashes, package and verify
+        id: pack
+        shell: bash
+        env:
+          INPUT_WASM_PATH: ${{ inputs.wasm-path }}
+          INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+          INPUT_MANIFEST_ARTIFACT: ${{ inputs.manifest-artifact }}
+        run: |
+          set -euo pipefail
+          manifest_root="$GITHUB_WORKSPACE/caller"
+          if [[ -n "$INPUT_MANIFEST_ARTIFACT" ]]; then
+            manifest_root="$RUNNER_TEMP/xila-manifest-input"
+          fi
+          python3 package-manager/tools/package_wasm.py \
+            --wasm-root "$RUNNER_TEMP/xila-wasm-input" \
+            --wasm-path "$INPUT_WASM_PATH" \
+            --manifest-root "$manifest_root" \
+            --manifest-path "$INPUT_MANIFEST_PATH" \
+            --staging "$RUNNER_TEMP/xila-package-payload" \
+            --manifest-output "$RUNNER_TEMP/xila-package-manifest.json" \
+            --output "$RUNNER_TEMP/xila-package-dist" \
+            --builder "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Upload Xila package to GitHub Actions artifacts
+        if: inputs.upload-artifact || inputs.publish-release
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/xila-package-dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Attach Xila archive to GitHub Release
+    needs: package
+    if: inputs.publish-release && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out caller repository with tags
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download built Xila package
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/xila-package-dist
+      - name: Ensure target is an existing tag pointing to this commit
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_TAG" || "$RELEASE_TAG" == -* ]]; then
+            echo "::error::release-tag must name an existing git tag"
+            exit 1
+          fi
+          git fetch --tags --force origin
+          tag_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test -n "$tag_commit"
+          if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "::error::release-tag does not reference this workflow commit"
+            exit 1
+          fi
+      - name: Publish archive and checksum to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "$RUNNER_TEMP/xila-package-dist/$PACKAGE_FILENAME" \
+            "$RUNNER_TEMP/xila-package-dist/$PACKAGE_FILENAME.sha256" \
+            --repo "$GITHUB_REPOSITORY"
