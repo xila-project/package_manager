@@ -89,10 +89,8 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
 
     for declared in &manifest.files {
         let present = entry.ok_or(Error::UnexpectedEntry)?;
-        let path = present
-            .filename()
-            .as_str()
-            .map_err(|_| Error::InvalidArchive)?;
+        let filename = present.filename();
+        let path = filename.as_str().map_err(|_| Error::InvalidArchive)?;
         if path != declared.path || present.size() as u64 != declared.size {
             return Err(Error::UnexpectedEntry);
         }
