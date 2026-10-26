@@ -1,0 +1,38 @@
+# Keep dependency maintenance predictable while avoiding a pull request per patch.
+# Security advisories are managed separately by Dependabot when enabled.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      cargo-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Paris"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      github-actions-updates:
+        patterns:
+          - "*"
