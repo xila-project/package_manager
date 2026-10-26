@@ -130,6 +130,6 @@ mod tests {
     }
     #[test]
     fn rejects_missing_trustworthy_header() {
-        assert_eq!(inspect_unsigned(&[0; 1024]), Err(Error::InvalidManifest));
+        assert_eq!(inspect_unsigned(&[0; 1024]), Err(Error::InvalidArchive));
     }
 }
