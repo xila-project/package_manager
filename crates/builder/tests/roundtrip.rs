@@ -70,3 +70,23 @@ fn command_generates_updates_and_packs() {
             .success()
     );
 }
+
+#[test]
+fn supports_derived_help_and_version() {
+    let binary = env!("CARGO_BIN_EXE_xila-package");
+    for arguments in [
+        vec!["--help"],
+        vec!["--version"],
+        vec!["manifest", "--help"],
+        vec!["manifest", "generate", "--help"],
+        vec!["manifest", "update", "--help"],
+        vec!["pack", "--help"],
+    ] {
+        let output = Command::new(binary).args(arguments).output().unwrap();
+        assert!(output.status.success(), "{:?}", String::from_utf8_lossy(&output.stderr));
+        assert!(!output.stdout.is_empty());
+    }
+    let output = Command::new(binary).args(["manifest", "generat"]).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("generate"));
+}

@@ -1,6 +1,7 @@
 //! Host-side Xila package authoring tool. Archives are unsigned unless an
 //! externally generated 64-byte Ed25519 signature is explicitly supplied.
 use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
+use getargs_derive::{GetArgs, Subcommand};
 use xila_package_writer::SourceFile;
 use std::{
     env,
@@ -15,12 +16,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
-}
-
-fn usage() -> io::Error {
-    invalid(
-        "Usage:\n  xila-package manifest generate <directory> <manifest.json> <namespace.name> <version> <target> <minimum-xila-abi>\n  xila-package manifest update <directory> <manifest.json>\n  xila-package pack <directory> <manifest.json> <package.xpk> [signature.bin]",
-    )
 }
 
 fn hash_file(path: &Path) -> Result<(u64, String)> {
@@ -215,37 +210,105 @@ fn pack(
     operation
 }
 
+/// Build and inspect packages for Xila.
+#[derive(Debug, GetArgs)]
+#[command(name = "xila-package", version)]
+struct Cli<'a> {
+    #[command(subcommand)]
+    command: Command<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command<'a> {
+    /// Generate or update a package manifest.
+    Manifest(ManifestCommand<'a>),
+    /// Create an archive from the validated manifest and source files.
+    Pack {
+        /// Directory containing the application payload files.
+        directory: &'a str,
+        /// Path to the manifest JSON file.
+        manifest: &'a str,
+        /// Destination archive path.
+        output: &'a str,
+        /// Optional 64-byte Ed25519 signature prepared outside this tool.
+        signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct ManifestCommand<'a> {
+    #[command(subcommand)]
+    command: ManifestOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum ManifestOperation<'a> {
+    /// Generate a manifest for an application directory.
+    Generate {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Output path for the manifest JSON file.
+        manifest: &'a str,
+        /// Package identifier, for example xila.calculator.
+        name: &'a str,
+        /// Package version.
+        version: &'a str,
+        /// Target architecture.
+        target: &'a str,
+        /// Minimum Xila runtime application binary interface version.
+        minimum_xila_abi: u32,
+    },
+    /// Refresh file sizes and hashes in an existing manifest.
+    Update {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Path of the manifest to update.
+        manifest: &'a str,
+    },
+}
+
 fn run() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    match args.as_slice() {
-        [_, a, b, directory, output, name, version, target, min]
-            if a == "manifest" && b == "generate" =>
-        {
-            generate(
-                Path::new(directory),
-                Path::new(output),
+    let args: Vec<String> = env::args().skip(1).collect();
+    let cli = match Cli::from_args(args.iter().map(String::as_str)) {
+        Ok(cli) => cli,
+        Err(error) if error.is_help() || error.is_version() => {
+            println!("{error}");
+            return Ok(());
+        }
+        Err(error) => return Err(invalid(&error.to_string()).into()),
+    };
+    match cli.command {
+        Command::Manifest(ManifestCommand { command }) => match command {
+            ManifestOperation::Generate {
+                directory,
+                manifest,
                 name,
                 version,
                 target,
-                min.parse()?,
-            )
-        }
-        [_, a, b, directory, path] if a == "manifest" && b == "update" => {
-            update(Path::new(directory), Path::new(path))
-        }
-        [_, a, directory, manifest, output] if a == "pack" => pack(
+                minimum_xila_abi,
+            } => generate(
+                Path::new(directory),
+                Path::new(manifest),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+            ),
+            ManifestOperation::Update { directory, manifest } => {
+                update(Path::new(directory), Path::new(manifest))
+            }
+        },
+        Command::Pack {
+            directory,
+            manifest,
+            output,
+            signature,
+        } => pack(
             Path::new(directory),
             Path::new(manifest),
             Path::new(output),
-            None,
+            signature.map(Path::new),
         ),
-        [_, a, directory, manifest, output, signature] if a == "pack" => pack(
-            Path::new(directory),
-            Path::new(manifest),
-            Path::new(output),
-            Some(Path::new(signature)),
-        ),
-        _ => Err(usage().into()),
     }
 }
 

@@ -12,6 +12,7 @@ name = "xila-package"
 path = "src/main.rs"
 
 [dependencies]
+getargs-derive = { version = "0.1.0", features = ["std"] }
 xila-package-manifest = { path = "../manifest" }
 xila-package-writer = { path = "../writer" }
 xila-package-reader = { path = "../reader" }
