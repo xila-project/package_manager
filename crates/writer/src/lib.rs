@@ -1,11 +1,11 @@
-//! Deterministic host-only USTAR writer for the experimental Xila package profile.
-//! No PAX headers, GNU extended names, symlinks, or compression in this version.
+#![doc = include_str!("../README.md")]
 
 use std::io::{self, Write};
 use tar::{Builder, EntryType, Header};
 use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_verification::ContentVerifier;
 
+/// Path and bytes for a single file matching a manifest entry.
 pub struct SourceFile<'a> {
     pub path: &'a str,
     pub bytes: &'a [u8],

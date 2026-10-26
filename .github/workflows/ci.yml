@@ -38,3 +38,11 @@ jobs:
         run: mise run clippy
       - name: Run tests
         run: mise run test
+      - name: Build and check Rustdoc
+        run: mise run doc:check
+      - name: Upload generated Rust API documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: rustdoc
+          path: target/doc/
+          if-no-files-found: error
