@@ -55,10 +55,7 @@ on:
         value: ${{ jobs.package.outputs.sha256 }}
       artifact-name:
         description: "Name of the Actions artifact containing the package (when upload is enabled)"
-        value: ${{ inputs.artifact-name }}
-
-permissions:
-  contents: read
+        value: ${{ jobs.package.outputs.artifact_name }}
 
 jobs:
   package:
@@ -69,6 +66,7 @@ jobs:
     outputs:
       filename: ${{ steps.pack.outputs.filename }}
       sha256: ${{ steps.pack.outputs.sha256 }}
+      artifact_name: ${{ inputs.artifact-name }}
     steps:
       - name: Check out caller repository for manifest
         uses: actions/checkout@v7
@@ -135,8 +133,6 @@ jobs:
     needs: package
     if: inputs.publish-release && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Check out caller repository with tags
         uses: actions/checkout@v7
