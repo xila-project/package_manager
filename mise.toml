@@ -1,0 +1,29 @@
+[tools]
+# Keep the compiler aligned with Xila core. Native mise integration makes Cargo
+# commands use mr-boxington without a global shell setup or a second wrapper.
+rust = { version = "1.99.0", profile = "minimal", components = ["clippy", "rustfmt"], mr_boxington = true }
+mr-boxington = "1.12.0"
+
+[tasks."format"]
+description = "Format every Rust crate in the workspace"
+run = "cargo fmt --all"
+
+[tasks."format:check"]
+description = "Check Rust formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks."check"]
+description = "Check all workspace crates and targets"
+run = "cargo check --workspace --all-targets --all-features --locked"
+
+[tasks."clippy"]
+description = "Lint all workspace crates and targets"
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+
+[tasks."test"]
+description = "Run all workspace tests"
+run = "cargo test --workspace --all-features --locked"
+
+[tasks."build"]
+description = "Build the workspace"
+run = "cargo build --workspace --all-features --locked"

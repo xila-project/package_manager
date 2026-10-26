@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cargo:
+    name: Cargo workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: "1.99.0"
+          github-cache-mode: target
+          cache-generation: v1-package-manager
+      - name: Check formatting
+        run: mise run format:check
+      - name: Check workspace
+        run: mise run check
+      - name: Lint workspace
+        run: mise run clippy
+      - name: Run tests
+        run: mise run test
