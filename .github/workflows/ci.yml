@@ -28,6 +28,8 @@ jobs:
           toolchain: "1.99.0"
           github-cache-mode: target
           cache-generation: v1-package-manager
+      - name: Refresh dependency lockfile for added workspace crates
+        run: cargo generate-lockfile
       - name: Check formatting
         run: mise run format:check
       - name: Check workspace
