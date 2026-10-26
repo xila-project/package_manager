@@ -1,0 +1,32 @@
+name: Linux ARM64 build
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/linux-arm64.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build native Linux aarch64 executable
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.0"
+          targets: aarch64-unknown-linux-gnu
+      - name: Compile native release executable
+        run: cargo build --locked --release --target aarch64-unknown-linux-gnu --package xila-package-builder
+      - name: Execute ARM64 release binary
+        run: target/aarch64-unknown-linux-gnu/release/xila-package --version
