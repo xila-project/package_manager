@@ -30,13 +30,13 @@ jobs:
       - name: Generate coverage report
         run: cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
       - name: Save coverage report as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-coverage-lcov
           path: lcov.info
           if-no-files-found: error
       - name: Upload report to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
