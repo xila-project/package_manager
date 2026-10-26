@@ -161,7 +161,10 @@ mod tests {
             )
             .is_err()
         );
-        let offset = first.windows(3).position(|window| window == b"abc").unwrap();
+        let offset = first
+            .windows(3)
+            .position(|window| window == b"abc")
+            .unwrap();
         first[offset] ^= 1; // mutate the actual file payload
         assert!(package_reader::inspect_unsigned(&first).is_err());
     }
