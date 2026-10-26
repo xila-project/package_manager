@@ -10,16 +10,46 @@ fn command_generates_updates_and_packs() {
     let manifest = temp.path().join("manifest.json");
     let archive = temp.path().join("calculator.xpk");
     let binary = env!("CARGO_BIN_EXE_xila-package");
-    assert!(Command::new(binary).args([
-        "manifest", "generate", source.to_str().unwrap(), manifest.to_str().unwrap(),
-        "xila.calculator", "1.0.0", "wasm32-wasip1", "1"
-    ]).status().unwrap().success());
-    assert!(Command::new(binary).args([
-        "manifest", "update", source.to_str().unwrap(), manifest.to_str().unwrap()
-    ]).status().unwrap().success());
-    assert!(Command::new(binary).args([
-        "pack", source.to_str().unwrap(), manifest.to_str().unwrap(), archive.to_str().unwrap()
-    ]).status().unwrap().success());
+    assert!(
+        Command::new(binary)
+            .args([
+                "manifest",
+                "generate",
+                source.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+                "xila.calculator",
+                "1.0.0",
+                "wasm32-wasip1",
+                "1"
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        Command::new(binary)
+            .args([
+                "manifest",
+                "update",
+                source.to_str().unwrap(),
+                manifest.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        Command::new(binary)
+            .args([
+                "pack",
+                source.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+                archive.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
     let bytes = fs::read(&archive).unwrap();
     let contents = package_reader::inspect_unsigned(&bytes).unwrap();
     assert_eq!(contents.name, "xila.calculator");
@@ -27,7 +57,16 @@ fn command_generates_updates_and_packs() {
     let mutated = temp.path().join("mutated");
     fs::create_dir(&mutated).unwrap();
     fs::write(mutated.join("calculator.wasm"), b"modified").unwrap();
-    assert!(!Command::new(binary).args([
-        "pack", mutated.to_str().unwrap(), manifest.to_str().unwrap(), archive.to_str().unwrap()
-    ]).status().unwrap().success());
+    assert!(
+        !Command::new(binary)
+            .args([
+                "pack",
+                mutated.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+                archive.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
 }

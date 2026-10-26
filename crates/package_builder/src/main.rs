@@ -1,11 +1,14 @@
 //! Host-side Xila package authoring tool. Archives are unsigned unless an
 //! externally generated 64-byte Ed25519 signature is explicitly supplied.
+use package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
+use package_writer::SourceFile;
 use std::{
-    env, fmt::Write as _, fs::{self, File}, io::{self, Read},
+    env,
+    fmt::Write as _,
+    fs::{self, File},
+    io::{self, Read},
     path::{Path, PathBuf},
 };
-use package_manifest::{Manifest, ManifestFile, FORMAT_VERSION};
-use package_writer::SourceFile;
 use verification::Sha256Verifier;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -15,7 +18,9 @@ fn invalid(message: &str) -> io::Error {
 }
 
 fn usage() -> io::Error {
-    invalid("Usage:\n  xila-package manifest generate <directory> <manifest.json> <namespace.name> <version> <target> <minimum-xila-abi>\n  xila-package manifest update <directory> <manifest.json>\n  xila-package pack <directory> <manifest.json> <package.xpk> [signature.bin]")
+    invalid(
+        "Usage:\n  xila-package manifest generate <directory> <manifest.json> <namespace.name> <version> <target> <minimum-xila-abi>\n  xila-package manifest update <directory> <manifest.json>\n  xila-package pack <directory> <manifest.json> <package.xpk> [signature.bin]",
+    )
 }
 
 fn hash_file(path: &Path) -> Result<(u64, String)> {
@@ -25,12 +30,21 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
     let mut buffer = [0u8; 8192];
     loop {
         let read = file.read(&mut buffer)?;
-        if read == 0 { break; }
-        total = total.checked_add(read as u64).ok_or_else(|| invalid("file too large"))?;
-        hasher.update(&buffer[..read]).map_err(|_| invalid("hash failure"))?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| invalid("file too large"))?;
+        hasher
+            .update(&buffer[..read])
+            .map_err(|_| invalid("hash failure"))?;
     }
     let mut hex = String::with_capacity(64);
-    for b in hasher.finalize().map_err(|_| invalid("hash finalization failure"))? {
+    for b in hasher
+        .finalize()
+        .map_err(|_| invalid("hash finalization failure"))?
+    {
         write!(&mut hex, "{b:02x}")?;
     }
     Ok((total, hex))
@@ -50,7 +64,9 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
             collect_files(root, &path, output)?;
             continue;
         }
-        if !metadata.is_file() { return Err(invalid("special files are not allowed").into()); }
+        if !metadata.is_file() {
+            return Err(invalid("special files are not allowed").into());
+        }
         let relative = path.strip_prefix(root)?;
         let mut components = Vec::new();
         for component in relative.iter() {
@@ -59,7 +75,11 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
         let name = components.join("/");
         package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
         let (size, sha256) = hash_file(&path)?;
-        output.push(ManifestFile { path: name, size, sha256 });
+        output.push(ManifestFile {
+            path: name,
+            size,
+            sha256,
+        });
         if output.len() > package_manifest::MAX_FILES {
             return Err(invalid("too many files").into());
         }
@@ -68,14 +88,20 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
 }
 
 fn write_manifest(output: &Path, manifest: &Manifest) -> Result<()> {
-    let text = package_manifest::encode(manifest)
-        .map_err(|_| invalid("manifest failed validation"))?;
+    let text =
+        package_manifest::encode(manifest).map_err(|_| invalid("manifest failed validation"))?;
     fs::write(output, text)?;
     Ok(())
 }
 
-fn generate(source: &Path, output: &Path, name: &str, version: &str,
-            target: &str, minimum_xila_abi: u32) -> Result<()> {
+fn generate(
+    source: &Path,
+    output: &Path,
+    name: &str,
+    version: &str,
+    target: &str,
+    minimum_xila_abi: u32,
+) -> Result<()> {
     let root = source.canonicalize()?;
     if output.exists() && output.canonicalize()?.starts_with(&root) {
         return Err(invalid("output manifest must reside outside the source directory").into());
@@ -85,16 +111,20 @@ fn generate(source: &Path, output: &Path, name: &str, version: &str,
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
         format_version: FORMAT_VERSION,
-        name: name.into(), version: version.into(), target: target.into(),
-        minimum_xila_abi, capabilities: vec![], files,
+        name: name.into(),
+        version: version.into(),
+        target: target.into(),
+        minimum_xila_abi,
+        capabilities: vec![],
+        files,
     };
     write_manifest(output, &manifest)
 }
 
 fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     let bytes = fs::read(manifest_path)?;
-    let mut manifest = package_manifest::decode(&bytes)
-        .map_err(|_| invalid("invalid existing manifest"))?;
+    let mut manifest =
+        package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
     let root = source.canonicalize()?;
     let mut files = Vec::new();
     collect_files(&root, &root, &mut files)?;
@@ -119,7 +149,12 @@ fn safe_file(root: &Path, path: &str) -> Result<PathBuf> {
     Ok(current)
 }
 
-fn pack(source: &Path, manifest_path: &Path, output: &Path, signature: Option<&Path>) -> Result<()> {
+fn pack(
+    source: &Path,
+    manifest_path: &Path,
+    output: &Path,
+    signature: Option<&Path>,
+) -> Result<()> {
     let root = source.canonicalize()?;
     let manifest = package_manifest::decode(&fs::read(manifest_path)?)
         .map_err(|_| invalid("invalid manifest"))?;
@@ -127,17 +162,25 @@ fn pack(source: &Path, manifest_path: &Path, output: &Path, signature: Option<&P
     for declared in &manifest.files {
         bytes.push(fs::read(safe_file(&root, &declared.path)?)?);
     }
-    let sources: Vec<_> = manifest.files.iter().zip(bytes.iter())
+    let sources: Vec<_> = manifest
+        .files
+        .iter()
+        .zip(bytes.iter())
         .map(|(declared, bytes)| SourceFile {
-            path: &declared.path, bytes,
-        }).collect();
+            path: &declared.path,
+            bytes,
+        })
+        .collect();
 
     let signature = if let Some(path) = signature {
         let signature = fs::read(path)?;
-        let signature: [u8; 64] = signature.try_into()
+        let signature: [u8; 64] = signature
+            .try_into()
             .map_err(|_| invalid("signature must be exactly 64 bytes"))?;
         Some(signature)
-    } else { None };
+    } else {
+        None
+    };
 
     // Write to a sibling temporary file first; do not leave a partial archive.
     let temporary = output.with_extension("xpk.tmp");
@@ -146,11 +189,14 @@ fn pack(source: &Path, manifest_path: &Path, output: &Path, signature: Option<&P
         package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
         // The reader is a second implementation of framing/inventory checks.
         let archive = fs::read(&temporary)?;
-        package_reader::inspect_unsigned(&archive).map_err(|_| invalid("archive verification failed"))?;
+        package_reader::inspect_unsigned(&archive)
+            .map_err(|_| invalid("archive verification failed"))?;
         fs::rename(&temporary, output)?;
         Ok(())
     })();
-    if operation.is_err() { let _ = fs::remove_file(&temporary); }
+    if operation.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
     operation
 }
 
@@ -160,14 +206,30 @@ fn run() -> Result<()> {
         [_, a, b, directory, output, name, version, target, min]
             if a == "manifest" && b == "generate" =>
         {
-            generate(Path::new(directory), Path::new(output), name, version, target, min.parse()?)
+            generate(
+                Path::new(directory),
+                Path::new(output),
+                name,
+                version,
+                target,
+                min.parse()?,
+            )
         }
-        [_, a, b, directory, path] if a == "manifest" && b == "update" =>
-            update(Path::new(directory), Path::new(path)),
-        [_, a, directory, manifest, output] if a == "pack" =>
-            pack(Path::new(directory), Path::new(manifest), Path::new(output), None),
-        [_, a, directory, manifest, output, signature] if a == "pack" =>
-            pack(Path::new(directory), Path::new(manifest), Path::new(output), Some(Path::new(signature))),
+        [_, a, b, directory, path] if a == "manifest" && b == "update" => {
+            update(Path::new(directory), Path::new(path))
+        }
+        [_, a, directory, manifest, output] if a == "pack" => pack(
+            Path::new(directory),
+            Path::new(manifest),
+            Path::new(output),
+            None,
+        ),
+        [_, a, directory, manifest, output, signature] if a == "pack" => pack(
+            Path::new(directory),
+            Path::new(manifest),
+            Path::new(output),
+            Some(Path::new(signature)),
+        ),
         _ => Err(usage().into()),
     }
 }

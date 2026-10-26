@@ -1,8 +1,8 @@
 //! Deterministic host-only USTAR writer for the experimental Xila package profile.
 //! No PAX headers, GNU extended names, symlinks, or compression in this version.
 
+use package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use std::io::{self, Write};
-use package_manifest::{Manifest, MANIFEST_PATH, SIGNATURE_PATH};
 use tar::{Builder, EntryType, Header};
 use verification::ContentVerifier;
 
@@ -24,7 +24,9 @@ fn nibble(byte: u8) -> io::Result<u8> {
 }
 
 fn decode_digest(hex: &str) -> io::Result<[u8; 32]> {
-    if hex.len() != 64 { return Err(bad_input("invalid digest length")); }
+    if hex.len() != 64 {
+        return Err(bad_input("invalid digest length"));
+    }
     let mut digest = [0u8; 32];
     for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
         digest[index] = nibble(pair[0])? << 4 | nibble(pair[1])?;
@@ -62,8 +64,7 @@ pub fn write_package<W: Write>(
     payloads: &[SourceFile<'_>],
     signature: Option<&[u8; 64]>,
 ) -> io::Result<()> {
-    let json = package_manifest::encode(manifest)
-        .map_err(|_| bad_input("invalid manifest"))?;
+    let json = package_manifest::encode(manifest).map_err(|_| bad_input("invalid manifest"))?;
     if payloads.len() != manifest.files.len() {
         return Err(bad_input("incorrect file count"));
     }
@@ -77,8 +78,12 @@ pub fn write_package<W: Write>(
         let digest = decode_digest(&declared.sha256)?;
         let mut verifier = ContentVerifier::new(declared.size, digest)
             .map_err(|_| bad_input("invalid expected content"))?;
-        verifier.update(source.bytes).map_err(|_| bad_input("incorrect file size"))?;
-        verifier.verify().map_err(|_| bad_input("incorrect file digest"))?;
+        verifier
+            .update(source.bytes)
+            .map_err(|_| bad_input("incorrect file size"))?;
+        verifier
+            .verify()
+            .map_err(|_| bad_input("incorrect file digest"))?;
     }
     let mut archive = Builder::new(output);
     append(&mut archive, MANIFEST_PATH, json.as_bytes())?;
@@ -115,7 +120,10 @@ mod tests {
     #[test]
     fn round_trip_between_writer_and_reader() {
         let mut output = vec![];
-        let file = SourceFile { path: "bin/calculator.wasm", bytes: b"abc" };
+        let file = SourceFile {
+            path: "bin/calculator.wasm",
+            bytes: b"abc",
+        };
         write_package(&mut output, &fixture(), &[file], None).unwrap();
         let inspected = package_reader::inspect_unsigned(&output).unwrap();
         assert_eq!(inspected, fixture());
@@ -123,15 +131,36 @@ mod tests {
 
     #[test]
     fn reproducible_and_rejects_corruption() {
-        let file = SourceFile { path: "bin/calculator.wasm", bytes: b"abc" };
+        let file = SourceFile {
+            path: "bin/calculator.wasm",
+            bytes: b"abc",
+        };
         let mut first = vec![];
         let mut second = vec![];
-        write_package(&mut first, &fixture(), &[SourceFile { path: file.path, bytes: file.bytes }], None).unwrap();
+        write_package(
+            &mut first,
+            &fixture(),
+            &[SourceFile {
+                path: file.path,
+                bytes: file.bytes,
+            }],
+            None,
+        )
+        .unwrap();
         write_package(&mut second, &fixture(), &[file], None).unwrap();
         assert_eq!(first, second);
-        assert!(write_package(vec![], &fixture(), &[SourceFile {
-            path: "bin/calculator.wasm", bytes: b"abd"
-        }], None).is_err());
+        assert!(
+            write_package(
+                vec![],
+                &fixture(),
+                &[SourceFile {
+                    path: "bin/calculator.wasm",
+                    bytes: b"abd"
+                }],
+                None
+            )
+            .is_err()
+        );
         let last = first.len();
         first[last - 1025] ^= 1; // mutate the payload or final padding region
         assert!(package_reader::inspect_unsigned(&first).is_err());
