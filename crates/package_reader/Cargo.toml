@@ -1,0 +1,12 @@
+[package]
+name = "package_reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+package_manifest = { path = "../package_manifest" }
+verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
+tar-no-std = { version = "0.5.0", default-features = false }
