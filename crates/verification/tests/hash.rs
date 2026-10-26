@@ -1,6 +1,6 @@
 #![cfg(feature = "sha256")]
 
-use verification::{ContentVerifier, Error, Sha256Verifier};
+use xila_package_verification::{ContentVerifier, Error, Sha256Verifier};
 
 fn digest(hex: &str) -> [u8; 32] {
     core::array::from_fn(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())

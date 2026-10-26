@@ -1,6 +1,6 @@
 #![cfg(feature = "ed25519")]
 
-use verification::{Error, PublicKey};
+use xila_package_verification::{Error, PublicKey};
 
 fn bytes<const N: usize>(hex: &str) -> [u8; N] {
     assert_eq!(hex.len(), N * 2);

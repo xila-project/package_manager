@@ -5,9 +5,9 @@
 extern crate alloc;
 
 use alloc::vec;
-use package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
 use tar_no_std::TarArchiveRef;
-use verification::{ContentVerifier, PublicKey};
+use xila_package_verification::{ContentVerifier, PublicKey};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -56,7 +56,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
         return Err(Error::InvalidManifest);
     }
     let raw_manifest = first.data();
-    let manifest = package_manifest::decode(raw_manifest).map_err(|_| Error::InvalidManifest)?;
+    let manifest = xila_package_manifest::decode(raw_manifest).map_err(|_| Error::InvalidManifest)?;
 
     let mut entry = entries.next();
     let mut signature = None;
@@ -80,7 +80,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
     if let Some(key) = trusted {
         let signature = signature.ok_or(Error::MissingSignature)?;
         let mut message = vec![0u8; SIGNED_DOMAIN.len() + 4 + raw_manifest.len()];
-        let raw = package_manifest::signed_message_into(raw_manifest, &mut message)
+        let raw = xila_package_manifest::signed_message_into(raw_manifest, &mut message)
             .map_err(|_| Error::InvalidManifest)?;
         key.verify(raw, &signature)
             .map_err(|_| Error::InvalidSignature)?;

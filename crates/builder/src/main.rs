@@ -1,7 +1,7 @@
 //! Host-side Xila package authoring tool. Archives are unsigned unless an
 //! externally generated 64-byte Ed25519 signature is explicitly supplied.
-use package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
-use package_writer::SourceFile;
+use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
+use xila_package_writer::SourceFile;
 use std::{
     env,
     fmt::Write as _,
@@ -9,7 +9,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
-use verification::Sha256Verifier;
+use xila_package_verification::Sha256Verifier;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -73,14 +73,14 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
             components.push(component.to_str().ok_or_else(|| invalid("non-UTF8 path"))?);
         }
         let name = components.join("/");
-        package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
+        xila_package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
         let (size, sha256) = hash_file(&path)?;
         output.push(ManifestFile {
             path: name,
             size,
             sha256,
         });
-        if output.len() > package_manifest::MAX_FILES {
+        if output.len() > xila_package_manifest::MAX_FILES {
             return Err(invalid("too many files").into());
         }
     }
@@ -89,7 +89,7 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
 
 fn write_manifest(output: &Path, manifest: &Manifest) -> Result<()> {
     let text =
-        package_manifest::encode(manifest).map_err(|_| invalid("manifest failed validation"))?;
+        xila_package_manifest::encode(manifest).map_err(|_| invalid("manifest failed validation"))?;
     fs::write(output, text)?;
     Ok(())
 }
@@ -128,7 +128,7 @@ fn generate(
 fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     let bytes = fs::read(manifest_path)?;
     let mut manifest =
-        package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
     let root = source.canonicalize()?;
     if manifest_path.canonicalize()?.starts_with(&root) {
         return Err(invalid("manifest must reside outside the source directory").into());
@@ -141,7 +141,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
 }
 
 fn safe_file(root: &Path, path: &str) -> Result<PathBuf> {
-    package_manifest::validate_path(path).map_err(|_| invalid("unsafe file path"))?;
+    xila_package_manifest::validate_path(path).map_err(|_| invalid("unsafe file path"))?;
     let mut current = root.to_path_buf();
     for part in path.split('/') {
         current.push(part);
@@ -165,10 +165,10 @@ fn pack(
     let root = source.canonicalize()?;
     let raw_manifest = fs::read(manifest_path)?;
     let manifest =
-        package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
+        xila_package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
     if signature.is_some() {
         let canonical =
-            package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
+            xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
         if canonical.as_bytes() != raw_manifest {
             return Err(invalid("cannot attach a signature to a noncanonical manifest").into());
         }
@@ -201,10 +201,10 @@ fn pack(
     let temporary = output.with_extension("xpk.tmp");
     let operation = (|| -> Result<()> {
         let file = File::create(&temporary)?;
-        package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
+        xila_package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
         // The reader is a second implementation of framing/inventory checks.
         let archive = fs::read(&temporary)?;
-        package_reader::inspect_unsigned(&archive)
+        xila_package_reader::inspect_unsigned(&archive)
             .map_err(|_| invalid("archive verification failed"))?;
         fs::rename(&temporary, output)?;
         Ok(())

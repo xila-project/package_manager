@@ -51,7 +51,7 @@ fn command_generates_updates_and_packs() {
             .success()
     );
     let bytes = fs::read(&archive).unwrap();
-    let contents = package_reader::inspect_unsigned(&bytes).unwrap();
+    let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
     assert_eq!(contents.name, "xila.calculator");
     assert_eq!(contents.files[0].path, "bin/calculator.wasm");
     let mutated = temp.path().join("mutated");
