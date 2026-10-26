@@ -1,0 +1,16 @@
+# Git-only releases: no crate is published to crates.io.
+[workspace]
+git_only = true
+publish = false
+release = false
+release_always = false
+git_release_enable = false
+changelog_update = false
+
+# Only the host executable gets GitHub Releases and binary artifacts.
+[[package]]
+name = "xila-package-builder"
+release = true
+git_release_enable = true
+git_tag_name = "xila-package-builder-v{{ version }}"
+git_release_name = "xila-package-builder v{{ version }}"
