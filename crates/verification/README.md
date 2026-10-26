@@ -9,7 +9,7 @@ policy or define a package format.
 ```rust
 # #[cfg(feature = "sha256")]
 # {
-use verification::ContentVerifier;
+use xila_package_verification::ContentVerifier;
 
 // Expected values must come from authenticated metadata, not the payload itself.
 let expected = [
@@ -23,7 +23,7 @@ verifier.update(b"a")?;
 verifier.update(b"bc")?;
 verifier.verify()?;
 # }
-# Ok::<(), verification::Error>(())
+# Ok::<(), xila_package_verification::Error>(())
 ```
 
 `Sha256Verifier` also provides `new`, `update`, and consuming `finalize` for plain
