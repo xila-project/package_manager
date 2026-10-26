@@ -50,6 +50,35 @@ See [verification migration notes](docs/verification-migration.md) for the cross
 
 The Cargo packages are **private to this Git workspace**: every crate sets `publish = false`. Release-plz operates in `git_only = true` mode and tracks only the native `xila-package-builder` binary. It may create a version bump pull request and a GitHub Release, but it never sends any crate to crates.io. The release workflow attaches archives of the `xila-package` executable for Linux, macOS and Windows, with SHA-256 checksums. Releases are prepared on `main` and occur after merging the release-plz version bump pull request.
 
+### Bootstrap the first GitHub Release (one time)
+
+The initial `xila-package-builder` version is already `0.1.0`, so `release-plz release-pr` computes the same version and creates no version-bump PR. Its normal `release_always = false` policy then prevents `release-plz release` from releasing arbitrary commits.
+
+After reviewing and merging the bootstrap workflow PR, explicitly run the workflow **once on `main`**:
+
+```sh
+gh workflow run release.yml \
+  --repo Xila-Project/package_manager \
+  --ref main \
+  -f bootstrap_initial_release=true
+```
+
+You can also open **Actions → Native binary release → Run workflow**, select
+`main`, and enable **bootstrap_initial_release**. The workflow confirms that
+the builder is still `0.1.0` and the initial tag does not exist. Only for
+this manual run it creates a temporary `release-plz` configuration enabling
+`release_always`, allowing the first GitHub tag and release
+`xila-package-builder-v0.1.0` to be generated along with native binary assets.
+The repository's `release-plz.toml` is **not** changed; future releases
+continue to require release-plz release PRs. A second attempt with an existing
+tag fails rather than republishing it.
+
+This is a **Git-only release**, never a crates.io publication. Review the
+[GitHub Release](https://github.com/Xila-Project/package_manager/releases)
+and [workflow run](https://github.com/Xila-Project/package_manager/actions/workflows/release.yml)
+to verify its tag and uploaded Linux/macOS/Windows assets. The normal
+version-bump PR flow starts after the initial tag exists.
+
 GitHub Actions generates Rust coverage with `cargo-llvm-cov` and publishes the report to Codecov. Configure `CODECOV_TOKEN` as a repository secret for reliable uploads; coverage reports are also retained as GitHub Actions artifacts. See `.github/workflows/coverage.yml`.
 
 **Integration caution:** Xila Core currently pins the original `verification` crate revision. The renamed package `xila-package-verification` requires a separate dependency-alias update before Core changes its pinned revision. Existing Core builds remain functional with their original commit.
