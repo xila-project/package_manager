@@ -103,7 +103,11 @@ fn generate(
     minimum_xila_abi: u32,
 ) -> Result<()> {
     let root = source.canonicalize()?;
-    if output.exists() && output.canonicalize()?.starts_with(&root) {
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if parent.canonicalize()?.starts_with(&root) {
         return Err(invalid("output manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
@@ -126,6 +130,9 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     let mut manifest =
         package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
     let root = source.canonicalize()?;
+    if manifest_path.canonicalize()?.starts_with(&root) {
+        return Err(invalid("manifest must reside outside the source directory").into());
+    }
     let mut files = Vec::new();
     collect_files(&root, &root, &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -156,8 +163,16 @@ fn pack(
     signature: Option<&Path>,
 ) -> Result<()> {
     let root = source.canonicalize()?;
-    let manifest = package_manifest::decode(&fs::read(manifest_path)?)
-        .map_err(|_| invalid("invalid manifest"))?;
+    let raw_manifest = fs::read(manifest_path)?;
+    let manifest =
+        package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
+    if signature.is_some() {
+        let canonical =
+            package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
+        if canonical.as_bytes() != raw_manifest {
+            return Err(invalid("cannot attach a signature to a noncanonical manifest").into());
+        }
+    }
     let mut bytes = Vec::new();
     for declared in &manifest.files {
         bytes.push(fs::read(safe_file(&root, &declared.path)?)?);
