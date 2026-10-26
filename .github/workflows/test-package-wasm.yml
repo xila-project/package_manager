@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Create minimal valid Wasm module
         run: |
-          printf '\\x00asm\\x01\\x00\\x00\\x00' > example.wasm
+          printf '\x00asm\x01\x00\x00\x00' > example.wasm
       - uses: actions/upload-artifact@v7
         with:
           name: reusable-smoke-wasm
