@@ -48,7 +48,7 @@ See [verification migration notes](docs/verification-migration.md) for the cross
 
 ## Versioning, GitHub releases and coverage
 
-The Cargo packages are **private to this Git workspace**: every crate sets `publish = false`. Release-plz operates in `git_only = true` mode and tracks only the native `xila-package-builder` binary. It may create a version bump pull request and a GitHub Release, but it never sends any crate to crates.io. The release workflow attaches archives of the `xila-package` executable for Linux, macOS and Windows, with SHA-256 checksums. Releases are prepared on `main` and occur after merging the release-plz version bump pull request.
+The Cargo packages are **private to this Git workspace**: every crate sets `publish = false`. Release-plz operates in `git_only = true` mode and tracks only the native `xila-package-builder` binary. It may create a version bump pull request and a GitHub Release, but it never sends any crate to crates.io. The release workflow attaches archives of the `xila-package` executable for Linux x86_64/ARM64, macOS ARM64 and Windows x86_64, with SHA-256 checksums. Releases are prepared on `main` and occur after merging the release-plz version bump pull request.
 
 ### Bootstrap the first GitHub Release (one time)
 
