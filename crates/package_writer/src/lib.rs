@@ -28,7 +28,7 @@ fn decode_digest(hex: &str) -> io::Result<[u8; 32]> {
         return Err(bad_input("invalid digest length"));
     }
     let mut digest = [0u8; 32];
-    for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+    for (index, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         digest[index] = nibble(pair[0])? << 4 | nibble(pair[1])?;
     }
     Ok(digest)
@@ -161,8 +161,8 @@ mod tests {
             )
             .is_err()
         );
-        let last = first.len();
-        first[last - 1025] ^= 1; // mutate the payload or final padding region
+        let offset = first.windows(3).position(|window| window == b"abc").unwrap();
+        first[offset] ^= 1; // mutate the actual file payload
         assert!(package_reader::inspect_unsigned(&first).is_err());
     }
 }
