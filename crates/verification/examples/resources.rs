@@ -8,7 +8,7 @@ fn main() {
     );
     #[cfg(feature = "sha256")]
     {
-        use verification::{ContentVerifier, Sha256Verifier};
+        use xila_package_verification::{ContentVerifier, Sha256Verifier};
         println!(
             "SHA state={} content state={}",
             size_of::<Sha256Verifier>(),
@@ -37,7 +37,7 @@ fn main() {
     #[cfg(feature = "ed25519")]
     {
         use ed25519_dalek::{Signer, SigningKey};
-        use verification::PublicKey;
+        use xila_package_verification::PublicKey;
         // Public test-only seed; never a deployment signing key. Fixture creation
         // is outside the timed section and only in this host example.
         let signer = SigningKey::from_bytes(&[0x42; 32]);

@@ -1,0 +1,23 @@
+[package]
+publish = false
+name = "xila-package-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "xila-package"
+path = "src/main.rs"
+
+[dependencies]
+getargs-derive = { version = "0.1.0", features = ["std"] }
+getargs = "0.5"
+xila-package-manifest = { path = "../manifest" }
+xila-package-writer = { path = "../writer" }
+xila-package-reader = { path = "../reader" }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,4 +1,4 @@
-# package_reader
+# xila-package-reader
 
 Borrowed TAR archive inspection based on `tar-no-std` 0.5.0. It checks every archive header is an ordinary file, validates manifest-first layout, exact declared files and order, lengths, and SHA-256 digests. It supports inspecting unsigned development archives or verifying a signature with an **externally trusted** Ed25519 key.
 

@@ -1,5 +1,6 @@
 [package]
-name = "verification"
+publish = false
+name = "xila-package-verification"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"

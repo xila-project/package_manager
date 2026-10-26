@@ -1,7 +1,6 @@
 //! Host-side Xila package authoring tool. Archives are unsigned unless an
 //! externally generated 64-byte Ed25519 signature is explicitly supplied.
-use package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
-use package_writer::SourceFile;
+use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
     fmt::Write as _,
@@ -9,18 +8,14 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
-use verification::Sha256Verifier;
+use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
+use xila_package_verification::Sha256Verifier;
+use xila_package_writer::SourceFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
-}
-
-fn usage() -> io::Error {
-    invalid(
-        "Usage:\n  xila-package manifest generate <directory> <manifest.json> <namespace.name> <version> <target> <minimum-xila-abi>\n  xila-package manifest update <directory> <manifest.json>\n  xila-package pack <directory> <manifest.json> <package.xpk> [signature.bin]",
-    )
 }
 
 fn hash_file(path: &Path) -> Result<(u64, String)> {
@@ -73,14 +68,14 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
             components.push(component.to_str().ok_or_else(|| invalid("non-UTF8 path"))?);
         }
         let name = components.join("/");
-        package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
+        xila_package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
         let (size, sha256) = hash_file(&path)?;
         output.push(ManifestFile {
             path: name,
             size,
             sha256,
         });
-        if output.len() > package_manifest::MAX_FILES {
+        if output.len() > xila_package_manifest::MAX_FILES {
             return Err(invalid("too many files").into());
         }
     }
@@ -88,8 +83,8 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
 }
 
 fn write_manifest(output: &Path, manifest: &Manifest) -> Result<()> {
-    let text =
-        package_manifest::encode(manifest).map_err(|_| invalid("manifest failed validation"))?;
+    let text = xila_package_manifest::encode(manifest)
+        .map_err(|_| invalid("manifest failed validation"))?;
     fs::write(output, text)?;
     Ok(())
 }
@@ -128,7 +123,7 @@ fn generate(
 fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     let bytes = fs::read(manifest_path)?;
     let mut manifest =
-        package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
     let root = source.canonicalize()?;
     if manifest_path.canonicalize()?.starts_with(&root) {
         return Err(invalid("manifest must reside outside the source directory").into());
@@ -141,7 +136,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
 }
 
 fn safe_file(root: &Path, path: &str) -> Result<PathBuf> {
-    package_manifest::validate_path(path).map_err(|_| invalid("unsafe file path"))?;
+    xila_package_manifest::validate_path(path).map_err(|_| invalid("unsafe file path"))?;
     let mut current = root.to_path_buf();
     for part in path.split('/') {
         current.push(part);
@@ -165,10 +160,10 @@ fn pack(
     let root = source.canonicalize()?;
     let raw_manifest = fs::read(manifest_path)?;
     let manifest =
-        package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
+        xila_package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
     if signature.is_some() {
         let canonical =
-            package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
+            xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
         if canonical.as_bytes() != raw_manifest {
             return Err(invalid("cannot attach a signature to a noncanonical manifest").into());
         }
@@ -201,10 +196,10 @@ fn pack(
     let temporary = output.with_extension("xpk.tmp");
     let operation = (|| -> Result<()> {
         let file = File::create(&temporary)?;
-        package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
+        xila_package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
         // The reader is a second implementation of framing/inventory checks.
         let archive = fs::read(&temporary)?;
-        package_reader::inspect_unsigned(&archive)
+        xila_package_reader::inspect_unsigned(&archive)
             .map_err(|_| invalid("archive verification failed"))?;
         fs::rename(&temporary, output)?;
         Ok(())
@@ -215,37 +210,106 @@ fn pack(
     operation
 }
 
+/// Build and inspect packages for Xila.
+#[derive(Debug, GetArgs)]
+#[command(name = "xila-package", version)]
+struct Cli<'a> {
+    #[command(subcommand)]
+    command: Command<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command<'a> {
+    /// Generate or update a package manifest.
+    Manifest(ManifestCommand<'a>),
+    /// Create an archive from the validated manifest and source files.
+    Pack {
+        /// Directory containing the application payload files.
+        directory: &'a str,
+        /// Path to the manifest JSON file.
+        manifest: &'a str,
+        /// Destination archive path.
+        output: &'a str,
+        /// Optional 64-byte Ed25519 signature prepared outside this tool.
+        signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct ManifestCommand<'a> {
+    #[command(subcommand)]
+    command: ManifestOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum ManifestOperation<'a> {
+    /// Generate a manifest for an application directory.
+    Generate {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Output path for the manifest JSON file.
+        manifest: &'a str,
+        /// Package identifier, for example xila.calculator.
+        name: &'a str,
+        /// Package version.
+        version: &'a str,
+        /// Target architecture.
+        target: &'a str,
+        /// Minimum Xila runtime application binary interface version.
+        minimum_xila_abi: u32,
+    },
+    /// Refresh file sizes and hashes in an existing manifest.
+    Update {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Path of the manifest to update.
+        manifest: &'a str,
+    },
+}
+
 fn run() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    match args.as_slice() {
-        [_, a, b, directory, output, name, version, target, min]
-            if a == "manifest" && b == "generate" =>
-        {
-            generate(
-                Path::new(directory),
-                Path::new(output),
+    let args: Vec<String> = env::args().skip(1).collect();
+    let cli = match Cli::from_args(args.iter().map(String::as_str)) {
+        Ok(cli) => cli,
+        Err(error) if error.is_help() || error.is_version() => {
+            println!("{error}");
+            return Ok(());
+        }
+        Err(error) => return Err(invalid(&error.to_string()).into()),
+    };
+    match cli.command {
+        Command::Manifest(ManifestCommand { command }) => match command {
+            ManifestOperation::Generate {
+                directory,
+                manifest,
                 name,
                 version,
                 target,
-                min.parse()?,
-            )
-        }
-        [_, a, b, directory, path] if a == "manifest" && b == "update" => {
-            update(Path::new(directory), Path::new(path))
-        }
-        [_, a, directory, manifest, output] if a == "pack" => pack(
+                minimum_xila_abi,
+            } => generate(
+                Path::new(directory),
+                Path::new(manifest),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+            ),
+            ManifestOperation::Update {
+                directory,
+                manifest,
+            } => update(Path::new(directory), Path::new(manifest)),
+        },
+        Command::Pack {
+            directory,
+            manifest,
+            output,
+            signature,
+        } => pack(
             Path::new(directory),
             Path::new(manifest),
             Path::new(output),
-            None,
+            signature.map(Path::new),
         ),
-        [_, a, directory, manifest, output, signature] if a == "pack" => pack(
-            Path::new(directory),
-            Path::new(manifest),
-            Path::new(output),
-            Some(Path::new(signature)),
-        ),
-        _ => Err(usage().into()),
     }
 }
 

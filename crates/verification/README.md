@@ -9,7 +9,7 @@ policy or define a package format.
 ```rust
 # #[cfg(feature = "sha256")]
 # {
-use verification::ContentVerifier;
+use xila_package_verification::ContentVerifier;
 
 // Expected values must come from authenticated metadata, not the payload itself.
 let expected = [
@@ -23,7 +23,7 @@ verifier.update(b"a")?;
 verifier.update(b"bc")?;
 verifier.verify()?;
 # }
-# Ok::<(), verification::Error>(())
+# Ok::<(), xila_package_verification::Error>(())
 ```
 
 `Sha256Verifier` also provides `new`, `update`, and consuming `finalize` for plain
@@ -160,13 +160,14 @@ definition. Do not inherit any measurements from the unavailable prototype.
 ## Validation commands
 
 ```sh
-bash libraries/verification/check.sh
-cargo tree -p verification --all-features -e features
-bash tools/verification_probe/check.sh thumbv7em-none-eabi
-COMPACT_SHA2=1 bash tools/verification_probe/check.sh thumbv7em-none-eabi
+bash crates/verification/check.sh
+cargo tree -p xila-package-verification --all-features -e features
 ```
 
-The focused matrix expects installed Cortex-M/WASM targets; override
+The focused matrix expects installed Cortex-M and WebAssembly targets; override
 `VERIFICATION_TARGETS` for a narrower check and report that restriction.
-CI runs the full matrix and no-allocator Cortex-M/WASM link probes through
-`mise run ci:verification`. No firmware or full package workflow is enabled.
+For linked, allocation-free targets and realistic size measurements, use
+`tools/verification_probe/check.sh` from [Xila Core](https://github.com/xila-project/core),
+which pins its verification dependency to an older immutable revision until
+it is explicitly migrated to the newly renamed Cargo package. The standalone
+workspace checks and the linked-device probes are complementary.

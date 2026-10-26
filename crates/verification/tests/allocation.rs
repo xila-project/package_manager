@@ -56,7 +56,7 @@ fn verification_paths_do_not_allocate() {
     let count = measured(|| {
         #[cfg(feature = "sha256")]
         {
-            use verification::{ContentVerifier, Sha256Verifier};
+            use xila_package_verification::{ContentVerifier, Sha256Verifier};
             let mut hash = Sha256Verifier::new();
             for _ in 0..8192 {
                 hash.update(&[0x5a; 512]).unwrap();
@@ -75,7 +75,7 @@ fn verification_paths_do_not_allocate() {
         }
         #[cfg(feature = "ed25519")]
         {
-            use verification::PublicKey;
+            use xila_package_verification::PublicKey;
             // RFC 8032 section 7.1 TEST 1.
             let key = PublicKey::from_bytes(&[
                 0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64,

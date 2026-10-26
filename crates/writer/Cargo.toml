@@ -1,0 +1,16 @@
+[package]
+publish = false
+name = "xila-package-writer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xila-package-manifest = { path = "../manifest" }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
+tar = "0.4.46"
+
+[dev-dependencies]
+xila-package-reader = { path = "../reader" }

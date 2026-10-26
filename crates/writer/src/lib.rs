@@ -1,10 +1,10 @@
 //! Deterministic host-only USTAR writer for the experimental Xila package profile.
 //! No PAX headers, GNU extended names, symlinks, or compression in this version.
 
-use package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use std::io::{self, Write};
 use tar::{Builder, EntryType, Header};
-use verification::ContentVerifier;
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
+use xila_package_verification::ContentVerifier;
 
 pub struct SourceFile<'a> {
     pub path: &'a str,
@@ -55,7 +55,7 @@ fn append<W: Write>(archive: &mut Builder<W>, path: &str, bytes: &[u8]) -> io::R
 /// Build a development package. A signature is optional ONLY for unsigned
 /// development inspection; untrusted packages must never be installed.
 ///
-/// The caller signs the exact JSON output from package_manifest::encode after
+/// The caller signs the exact JSON output from xila_package_manifest::encode after
 /// applying the domain-separated message from signed_message_into. This writer
 /// does not possess private keys and does not silently create signatures.
 pub fn write_package<W: Write>(
@@ -64,7 +64,8 @@ pub fn write_package<W: Write>(
     payloads: &[SourceFile<'_>],
     signature: Option<&[u8; 64]>,
 ) -> io::Result<()> {
-    let json = package_manifest::encode(manifest).map_err(|_| bad_input("invalid manifest"))?;
+    let json =
+        xila_package_manifest::encode(manifest).map_err(|_| bad_input("invalid manifest"))?;
     if payloads.len() != manifest.files.len() {
         return Err(bad_input("incorrect file count"));
     }
@@ -99,7 +100,7 @@ pub fn write_package<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use package_manifest::{Manifest, ManifestFile};
+    use xila_package_manifest::{Manifest, ManifestFile};
 
     fn fixture() -> Manifest {
         Manifest {
@@ -125,7 +126,7 @@ mod tests {
             bytes: b"abc",
         };
         write_package(&mut output, &fixture(), &[file], None).unwrap();
-        let inspected = package_reader::inspect_unsigned(&output).unwrap();
+        let inspected = xila_package_reader::inspect_unsigned(&output).unwrap();
         assert_eq!(inspected, fixture());
     }
 
@@ -166,6 +167,6 @@ mod tests {
             .position(|window| window == b"abc")
             .unwrap();
         first[offset] ^= 1; // mutate the actual file payload
-        assert!(package_reader::inspect_unsigned(&first).is_err());
+        assert!(xila_package_reader::inspect_unsigned(&first).is_err());
     }
 }

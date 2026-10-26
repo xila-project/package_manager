@@ -51,7 +51,7 @@ fn command_generates_updates_and_packs() {
             .success()
     );
     let bytes = fs::read(&archive).unwrap();
-    let contents = package_reader::inspect_unsigned(&bytes).unwrap();
+    let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
     assert_eq!(contents.name, "xila.calculator");
     assert_eq!(contents.files[0].path, "bin/calculator.wasm");
     let mutated = temp.path().join("mutated");
@@ -69,4 +69,31 @@ fn command_generates_updates_and_packs() {
             .unwrap()
             .success()
     );
+}
+
+#[test]
+fn supports_derived_help_and_version() {
+    let binary = env!("CARGO_BIN_EXE_xila-package");
+    for arguments in [
+        vec!["--help"],
+        vec!["--version"],
+        vec!["manifest", "--help"],
+        vec!["manifest", "generate", "--help"],
+        vec!["manifest", "update", "--help"],
+        vec!["pack", "--help"],
+    ] {
+        let output = Command::new(binary).args(arguments).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{:?}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!output.stdout.is_empty());
+    }
+    let output = Command::new(binary)
+        .args(["manifest", "generat"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("generate"));
 }

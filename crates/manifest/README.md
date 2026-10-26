@@ -1,4 +1,4 @@
-# package_manifest
+# xila-package-manifest
 
 Versioned package metadata with Miniserde. Miniserde is JSON-only and uses an allocator even though the crate is compatible with no_std; this prototype does **not** claim zero allocations. Input length and file count are limited, and file hashes cover uncompressed logical bytes.
 
