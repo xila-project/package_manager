@@ -32,7 +32,7 @@ fn decode_digest(hex: &str) -> Result<[u8; 32], Error> {
         return Err(Error::InvalidDigest);
     }
     let mut bytes = [0u8; 32];
-    for (n, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+    for (n, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         bytes[n] = nibble(pair[0])? << 4 | nibble(pair[1])?;
     }
     Ok(bytes)
@@ -60,13 +60,13 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
 
     let mut entry = entries.next();
     let mut signature = None;
-    if let Some(candidate) = entry.as_ref() {
-        if candidate
+    if let Some(candidate) = entry.as_ref()
+        && candidate
             .filename()
             .as_str()
             .map_err(|_| Error::InvalidArchive)?
             == SIGNATURE_PATH
-        {
+    {
             let bytes = candidate.data();
             if bytes.len() != 64 {
                 return Err(Error::InvalidSignature);
@@ -75,7 +75,6 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
             sig.copy_from_slice(bytes);
             signature = Some(sig);
             entry = entries.next();
-        }
     }
 
     if let Some(key) = trusted {
