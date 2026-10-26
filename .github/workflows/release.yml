@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bootstrap_initial_release:
+        description: "One-time: publish xila-package-builder v0.1.0 without a release PR"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ concurrency:
 jobs:
   prepare:
     name: Prepare version bump pull request
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || !inputs.bootstrap_initial_release)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -52,11 +58,43 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
+      - name: Select release-plz configuration
+        id: release-config
+        shell: bash
+        env:
+          BOOTSTRAP_INITIAL_RELEASE: ${{ inputs.bootstrap_initial_release }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$BOOTSTRAP_INITIAL_RELEASE" == "true" ]]; then
+            # A normal release requires merging a release-plz PR. The initial
+            # version is already 0.1.0, so release-plz has no bump PR to open.
+            version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "xila-package-builder") | .version')"
+            if [[ "$version" != "0.1.0" ]]; then
+              echo "::error::Bootstrap is only supported for xila-package-builder v0.1.0 (found $version)"
+              exit 1
+            fi
+            if git show-ref --verify --quiet "refs/tags/xila-package-builder-v0.1.0"; then
+              echo "::error::The initial tag already exists; use the normal release workflow"
+              exit 1
+            fi
+            if ! grep -qx 'release_always = false' release-plz.toml; then
+              echo "::error::Expected release_always = false in the regular configuration"
+              exit 1
+            fi
+            # Keep the checked-out repository and default policy unchanged.
+            config="$RUNNER_TEMP/release-plz-bootstrap.toml"
+            sed 's/^release_always = false$/release_always = true/' release-plz.toml > "$config"
+            echo "path=$config" >> "$GITHUB_OUTPUT"
+            echo "Bootstrapping the initial git-only release with a temporary configuration."
+          else
+            echo "path=release-plz.toml" >> "$GITHUB_OUTPUT"
+          fi
       - name: Release Git tag and GitHub release
         id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release
+          config: ${{ steps.release-config.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Identify the native binary release
