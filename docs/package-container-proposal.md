@@ -1,12 +1,12 @@
 # Proposal: Xila package container, manifest and signatures
 
-**Status: architectural proposal; NOT a frozen production format.** A development-only implementation now exists under `crates/package_manifest`, `crates/package_reader`, and `crates/package_writer`. The installed version currently uses Miniserde JSON, not Postcard, and the reader requires an entire TAR archive in memory.
+**Status: architectural proposal; NOT a frozen production format.** A development-only implementation now exists under `crates/xila-package-manifest`, `crates/xila-package-reader`, and `crates/xila-package-writer`. The installed version currently uses Miniserde JSON, not Postcard, and the reader requires an entire TAR archive in memory.
 
 This document records the recommended architecture for review. [Xila Core issue #402](https://github.com/xila-project/core/issues/402) remains the authority for the final format decision and required comparison with CPIO, SWUpdate, Alpine package formats and a minimal custom container.
 
 ## Current implementation versus production requirements
 
-The first implementation is intentionally limited: `package_manifest` serializes JSON with `miniserde` (`no_std` with `alloc`), `package_reader` uses full-buffer `tar-no-std`, `package_writer` creates reproducible uncompressed USTAR, and `package_builder` is a host-only command. These components are useful for fixtures and format exploration, but no secure streaming installer is provided. The proposed format, memory limits, capability validation and signing envelope still need a single finalized specification in Core issue #402.
+The first implementation is intentionally limited: `xila-package-manifest` serializes JSON with `miniserde` (`no_std` with `alloc`), `xila-package-reader` uses full-buffer `tar-no-std`, `xila-package-writer` creates reproducible uncompressed USTAR, and `xila-package-builder` is a host-only command. These components are useful for fixtures and format exploration, but no secure streaming installer is provided. The proposed format, memory limits, capability validation and signing envelope still need a single finalized specification in Core issue #402.
 
 ## Core requirements
 
@@ -63,7 +63,7 @@ If keeping the full canonical manifest in RAM proves too expensive on constraine
 
 ## Manifest structure to discuss
 
-A provisional `Manifest` schema already lives in the shared `package_manifest` library using `miniserde` and JSON. A future compact binary representation such as Postcard remains an option, but switching would require a deliberate versioned format migration. A human-readable authoring manifest (for example TOML) is a host tool input mapped to the same semantic schema and validated by the shared library, **not** an independently trusted format.
+A provisional `Manifest` schema already lives in the shared `xila-package-manifest` library using `miniserde` and JSON. A future compact binary representation such as Postcard remains an option, but switching would require a deliberate versioned format migration. A human-readable authoring manifest (for example TOML) is a host tool input mapped to the same semantic schema and validated by the shared library, **not** an independently trusted format.
 
 Suggested minimal semantic fields (provisional):
 
