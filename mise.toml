@@ -36,3 +36,7 @@ run = "cargo llvm-cov --workspace --all-features"
 [tasks."coverage:lcov"]
 description = "Generate an LCOV report for Codecov"
 run = "cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info"
+
+[tasks."doc:check"]
+description = "Build Rustdoc for all workspace crates and treat warnings as errors"
+run = "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --locked"

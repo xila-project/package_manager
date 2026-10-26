@@ -1,5 +1,4 @@
-//! Host-side Xila package authoring tool. Archives are unsigned unless an
-//! externally generated 64-byte Ed25519 signature is explicitly supplied.
+#![doc = include_str!("../README.md")]
 use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,

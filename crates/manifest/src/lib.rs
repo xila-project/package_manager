@@ -1,19 +1,25 @@
 #![no_std]
 #![forbid(unsafe_code)]
-//! Bounded manifest schema with no_std + alloc Miniserde JSON.
-//! Development format: not a finalized trusted wire protocol.
+#![doc = include_str!("../README.md")]
 
 extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
+/// Current experimental manifest format version.
 pub const FORMAT_VERSION: u32 = 1;
+/// Maximum accepted manifest JSON byte length.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
+/// Maximum number of payload files in a manifest.
 pub const MAX_FILES: usize = 128;
+/// Required first TAR entry holding the JSON manifest.
 pub const MANIFEST_PATH: &str = ".xila/manifest.json";
+/// Optional detached 64-byte Ed25519 signature archive entry.
 pub const SIGNATURE_PATH: &str = ".xila/manifest.sig";
+/// Domain separator proposed for signing exact manifest bytes.
 pub const SIGNED_DOMAIN: &[u8] = b"XILA-PACKAGE-MANIFEST-V1\0";
 
+/// Reasons a package manifest or path is rejected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     TooLarge,
@@ -28,6 +34,7 @@ pub enum Error {
     InvalidFileList,
 }
 
+/// A complete Xila archive manifest describing identity and every payload file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     pub format_version: u32,
@@ -39,6 +46,7 @@ pub struct Manifest {
     pub files: Vec<ManifestFile>,
 }
 
+/// One payload file and the expected hash of its uncompressed bytes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ManifestFile {
     pub path: String,
@@ -47,6 +55,7 @@ pub struct ManifestFile {
     pub sha256: String,
 }
 
+/// Reject unsafe relative paths, reserved metadata names, and traversal.
 pub fn validate_path(path: &str) -> Result<(), Error> {
     if path.is_empty()
         || path.len() > 200
@@ -75,6 +84,7 @@ fn valid_identifier(value: &str) -> bool {
         && value.contains('.')
 }
 
+/// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
     if manifest.format_version != FORMAT_VERSION {
         return Err(Error::UnsupportedVersion);
@@ -133,6 +143,7 @@ pub fn validate(manifest: &Manifest) -> Result<(), Error> {
     Ok(())
 }
 
+/// Parse bounded Miniserde JSON using `alloc`, then validate its structure.
 pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(Error::TooLarge);
@@ -143,6 +154,7 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
     Ok(value)
 }
 
+/// Serialize a validated manifest to bounded JSON for use inside TAR.
 pub fn encode(value: &Manifest) -> Result<String, Error> {
     validate(value)?;
     let json = miniserde::json::to_string(value);

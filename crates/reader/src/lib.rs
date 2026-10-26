@@ -1,7 +1,6 @@
 #![no_std]
 #![forbid(unsafe_code)]
-//! Strict, full-buffer TAR inspection via tar-no-std.
-//! This is not yet a bounded network-streaming installer.
+#![doc = include_str!("../README.md")]
 extern crate alloc;
 
 use alloc::vec;
@@ -9,6 +8,7 @@ use tar_no_std::TarArchiveRef;
 use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
 use xila_package_verification::{ContentVerifier, PublicKey};
 
+/// Reasons a TAR archive, manifest or supplied signature was rejected.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     InvalidArchive,
