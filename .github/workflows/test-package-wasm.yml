@@ -1,0 +1,68 @@
+name: Reusable Wasm package smoke test
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/package-wasm.yml"
+      - ".github/workflows/test-package-wasm.yml"
+      - "tools/package_wasm.py"
+      - "tests/fixtures/package-workflow-manifest.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create minimal valid Wasm module
+        run: |
+          printf '\\x00asm\\x01\\x00\\x00\\x00' > example.wasm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reusable-smoke-wasm
+          path: example.wasm
+  package:
+    needs: inputs
+    uses: ./.github/workflows/package-wasm.yml
+    with:
+      wasm-artifact: reusable-smoke-wasm
+      manifest-path: tests/fixtures/package-workflow-manifest.json
+      builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      artifact-name: reusable-smoke-xila-package
+      upload-artifact: true
+      publish-release: false
+  verify:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: reusable-smoke-xila-package
+          path: out
+      - name: Verify the generated package and checksum
+        env:
+          EXPECTED_SHA256: ${{ needs.package.outputs.sha256 }}
+          EXPECTED_FILENAME: ${{ needs.package.outputs.filename }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tarfile
+
+          filename = os.environ["EXPECTED_FILENAME"]
+          data = (pathlib.Path("out") / filename).read_bytes()
+          assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_SHA256"]
+          with tarfile.open(fileobj=__import__("io").BytesIO(data), mode="r:") as tar:
+              manifest = json.load(tar.extractfile(".xila/manifest.json"))
+              assert manifest["name"] == "community.example"
+              wasm = tar.extractfile("bin/example.wasm").read()
+              assert wasm == b"\x00asm\x01\x00\x00\x00"
+              entry = manifest["files"][0]
+              assert entry["sha256"] == hashlib.sha256(wasm).hexdigest()
+              assert entry["size"] == len(wasm)
+          print("Xila archive smoke test passed.")
+          PY
