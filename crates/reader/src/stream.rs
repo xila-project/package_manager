@@ -97,12 +97,9 @@ impl<'a> StreamingVerifier<'a> {
 
         match event {
             Some(StreamEvent::Entry(entry)) => {
-                let filename = entry
-                    .filename()
-                    .as_str()
-                    .map_err(|_| Error::InvalidArchive)?
-                    .to_owned();
-                self.on_entry(&filename, entry.payload_size())
+                let filename = entry.filename();
+                let path = filename.as_str().map_err(|_| Error::InvalidArchive)?;
+                self.on_entry(path, entry.payload_size())
             }
             Some(StreamEvent::Data { bytes, remaining }) => self.on_data(bytes, remaining),
             Some(StreamEvent::End) => self.on_end(),
@@ -416,8 +413,14 @@ mod tests {
         );
 
         let (archive, public, _) = fixture(true);
+        // Remove the final two-block terminator *and* optional zero padding,
+        // but keep the entire authenticated content.
+        let end_of_payload = archive
+            .chunks_exact(512)
+            .rposition(|block| block.iter().any(|&value| value != 0))
+            .unwrap() + 1;
         assert_eq!(
-            from_bytes::<core::convert::Infallible>(&archive[..archive.len()-512*3], Some(&public)),
+            from_bytes::<core::convert::Infallible>(&archive[..end_of_payload * 512], Some(&public)),
             Err(StreamError::Package(Error::InvalidArchive))
         );
         assert_eq!(
