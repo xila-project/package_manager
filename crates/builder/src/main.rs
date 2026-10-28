@@ -14,8 +14,8 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
-use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
 use xila_package_bundle::FileHasher;
+use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
 use xila_package_writer::SourceFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -38,7 +38,9 @@ fn hash_file(path: &Path, relative: &str) -> Result<(u64, String)> {
             .update(&buffer[..read])
             .map_err(|_| invalid("file hashing failed"))?;
     }
-    let metadata = hasher.finish().map_err(|_| invalid("file hashing failed"))?;
+    let metadata = hasher
+        .finish()
+        .map_err(|_| invalid("file hashing failed"))?;
     Ok((metadata.size, metadata.sha256))
 }
 
