@@ -33,15 +33,21 @@ grant runtime capabilities.
 
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
 
-## Native packaging workflow
+## Native bundle build workflow
 
 ```sh
 cargo run -p xila-package-builder -- manifest generate ./app ./manifest.json xila.calculator 1.0.0 wasm32-wasip1 1
+cargo run -p xila-package-builder -- manifest application ./manifest.json bin/calculator.wasm Calculator --icon share/icons/calculator.png
 cargo run -p xila-package-builder -- manifest update ./app ./manifest.json
-cargo run -p xila-package-builder -- pack ./app ./manifest.json ./calculator.xpk
+cargo run -p xila-package-builder -- bundle build ./app ./manifest.json ./Calculator.app
+cargo run -p xila-package-builder -- bundle archive ./Calculator.app ./calculator.xpk
 ```
 
-The first version handles ordinary uncompressed files and produces development archives. An optional externally generated detached signature is supported, but publisher trust and key management are **not** implemented by this command.
+**The bundle is the self-contained directory** (`.xila/manifest.json`, the application executable, and declared resources); the optional `.xpk` is only a distribution archive of the same tree. Build outputs are staged and checked before publishing. The older `pack` subcommand is retained for direct archive creation. A package with `application: null` is a standalone executable/data package rather than a launcher-discoverable app.
+
+This repository currently builds and verifies bundles **only**. An application in `xila-project/applications` will eventually handle VFS-based copying/unpacking. The Shell will discover on-disk bundles and provide launcher integration. No installation, VFS adapter, activation pointer, or process execution is implemented here.
+
+An optional externally generated detached signature is supported, but publisher trust and key management are **not** implemented by this command. For examples and directory layout, see [builder usage](crates/builder/README.md).
 
 ## Development
 
