@@ -1,5 +1,12 @@
 #![doc = include_str!("../README.md")]
 mod bundle;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InventoryMode {
+    Legacy,
+    Developer,
+    Bundle,
+}
 use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
@@ -49,7 +56,7 @@ fn collect_files(
     root: &Path,
     current: &Path,
     output: &mut Vec<ManifestFile>,
-    skip_bundle_metadata: bool,
+    mode: InventoryMode,
 ) -> Result<()> {
     let mut paths = fs::read_dir(current)?
         .map(|entry| entry.map(|entry| entry.path()))
@@ -60,14 +67,24 @@ fn collect_files(
         if metadata.file_type().is_symlink() {
             return Err(invalid("symbolic links are not allowed").into());
         }
-        if current == root && path.file_name().is_some_and(|name| name == ".xila") {
-            if skip_bundle_metadata && metadata.is_dir() {
+        if current == root {
+            if path.file_name().is_some_and(|name| name == ".xila") {
+                if mode == InventoryMode::Bundle && metadata.is_dir() {
+                    continue;
+                }
+                return Err(invalid(".xila is reserved for bundle metadata").into());
+            }
+            if mode == InventoryMode::Developer
+                && path.file_name().is_some_and(|name| name == xila_package_manifest::DEVELOPER_MANIFEST_FILENAME)
+            {
+                if !metadata.is_file() {
+                    return Err(invalid("developer manifest is not a regular file").into());
+                }
                 continue;
             }
-            return Err(invalid(".xila is reserved for bundle metadata").into());
         }
         if metadata.is_dir() {
-            collect_files(root, &path, output, skip_bundle_metadata)?;
+            collect_files(root, &path, output, mode)?;
             continue;
         }
         if !metadata.is_file() {
@@ -117,7 +134,7 @@ fn generate(
         return Err(invalid("output manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files, false)?;
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
         schema: Some(xila_package_manifest::SCHEMA_URL.into()),
@@ -142,7 +159,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
         return Err(invalid("manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files, false)?;
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     manifest.files = files;
     write_manifest(manifest_path, &manifest)
