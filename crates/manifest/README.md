@@ -4,18 +4,22 @@ The shared archive manifest schema, portable to `no_std + alloc`. It contains
 package identity, target/ABI requirements, declared capabilities and the
 inventory of files embedded in a Xila archive.
 
-Format v2 adds an optional `application` descriptor, **without creating a
-second identity, version, signature or capability manifest**. A package with
-`application: null` carries standalone executables/resources; a package with an
-application descriptor can be discovered by the launcher. `entrypoint` references
-a bundle-relative, inventory-verified executable or a preinstalled system
-executable. Its presence does not grant permissions or authorization. v1
-archives remain readable and use the original v1 signature domain.
+The experimental **v1** schema now carries an optional `application` descriptor,
+**without adding a second identity, version, signature or capability manifest**.
+A package with `application: null` carries standalone executables/resources;
+an application descriptor enables launcher discovery. Its `entrypoint`
+references a bundle-relative, inventory-verified executable or a preinstalled
+system executable. This metadata does not grant permissions or authorization.
+
+This is an intentional breaking change **within experimental v1**. There is
+no compatibility decoder, schema migration or second signature domain for
+the earlier v1 draft. Regenerate/repackage unsigned development artifacts
+with the revised schema; re-sign any signed manifests after regeneration.
 
 The format is **versioned but still experimental**. It uses Miniserde JSON,
 which allocates memory during decoding; it is not a zero-allocation MCU parser.
 The input limit is `MAX_MANIFEST_BYTES`, with additional file-count and
-content-size bounds. The version-specific signature domain separator covers the **exact encoded
+content-size bounds. The v1 signature domain separator covers the **exact encoded
 manifest bytes**, not an arbitrary reserialization.
 
 ## Example
