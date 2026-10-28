@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json",
+  "title": "Xila developer manifest (experimental v1)",
+  "description": "Editable developer configuration for xila-package bundle build. No files, sizes, hashes or signatures are written by developers; they are generated from the payload directory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "name",
+    "version",
+    "target",
+    "minimum_xila_abi",
+    "capabilities",
+    "application"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL. This pointer is not a trust anchor and is never fetched by the Xila runtime.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1,
+      "description": "Experimental v1 wire format. Breaking changes may occur before the format is frozen."
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 96,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9.+-]+$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "minimum_xila_abi": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "application": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/application"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?!\\.xila/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
+      "description": "Nonempty bundle-relative path. No . or .. components, symlinks or special entries; the runtime additionally enforces UTF-8 byte-size limits."
+    },
+    "systemExecutable": {
+      "type": "string",
+      "pattern": "^/(?:system|applications)/executables/(?!\\.\\.?(?:/|$))(?!.*(?:/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
+      "description": "Reference to an existing preinstalled executable. This does not imply permissions or package ownership."
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entrypoint",
+        "display_name",
+        "icon",
+        "show_in_launcher"
+      ],
+      "properties": {
+        "entrypoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relativePath"
+            },
+            {
+              "$ref": "#/$defs/systemExecutable"
+            }
+          ],
+          "description": "Bundle-relative application executable. The build tool ensures it exists in the generated signed file inventory."
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "$ref": "#/$defs/relativePath"
+            }
+          ],
+          "description": "Optional bundle-relative icon. The build tool ensures it exists in the generated signed file inventory."
+        },
+        "show_in_launcher": {
+          "type": "boolean",
+          "description": "Launcher discovery only; does not automatically pin to Dock."
+        }
+      }
+    }
+  }
+}
