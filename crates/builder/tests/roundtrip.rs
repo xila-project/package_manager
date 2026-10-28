@@ -50,8 +50,41 @@ fn command_generates_updates_and_packs() {
             .unwrap()
             .success()
     );
+    // A standalone binary is not automatically an application.
     let bytes = fs::read(&archive).unwrap();
     let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
+    assert!(contents.application.is_none());
+    assert!(
+        Command::new(binary)
+            .args([
+                "manifest",
+                "application",
+                manifest.to_str().unwrap(),
+                "bin/calculator.wasm",
+                "Calculator",
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        Command::new(binary)
+            .args([
+                "pack",
+                source.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+                archive.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let bytes = fs::read(&archive).unwrap();
+    let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
+    let app = contents.application.as_ref().unwrap();
+    assert_eq!(app.entrypoint, "bin/calculator.wasm");
+    assert_eq!(app.display_name, "Calculator");
+    assert!(app.show_in_launcher);
     assert_eq!(contents.name, "xila.calculator");
     assert_eq!(contents.files[0].path, "bin/calculator.wasm");
     let mutated = temp.path().join("mutated");
@@ -80,6 +113,7 @@ fn supports_derived_help_and_version() {
         vec!["manifest", "--help"],
         vec!["manifest", "generate", "--help"],
         vec!["manifest", "update", "--help"],
+        vec!["manifest", "application", "--help"],
         vec!["pack", "--help"],
     ] {
         let output = Command::new(binary).args(arguments).output().unwrap();
