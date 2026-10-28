@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 xila-package-manifest = { path = "../manifest" }
+xila-package-bundle = { path = "../bundle" }
 xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
 tar = "0.4.46"
 
