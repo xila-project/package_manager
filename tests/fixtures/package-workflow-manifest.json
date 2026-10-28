@@ -1,5 +1,5 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "community.example",
   "version": "0.1.0",
   "target": "wasm32-wasip1",
@@ -11,5 +11,6 @@
       "size": 0,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
-  ]
+  ],
+  "application": null
 }
