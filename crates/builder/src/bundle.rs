@@ -14,8 +14,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use xila_package_bundle::{Inventory, verify_signature};
 use xila_package_manifest::{
     Application, DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest,
-    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, decode_developer,
-    encode_developer,
+    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, decode_developer, encode_developer,
 };
 use xila_package_verification::PublicKey;
 
