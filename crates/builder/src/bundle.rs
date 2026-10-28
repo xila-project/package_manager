@@ -6,7 +6,7 @@
 
 use std::{
     fs,
-    io::{self, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -162,7 +162,7 @@ fn sign_manifest(raw_manifest: &[u8], key_path: &Path) -> Result<[u8; 64]> {
     check_regular_file(key_path)?;
     let seed: [u8; 32] = fs::read(key_path)?
         .try_into()
-        .map_err(|_| invalid("signing key must be a raw 32-byte Ed25519 seed").into())?;
+        .map_err(|_| invalid("signing key must be a raw 32-byte Ed25519 seed"))?;
     let signer = SigningKey::from_bytes(&seed);
     let message = signing_message(raw_manifest)?;
     let signature = signer.sign(&message).to_bytes();
