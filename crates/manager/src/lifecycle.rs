@@ -8,7 +8,7 @@
 
 use alloc::{
     format,
-    string::{String, ToString},
+    string::String,
 };
 use miniserde::{Deserialize, Serialize};
 use xila_package_manifest::{Manifest, decode, validate, validate_path};
@@ -320,7 +320,7 @@ pub fn classify_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
+    use alloc::{string::ToString, vec};
     use xila_package_manifest::{Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL};
 
     fn manifest() -> Manifest {
