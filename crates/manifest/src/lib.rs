@@ -10,8 +10,7 @@ use miniserde::{Deserialize, Serialize};
 pub const FORMAT_VERSION: u32 = 1;
 /// Editor-facing JSON Schema hosted in the package-manager repository.
 /// This is a tooling hint, never a package trust anchor.
-pub const SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json";
+pub const SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json";
 /// Maximum accepted manifest JSON byte length.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 /// Maximum number of payload files in a manifest.
@@ -113,7 +112,11 @@ fn valid_identifier(value: &str) -> bool {
 
 /// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
-    if manifest.schema.as_deref().is_some_and(|url| url != SCHEMA_URL) {
+    if manifest
+        .schema
+        .as_deref()
+        .is_some_and(|url| url != SCHEMA_URL)
+    {
         return Err(Error::InvalidSchema);
     }
     if manifest.format_version != FORMAT_VERSION {
@@ -207,8 +210,7 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let value: Manifest =
-        miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
+    let value: Manifest = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
     validate(&value)?;
     Ok(value)
 }
