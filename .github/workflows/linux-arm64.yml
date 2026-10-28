@@ -22,10 +22,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: "1.99.0"
-          targets: aarch64-unknown-linux-gnu
+          cache-enabled: "false"
       - name: Compile native release executable
         run: cargo build --locked --release --target aarch64-unknown-linux-gnu --package xila-package-builder
       - name: Execute ARM64 release binary

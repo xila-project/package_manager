@@ -22,11 +22,9 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5.2.2
-      - uses: jdx/mr-boxington-action@v1
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: "1.99.0"
-          github-cache-mode: target
+          cache-mode: target
           cache-generation: v1-package-manager
       - name: Verify committed dependency lockfile
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null

@@ -1,7 +1,10 @@
+[vars]
+rust_version = "1.99.0"
+
 [tools]
 # Keep the compiler aligned with Xila core. Native mise integration makes Cargo
 # commands use mr-boxington without a global shell setup or a second wrapper.
-rust = { version = "1.99.0", profile = "minimal", components = ["clippy", "rustfmt", "llvm-tools-preview"], mr_boxington = true }
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = ["clippy", "rustfmt", "llvm-tools-preview"], mr_boxington = true }
 mr-boxington = "1.12.0"
 "cargo:cargo-llvm-cov" = "0.9.1"
 
@@ -40,3 +43,13 @@ run = "cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info"
 [tasks."doc:check"]
 description = "Build Rustdoc for all workspace crates and treat warnings as errors"
 run = "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --locked"
+
+[tasks."ci:toolchain"]
+description = "Install and report the mise-pinned Rust toolchain for shared CI setup"
+run = '''
+set -eu
+rustc --version
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "version={{ vars.rust_version }}" >> "$GITHUB_OUTPUT"
+fi
+'''
