@@ -424,7 +424,9 @@ mod tests {
         // Remove the final two-block terminator *and* optional zero padding,
         // but keep the entire authenticated content.
         let end_of_payload = archive
-            .as_chunks::<512>().0.iter()
+            .as_chunks::<512>()
+            .0
+            .iter()
             .rposition(|block| block.iter().any(|&value| value != 0))
             .unwrap()
             + 1;
