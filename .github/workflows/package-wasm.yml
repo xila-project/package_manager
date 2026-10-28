@@ -68,35 +68,36 @@ jobs:
       sha256: ${{ steps.pack.outputs.sha256 }}
       artifact_name: ${{ inputs.artifact-name }}
     steps:
-      - name: Check out caller repository for manifest
+      - name: "Setup | Checkout caller manifest"
         uses: actions/checkout@v7
         with:
           persist-credentials: false
           path: caller
-      - name: Check out Xila package builder
+      - name: "Setup | Checkout package builder"
         uses: actions/checkout@v7
         with:
           repository: Xila-Project/package_manager
           ref: ${{ inputs.builder-ref }}
           persist-credentials: false
           path: package-manager
-      - name: Fetch Wasm artifact from the caller run
+      - name: "Setup | Fetch caller WASI artifact"
         uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.wasm-artifact }}
           path: ${{ runner.temp }}/xila-wasm-input
-      - name: Fetch optional generated manifest artifact
+      - name: "Setup | Fetch generated manifest"
         if: inputs.manifest-artifact != ''
         uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.manifest-artifact }}
           path: ${{ runner.temp }}/xila-manifest-input
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Setup | Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
-      - name: Build host-only packaging tool
+      - name: "Build | Host package builder"
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
-      - name: Stage Wasm, refresh manifest hashes, package and verify
+      - name: "Package | Stage Wasm and validate archive"
         id: pack
         shell: bash
         env:
@@ -119,7 +120,7 @@ jobs:
             --output "$RUNNER_TEMP/xila-package-dist" \
             --builder "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
             --github-output "$GITHUB_OUTPUT"
-      - name: Upload Xila package to GitHub Actions artifacts
+      - name: "Report | Upload application package"
         if: inputs.upload-artifact || inputs.publish-release
         uses: actions/upload-artifact@v7
         with:
@@ -134,17 +135,17 @@ jobs:
     if: inputs.publish-release && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out caller repository with tags
+      - name: "Setup | Checkout caller release tag"
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Download built Xila package
+      - name: "Setup | Download package archive"
         uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/xila-package-dist
-      - name: Ensure target is an existing tag pointing to this commit
+      - name: "Validate | Release tag and commit"
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
         shell: bash
@@ -161,7 +162,7 @@ jobs:
             echo "::error::release-tag does not reference this workflow commit"
             exit 1
           fi
-      - name: Publish archive and checksum to GitHub Release
+      - name: "Publish | Package archive and checksum"
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release-tag }}
