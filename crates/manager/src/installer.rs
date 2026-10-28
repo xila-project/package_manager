@@ -285,7 +285,8 @@ pub fn install<S: Store>(
 
     // Archive was authenticated and verified above; it stays borrowed and
     // immutable for the entire extraction below.
-    let tar = TarArchiveRef::new(archive).map_err(|_| Error::Archive(xila_package_reader::Error::InvalidArchive))?;
+    let tar = TarArchiveRef::new(archive)
+        .map_err(|_| Error::Archive(xila_package_reader::Error::InvalidArchive))?;
     let mut entries = tar.entries();
     let manifest_entry = entries.next().ok_or(Error::InvalidStoredManifest)?;
     let signature_entry = entries.next().ok_or(Error::InvalidStoredSignature)?;
@@ -420,9 +421,13 @@ pub fn uninstall_active<S: Store>(
     let record = current_record(store, package)?;
     let dir = format!("{BUNDLES_ROOT}/{package}/{}", record.version);
     let (manifest, raw) = verify_directory(store, &dir, key, policy)?;
-    if manifest.name != package || manifest.version != record.version { return Err(Error::IdentityMismatch); }
+    if manifest.name != package || manifest.version != record.version {
+        return Err(Error::IdentityMismatch);
+    }
     let expected_record = ActivationRecord::for_manifest_bytes(&raw)?;
-    if record != expected_record { return Err(Error::IdentityMismatch); }
+    if record != expected_record {
+        return Err(Error::IdentityMismatch);
+    }
     store.remove_file(&format!("{ACTIVE_ROOT}/{package}"))?;
     store.sync_directory(ACTIVE_ROOT)?;
     store.remove_tree(&dir)?;
