@@ -429,6 +429,11 @@ dependencies = [
 [[package]]
 name = "xila-package-manager"
 version = "0.1.0"
+dependencies = [
+ "miniserde",
+ "xila-package-manifest",
+ "xila-package-verification",
+]
 
 [[package]]
 name = "xila-package-manifest"
