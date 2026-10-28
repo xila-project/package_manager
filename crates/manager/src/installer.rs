@@ -11,7 +11,7 @@ use crate::lifecycle::{
 };
 use alloc::{
     format,
-    string::{String, ToString},
+    string::ToString,
     vec,
     vec::Vec,
 };
@@ -59,7 +59,7 @@ pub enum StoreError {
     Io,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     Lifecycle(lifecycle::Error),
     Archive(xila_package_reader::Error),
