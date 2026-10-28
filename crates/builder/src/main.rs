@@ -108,6 +108,7 @@ fn generate(
     collect_files(&root, &root, &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
+        schema: Some(xila_package_manifest::SCHEMA_URL.into()),
         format_version: FORMAT_VERSION,
         name: name.into(),
         version: version.into(),
