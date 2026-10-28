@@ -355,8 +355,7 @@ dependencies = [
 [[package]]
 name = "tar-no-std"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ce14e67325dafcde4b79b521f01769db00660c87e3ed4ad9da8006fcee272bf"
+source = "git+https://github.com/AlixANNERAUD/tar-no-std?rev=ecdd39990ae4143d36b7f2adcf3eff2f971fea11#ecdd39990ae4143d36b7f2adcf3eff2f971fea11"
 dependencies = [
  "bitflags",
  "log",
@@ -451,6 +450,8 @@ dependencies = [
 name = "xila-package-reader"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
+ "xila-package-writer",
  "xila-package-bundle",
  "tar-no-std",
  "xila-package-manifest",
