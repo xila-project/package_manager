@@ -17,7 +17,8 @@ getargs = "0.5"
 xila-package-manifest = { path = "../manifest" }
 xila-package-writer = { path = "../writer" }
 xila-package-reader = { path = "../reader" }
-xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
+ed25519-dalek = { version = "3.0", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
