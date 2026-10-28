@@ -12,5 +12,11 @@ name = "xila_package_manager"
 
 [dependencies]
 xila-package-manifest = { path = "../manifest" }
-xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
+xila-package-reader = { path = "../reader" }
+tar-no-std = { version = "0.5.0", default-features = false }
 miniserde = { version = "0.1.46", default-features = false }
+
+[dev-dependencies]
+xila-package-writer = { path = "../writer" }
+ed25519-dalek = { version = "3.0", default-features = false }
