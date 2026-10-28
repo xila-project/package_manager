@@ -93,17 +93,30 @@ fn signing_message(raw_manifest: &[u8]) -> Result<Vec<u8>> {
 
 /// Prepare a developer-owned source directory. Generated hashes and signature
 /// are deliberately absent from this human-authored configuration.
-pub fn init(
-    directory: &Path,
-    name: &str,
-    version: &str,
-    target: &str,
-    minimum_xila_abi: u32,
-    entrypoint: Option<&str>,
-    display_name: Option<&str>,
-    icon: Option<&str>,
-    standalone: bool,
-) -> Result<()> {
+pub struct InitOptions<'a> {
+    pub directory: &'a Path,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub target: &'a str,
+    pub minimum_xila_abi: u32,
+    pub entrypoint: Option<&'a str>,
+    pub display_name: Option<&'a str>,
+    pub icon: Option<&'a str>,
+    pub standalone: bool,
+}
+
+pub fn init(options: InitOptions<'_>) -> Result<()> {
+    let InitOptions {
+        directory,
+        name,
+        version,
+        target,
+        minimum_xila_abi,
+        entrypoint,
+        display_name,
+        icon,
+        standalone,
+    } = options;
     check_output_absent(directory)?;
     if standalone && (entrypoint.is_some() || display_name.is_some() || icon.is_some()) {
         return Err(invalid("standalone packages do not have application metadata").into());
@@ -269,10 +282,10 @@ pub fn build(source: &Path, output: &Path, signing_key: Option<&Path>) -> Result
         if persisted != manifest || persisted_raw != raw.as_bytes() {
             return Err(invalid("bundle changed during construction").into());
         }
-        if let Some(signature) = signature {
-            if persisted_signature != Some(signature) {
-                return Err(invalid("signature was not persisted").into());
-            }
+        if let Some(signature) = signature
+            && persisted_signature != Some(signature)
+        {
+            return Err(invalid("signature was not persisted").into());
         }
         check_output_absent(output)?;
         fs::rename(&stage, output)?;
@@ -365,17 +378,17 @@ mod tests {
 
     fn setup(root: &Path) -> (PathBuf, PathBuf) {
         let source = root.join("source");
-        init(
-            &source,
-            "community.weather",
-            "1.0.0",
-            "wasm32-wasip1",
-            1,
-            Some("bin/weather.wasm"),
-            Some("Weather"),
-            Some("resources/icon.png"),
-            false,
-        )
+        init(InitOptions {
+            directory: &source,
+            name: "community.weather",
+            version: "1.0.0",
+            target: "wasm32-wasip1",
+            minimum_xila_abi: 1,
+            entrypoint: Some("bin/weather.wasm"),
+            display_name: Some("Weather"),
+            icon: Some("resources/icon.png"),
+            standalone: false,
+        })
         .unwrap();
         fs::write(source.join("bin/weather.wasm"), b"wasm executable").unwrap();
         fs::create_dir_all(source.join("resources/translations")).unwrap();
@@ -413,20 +426,17 @@ mod tests {
             b"icon bytes"
         );
         assert!(verify(&bundle, None).is_ok());
-        assert!(
-            init(
-                &source,
-                "community.weather",
-                "1.0.0",
-                "wasm32-wasip1",
-                1,
-                None,
-                None,
-                None,
-                false
-            )
-            .is_err()
-        );
+        assert!(init(InitOptions {
+            directory: &source,
+            name: "community.weather",
+            version: "1.0.0",
+            target: "wasm32-wasip1",
+            minimum_xila_abi: 1,
+            entrypoint: None,
+            display_name: None,
+            icon: None,
+            standalone: false,
+        }).is_err());
     }
 
     #[test]
@@ -540,17 +550,17 @@ mod tests {
     fn executable_only_package_can_be_built() {
         let temp = tempdir().unwrap();
         let source = temp.path().join("tool");
-        init(
-            &source,
-            "xila.tool",
-            "1.0.0",
-            "wasm32-wasip1",
-            1,
-            None,
-            None,
-            None,
-            true,
-        )
+        init(InitOptions {
+            directory: &source,
+            name: "xila.tool",
+            version: "1.0.0",
+            target: "wasm32-wasip1",
+            minimum_xila_abi: 1,
+            entrypoint: None,
+            display_name: None,
+            icon: None,
+            standalone: true,
+        })
         .unwrap();
         fs::write(source.join("bin/tool.wasm"), b"standalone wasm").unwrap();
         let bundle = temp.path().join("Tool.app");
