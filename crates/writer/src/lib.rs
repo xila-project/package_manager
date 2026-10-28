@@ -2,8 +2,8 @@
 
 use std::io::{self, Write};
 use tar::{Builder, EntryType, Header};
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_bundle::verify_bytes;
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 
 /// Path and bytes for a single file matching a manifest entry.
 pub struct SourceFile<'a> {
