@@ -13,7 +13,7 @@ Shared Rust workspace for building, inspecting and eventually installing Xila ap
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
 | `xila-package-builder` | Host-only `xila-package` executable to generate, update and package applications |
-| `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
+| `xila-package-manager` | Portable `no_std` lifecycle preflight, activation-record and recovery contracts; device-side installer and repository operations still pending |
 
 The **experimental v1 JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
@@ -32,6 +32,16 @@ and CI catch structural mistakes; it does not authenticate package content or
 grant runtime capabilities.
 
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
+
+## Local installation lifecycle (draft)
+
+The manager crate now exposes the offline-first
+[`lifecycle`](docs/activation-lifecycle.md) contract for trusted install
+policy checks, versioned paths, bounded activation-record JSON,
+read-only application resolution and fail-closed storage guarantees.
+It does **not** extract packages, authenticate a publisher, or implement
+VFS transactions. Core integration and native/ESP32-S3 power-loss testing
+remain required; no portable atomicity is assumed.
 
 ## Native packaging workflow
 
