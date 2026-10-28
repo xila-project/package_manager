@@ -11,8 +11,7 @@ use crate::{
 };
 
 pub const DEVELOPER_MANIFEST_FILENAME: &str = "xila-package.json";
-pub const DEVELOPER_SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json";
+pub const DEVELOPER_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json";
 
 /// Developer-authored application settings. There are deliberately no file
 /// hashes, sizes, signature or artifact paths here: those are build outputs.
@@ -31,7 +30,11 @@ pub struct DeveloperManifest {
 
 impl DeveloperManifest {
     pub fn validate(&self) -> Result<(), Error> {
-        if self.schema.as_deref().is_some_and(|url| url != DEVELOPER_SCHEMA_URL) {
+        if self
+            .schema
+            .as_deref()
+            .is_some_and(|url| url != DEVELOPER_SCHEMA_URL)
+        {
             return Err(Error::InvalidSchema);
         }
         if self.format_version != FORMAT_VERSION {
@@ -49,38 +52,43 @@ impl DeveloperManifest {
             })
             || self.version.is_empty()
             || self.version.len() > 64
-            || !self.version.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric() || b".+-".contains(&byte)
-            })
+            || !self
+                .version
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".+-".contains(&byte))
         {
             return Err(Error::InvalidIdentifier);
         }
         if self.target.is_empty()
             || self.target.len() > 64
-            || !self.target.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric() || b"-_".contains(&byte)
-            })
+            || !self
+                .target
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
         {
             return Err(Error::InvalidTarget);
         }
         if self.capabilities.len() > 32
-            || self.capabilities.iter().any(|capability| {
-                capability.is_empty() || capability.len() > 64
-            })
+            || self
+                .capabilities
+                .iter()
+                .any(|capability| capability.is_empty() || capability.len() > 64)
         {
             return Err(Error::InvalidFileList);
         }
         if let Some(application) = &self.application {
-            if application.display_name.trim().is_empty()
-                || application.display_name.len() > 128
-            {
+            if application.display_name.trim().is_empty() || application.display_name.len() > 128 {
                 return Err(Error::InvalidApplication);
             }
             let entrypoint = if application.entrypoint.starts_with('/') {
                 application
                     .entrypoint
                     .strip_prefix("/system/executables/")
-                    .or_else(|| application.entrypoint.strip_prefix("/applications/executables/"))
+                    .or_else(|| {
+                        application
+                            .entrypoint
+                            .strip_prefix("/applications/executables/")
+                    })
                     .ok_or(Error::InvalidApplication)?
             } else {
                 &application.entrypoint
