@@ -343,13 +343,7 @@ fn run() -> Result<()> {
                 display_name,
                 icon,
                 hidden,
-            } => set_application(
-                Path::new(manifest),
-                entrypoint,
-                display_name,
-                icon,
-                hidden,
-            ),
+            } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
         },
         Command::Pack {
             directory,
