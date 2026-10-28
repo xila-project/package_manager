@@ -9,12 +9,7 @@ use crate::lifecycle::{
     self, ACTIVE_ROOT, ActivationRecord, BUNDLES_ROOT, LaunchTarget, MAX_ACTIVATION_BYTES, Plan,
     Policy, StorageGuarantees,
 };
-use alloc::{
-    format,
-    string::ToString,
-    vec,
-    vec::Vec,
-};
+use alloc::{format, string::ToString, vec, vec::Vec};
 use tar_no_std::TarArchiveRef;
 use xila_package_manifest::{
     MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
