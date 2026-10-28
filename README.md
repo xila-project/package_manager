@@ -2,7 +2,7 @@
 
 [![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager)
 
-Shared Rust workspace for building, inspecting and eventually installing Xila application packages. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
+Shared Rust workspace for building, signing and validating Xila application bundles; installation and VFS integration are deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
 
 ## Workspace
 
@@ -12,12 +12,12 @@ Shared Rust workspace for building, inspecting and eventually installing Xila ap
 | `xila-package-manifest` | Shared versioned schema and validation via Miniserde JSON (`no_std + alloc`) |
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
-| `xila-package-builder` | Host-only `xila-package` executable to generate, update and package applications |
+| `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them |
 | `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
-The **experimental v1 JSON Schema** is maintained in
+The **experimental v1 runtime JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
-For editor validation, use the following optional field in a manifest:
+For editor validation of a **generated bundle** manifest, use the following optional field:
 
 ```json
 {
@@ -27,7 +27,7 @@ For editor validation, use the following optional field in a manifest:
 ```
 
 This snippet shows the schema hint only, not a complete manifest.
-`manifest generate` emits `$schema` automatically. The schema helps developers
+`manifest generate` emits `$schema` for the legacy workflow. New `bundle init` source folders instead reference `schemas/developer-manifest.schema.json`. The schema helps developers
 and CI catch structural mistakes; it does not authenticate package content or
 grant runtime capabilities.
 
@@ -35,19 +35,34 @@ grant runtime capabilities.
 
 ## Native bundle build workflow
 
+There are **two distinct manifests**:
+
+- The developer edits `weather/xila-package.json`, which contains identity,
+  runtime requirements and application metadata only.
+- The builder generates `Weather.app/.xila/manifest.json`, which contains
+  the full inventory of **all** executables and resources (paths, sizes,
+  SHA-256), and optionally `.xila/manifest.sig` authenticating that manifest.
+
 ```sh
-cargo run -p xila-package-builder -- manifest generate ./app ./manifest.json xila.calculator 1.0.0 wasm32-wasip1 1
-cargo run -p xila-package-builder -- manifest application ./manifest.json bin/calculator.wasm Calculator --icon share/icons/calculator.png
-cargo run -p xila-package-builder -- manifest update ./app ./manifest.json
-cargo run -p xila-package-builder -- bundle build ./app ./manifest.json ./Calculator.app
-cargo run -p xila-package-builder -- bundle archive ./Calculator.app ./calculator.xpk
+cargo run -p xila-package-builder -- bundle init ./weather community.weather 1.0.0 wasm32-wasip1 1 --entrypoint bin/weather.wasm --display-name Weather --icon resources/icon.png
+# Place the compiled executable in weather/bin/ and your assets in weather/resources/.
+cargo run -p xila-package-builder -- bundle build ./weather ./Weather.app
+cargo run -p xila-package-builder -- bundle verify ./Weather.app
+cargo run -p xila-package-builder -- bundle archive ./Weather.app ./Weather.xpk
 ```
 
-**The bundle is the self-contained directory** (`.xila/manifest.json`, the application executable, and declared resources); the optional `.xpk` is only a distribution archive of the same tree. Build outputs are staged and checked before publishing. The older `pack` subcommand is retained for direct archive creation. A package with `application: null` is a standalone executable/data package rather than a launcher-discoverable app.
+For signed releases, pass `--signing-key /secure/private.seed` to `bundle
+build` (raw 32-byte Ed25519 private seed) or export a signing payload and
+attach an externally produced detached signature with `bundle signing-payload`
+and `bundle attach-signature`. Every resource is covered through the signed
+manifest hashes, not only the Wasm. See
+[complete builder workflow](crates/builder/README.md) and the
+[developer manifest JSON Schema](schemas/developer-manifest.schema.json).
 
-This repository currently builds and verifies bundles **only**. An application in `xila-project/applications` will eventually handle VFS-based copying/unpacking. The Shell will discover on-disk bundles and provide launcher integration. No installation, VFS adapter, activation pointer, or process execution is implemented here.
-
-An optional externally generated detached signature is supported, but publisher trust and key management are **not** implemented by this command. For examples and directory layout, see [builder usage](crates/builder/README.md).
+The unpacked `.app` directory is the **bundle**; `.xpk` is merely its
+deterministic distribution archive. The existing `pack` command is retained
+for compatibility. This repository does not implement filesystem installation,
+VFS integration, Shell discovery, activation records or process spawning.
 
 ## Development
 
