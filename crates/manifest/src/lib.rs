@@ -153,8 +153,7 @@ fn valid_identifier(value: &str) -> bool {
 
 /// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
-    if manifest.format_version != FORMAT_VERSION
-        && manifest.format_version != LEGACY_FORMAT_VERSION
+    if manifest.format_version != FORMAT_VERSION && manifest.format_version != LEGACY_FORMAT_VERSION
     {
         return Err(Error::UnsupportedVersion);
     }
@@ -249,17 +248,14 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let header: FormatHeader =
-        miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
+    let header: FormatHeader = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
     let value = match header.format_version {
         LEGACY_FORMAT_VERSION => {
             let legacy: LegacyManifest =
                 miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
             legacy.into()
         }
-        FORMAT_VERSION => {
-            miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?
-        }
+        FORMAT_VERSION => miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?,
         _ => return Err(Error::UnsupportedVersion),
     };
     validate(&value)?;
@@ -361,8 +357,7 @@ mod tests {
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
         m.application.as_mut().unwrap().entrypoint = "bin/absent.wasm".to_string();
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
-        m.application.as_mut().unwrap().entrypoint =
-            "/system/executables/clock".to_string();
+        m.application.as_mut().unwrap().entrypoint = "/system/executables/clock".to_string();
         assert_eq!(validate(&m), Ok(()));
         m.application.as_mut().unwrap().icon = "resources/missing.png".to_string();
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
