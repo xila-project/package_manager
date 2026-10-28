@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+mod bundle;
 use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
@@ -44,7 +45,12 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
     Ok((total, hex))
 }
 
-fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) -> Result<()> {
+fn collect_files(
+    root: &Path,
+    current: &Path,
+    output: &mut Vec<ManifestFile>,
+    skip_bundle_metadata: bool,
+) -> Result<()> {
     let mut paths = fs::read_dir(current)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<io::Result<Vec<_>>>()?;
@@ -54,8 +60,14 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
         if metadata.file_type().is_symlink() {
             return Err(invalid("symbolic links are not allowed").into());
         }
+        if current == root && path.file_name().is_some_and(|name| name == ".xila") {
+            if skip_bundle_metadata && metadata.is_dir() {
+                continue;
+            }
+            return Err(invalid(".xila is reserved for bundle metadata").into());
+        }
         if metadata.is_dir() {
-            collect_files(root, &path, output)?;
+            collect_files(root, &path, output, skip_bundle_metadata)?;
             continue;
         }
         if !metadata.is_file() {
@@ -105,7 +117,7 @@ fn generate(
         return Err(invalid("output manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files)?;
+    collect_files(&root, &root, &mut files, false)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
         schema: Some(xila_package_manifest::SCHEMA_URL.into()),
@@ -130,7 +142,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
         return Err(invalid("manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files)?;
+    collect_files(&root, &root, &mut files, false)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     manifest.files = files;
     write_manifest(manifest_path, &manifest)
@@ -246,6 +258,8 @@ struct Cli<'a> {
 enum Command<'a> {
     /// Generate or update a package manifest.
     Manifest(ManifestCommand<'a>),
+    /// Build an unpacked, self-contained application bundle or archive it.
+    Bundle(BundleCommand<'a>),
     /// Create an archive from the validated manifest and source files.
     Pack {
         /// Directory containing the application payload files.
@@ -256,6 +270,34 @@ enum Command<'a> {
         output: &'a str,
         /// Optional 64-byte Ed25519 signature prepared outside this tool.
         signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct BundleCommand<'a> {
+    #[command(subcommand)]
+    command: BundleOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum BundleOperation<'a> {
+    /// Construct a directory bundle containing manifest, executables and resources.
+    Build {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Canonical manifest JSON produced by 'manifest generate/update'.
+        manifest: &'a str,
+        /// Output self-contained bundle directory (for example Weather.app).
+        output: &'a str,
+        /// Optional externally generated detached 64-byte Ed25519 signature.
+        signature: Option<&'a str>,
+    },
+    /// Create a deterministic .xpk archive from an already-built directory bundle.
+    Archive {
+        /// Path to the self-contained bundle directory.
+        directory: &'a str,
+        /// Destination .xpk archive.
+        output: &'a str,
     },
 }
 
@@ -344,6 +386,22 @@ fn run() -> Result<()> {
                 icon,
                 hidden,
             } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
+        },
+        Command::Bundle(BundleCommand { command }) => match command {
+            BundleOperation::Build {
+                directory,
+                manifest,
+                output,
+                signature,
+            } => bundle::build(
+                Path::new(directory),
+                Path::new(manifest),
+                Path::new(output),
+                signature.map(Path::new),
+            ),
+            BundleOperation::Archive { directory, output } => {
+                bundle::archive(Path::new(directory), Path::new(output))
+            }
         },
         Command::Pack {
             directory,
