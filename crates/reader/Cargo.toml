@@ -11,4 +11,9 @@ repository.workspace = true
 xila-package-manifest = { path = "../manifest" }
 xila-package-bundle = { path = "../bundle" }
 xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
-tar-no-std = { version = "0.5.0", default-features = false }
+# Temporary pinned commit from upstream PR #73; switch to crates.io after merge.
+tar-no-std = { git = "https://github.com/AlixANNERAUD/tar-no-std", rev = "ecdd39990ae4143d36b7f2adcf3eff2f971fea11", default-features = false }
+
+[dev-dependencies]
+xila-package-writer = { path = "../writer" }
+ed25519-dalek = { version = "3.0", default-features = false }
