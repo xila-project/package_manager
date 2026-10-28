@@ -1,9 +1,17 @@
-# Offline package lifecycle contract (work in progress)
+# Offline signed package installation and activation
 
-This document describes the `xila-package-manager::lifecycle` module. It is a
-**portable foundation**, not a finished installer. The existing runtime reader
-still accepts an entire TAR archive in memory; a bounded streaming reader and
-real Xila VFS adapter remain separate work in
+This document describes the working `xila-package-manager::{installer,lifecycle}`
+implementation. `installer::install` authenticates a signed local TAR, writes
+a non-executable staging bundle, reads and verifies its persisted bytes, and
+publishes an activation record using a caller-supplied `Store` backend.
+`resolve_active`, `activate_existing`, `uninstall_active` and
+`discard_staging` implement reading, rollback, removal and interrupted
+transaction cleanup. All of these functions perform real storage operations.
+
+**No Xila VFS adapter is implemented yet**, as that integration is intentionally
+held until the upstream `tar-no-std` streaming API is available. The existing
+reader currently requires an entire borrowed TAR archive in memory; a fully
+streaming source and device-side filesystem adapter remain work in
 [core#402](https://github.com/xila-project/core/issues/402) and
 [core#491](https://github.com/xila-project/core/issues/491).
 
@@ -66,11 +74,11 @@ a capability at installation cannot bypass execution-time authorization.
 
 `preflight(manifest, policy, transaction_nonce, storage_guarantees)`
 returns deterministic staging/version/activation paths without mutating the
-filesystem or reserving space. The trusted installer must reject destination
-collisions using the VFS at commit time. A unique nonce only prevents routine
+filesystem or reserving space. The installer rejects destination collisions
+through its `Store::rename_new` operation at commit time. A unique nonce only prevents routine
 staging name reuse; the backend must still use create-exclusive semantics.
 
-## Required commit sequence (still to be wired to Core)
+## Implemented commit sequence
 
 1. Select a trusted publisher key/policy outside the archive, validate
    target/ABI/capabilities, and preflight ownership, free space and paths.
@@ -90,7 +98,16 @@ staging name reuse; the backend must still use create-exclusive semantics.
 7. On restart, validate the active record and its target bundle. Quarantine
    incomplete staging; never automatically launch a merely present version.
 
-This ordering is a **design contract**, not proof of power-loss safety.
+This sequence is implemented by `installer::install` with `Store` operations.
+It still depends on actual backend guarantees: a mock/host test does **not**
+prove physical-flash power-loss safety. Caller-supplied trusted keys are
+verified with Ed25519; the manifest digest is checked again from persisted
+storage and each staged payload is read back and SHA-256 verified.
+
+The current source is a borrowed whole-archive buffer, not incremental input.
+Payload writes and read-back use 4 KiB chunks; metadata decoding retains the
+existing 64 KiB upper limit. This does not meet the final whole-package
+memory bound of an embedded streaming installer.
 
 ## Portable atomicity verification
 
@@ -106,21 +123,27 @@ platform-specific adapter must affirm, for the *actual mounted filesystems*:
 The mere presence of a VFS `rename` function does **not** prove the above.
 A LittleFS rename guarantee is not automatically applicable to HostFS,
 network mounts, FAT, arbitrary block devices or different mounted roots.
-A native failure-injection harness should crash/reboot between every write,
-sync and rename and verify that only the old or new **verified** activation
-is ever reachable. Device-side brownout and write-cache tests are separately
-required.
+The in-memory `Store` integration test injects errors at **every operation**
+of an upgrade, including partial append writes; after simulated restart it
+reverifies that the active version is either the old or the newly verified
+one. It also tests install, rollback, uninstall, signature rejection,
+persisted-payload tampering and preservation of user data. Device-side
+brownout and write-cache tests are separately required.
 
 ## Recovery and future integration
 
 `classify_recovery` currently returns conservative discovery states:
 `Active`, `InactiveVersion`, `UntrustedStaging` and `Unavailable`.
-It intentionally performs no filesystem I/O or deletion. Recovery needs
-to be backed by actual per-version verification and authoritative active
-record reads before production use.
+It intentionally performs no filesystem I/O or deletion. The real
+`resolve_active` implementation reads the authoritative active-record file,
+verifies the signed manifest and all installed file hashes before returning a
+launch candidate. `discard_staging` removes a named incomplete transaction;
+published-but-inactive versions remain available for rollback.
 
 The remaining integration tasks are **not** implemented by this PR:
-streaming archive extraction, filesystem-backed installed ownership database,
-live transaction/upgrade/uninstall flow, key/trust store, true per-user
-capability enforcement, VFS and executable adapters, and actual atomicity
-testing on native + ESP32-S3.
+bounded streaming TAR input (pending upstream), a real device filesystem
+adapter, a global enumerated installed-package ownership database, a
+persistent trusted-key store, true per-user authorization and process
+execution, and physical-platform atomicity tests on native + ESP32-S3.
+The current package-local version directory itself is the ownership
+boundary, so upgrades and removals never touch application user data.
