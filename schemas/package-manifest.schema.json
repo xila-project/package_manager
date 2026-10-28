@@ -112,7 +112,7 @@
     },
     "systemExecutable": {
       "type": "string",
-      "pattern": "^/(?:system|applications)/executables/(?!.*(?:^|/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
+      "pattern": "^/(?:system|applications)/executables/(?!\\.\\.?(?:/|$))(?!.*(?:/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
       "description": "Reference to an existing preinstalled executable. This does not imply permissions or package ownership."
     },
     "file": {
