@@ -18,7 +18,7 @@ The source directory contains application files and the manifest JSON
 is stored outside that directory. `manifest update` recalculates file sizes
 and digests while preserving the manifest identity and capabilities;
 `manifest application` adds an entrypoint and display metadata to the same
-manifest (upgrading v1 to v2). Configure this **before** signing;
+experimental v1 manifest. Configure this **before** signing;
 `pack` verifies the archive through the separate TAR reader.
 
 An optional final argument to `pack` provides an externally generated,
