@@ -19,19 +19,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - name: Generate coverage report
+      - name: "Setup | Activate mise"
+        uses: jdx/mise-action@v5.2.2
+      - name: "Test | Generate LLVM coverage"
         run: mise run coverage:lcov
-      - name: Save coverage report as artifact
+      - name: "Report | Upload LCOV artifact"
         uses: actions/upload-artifact@v7
         with:
           name: rust-coverage-lcov
           path: lcov.info
           if-no-files-found: error
-      - name: Upload report to Codecov
+      - name: "Report | Publish Codecov report"
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
