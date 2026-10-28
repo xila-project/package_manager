@@ -2,7 +2,7 @@
 
 [![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager)
 
-Shared Rust workspace for building, inspecting and installing Xila application packages through a portable, offline-first storage interface. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
+Shared Rust workspace for building, inspecting and eventually installing Xila application packages. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
 
 ## Workspace
 
@@ -13,7 +13,7 @@ Shared Rust workspace for building, inspecting and installing Xila application p
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
 | `xila-package-builder` | Host-only `xila-package` executable to generate, update and package applications |
-| `xila-package-manager` | Portable `no_std` signed TAR installation, staging/read-back, atomic activation, upgrade/rollback, removal and recovery over a pluggable `Store`; VFS adapter pending |
+| `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
 The **experimental v1 JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
@@ -32,29 +32,6 @@ and CI catch structural mistakes; it does not authenticate package content or
 grant runtime capabilities.
 
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
-
-## Signed offline installation (portable engine)
-
-The [installer implementation](crates/manager/src/installer.rs) provides
-`install`, `resolve_active`, `activate_existing`, `uninstall_active` and
-`discard_staging`. It authenticates each package with a caller-trusted
-Ed25519 public key, checks target/ABI/capability policy, extracts into
-non-executable staging through a pluggable `Store`, checks persisted SHA-256
-content and signature again, and publishes a protected activation record.
-Versioned bundle ownership preserves user data across upgrades.
-
-The engine includes [exhaustive simulated I/O fault tests](crates/manager/tests/installer.rs),
-including half-written files and interruption before or after activation.
-Storage adapters must truthfully guarantee atomic rename, replacement, sync
-and namespace containment; otherwise installation fails closed.
-
-**The Xila VFS adapter is intentionally not implemented yet**, pending the
-upstream streaming work in `tar-no-std`. For now, installation accepts a
-borrowed entire TAR archive in memory, while writes and storage reads use
-4 KiB chunks. The package manager has no network dependency or background
-daemon. Device-side power-loss validation and execution-time user
-authorization are still required. See [architecture and implementation
-details](docs/activation-lifecycle.md).
 
 ## Native packaging workflow
 
