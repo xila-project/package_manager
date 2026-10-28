@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{string::String, vec, vec::Vec};
 use xila_package_manifest::{
-    self as manifest, DeveloperManifest, Manifest, ManifestFile, MAX_FILES, SIGNED_DOMAIN,
+    self as manifest, DeveloperManifest, MAX_FILES, Manifest, ManifestFile, SIGNED_DOMAIN,
 };
 use xila_package_verification::{ContentVerifier, PublicKey, Sha256Verifier};
 
@@ -223,7 +223,10 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_paths_and_malformed_digests() {
-        assert!(matches!(FileHasher::new("../escape"), Err(Error::InvalidPath)));
+        assert!(matches!(
+            FileHasher::new("../escape"),
+            Err(Error::InvalidPath)
+        ));
         assert_eq!(decode_sha256(&"A".repeat(64)), Err(Error::InvalidDigest));
         assert_eq!(decode_sha256("00"), Err(Error::InvalidDigest));
         let mut inventory = Inventory::new();
