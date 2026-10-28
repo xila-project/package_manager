@@ -95,6 +95,8 @@ class ManifestSchemaTests(unittest.TestCase):
         for changes in [
             {"entrypoint": "../escape"},
             {"entrypoint": "/etc/passwd"},
+            {"entrypoint": "/system/executables/../escape"},
+            {"entrypoint": "/applications/executables/./tool"},
             {"icon": "../escape.png"},
             {"display_name": "   "},
             {"show_in_launcher": "yes"},
