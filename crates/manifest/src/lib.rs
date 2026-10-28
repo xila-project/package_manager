@@ -384,6 +384,35 @@ mod tests {
         let mut m = example();
         m.application = None;
         assert_eq!(decode(encode(&m).unwrap().as_bytes()), Ok(m));
+        m.files.clear();
+        assert_eq!(validate(&m), Err(Error::InvalidFileList));
+    }
+
+    #[test]
+    fn native_system_application_may_reference_an_existing_executable() {
+        let mut m = example();
+        m.files.clear();
+        m.application.as_mut().unwrap().entrypoint = "/system/executables/settings".to_string();
+        assert_eq!(validate(&m), Ok(()));
+        assert_eq!(decode(encode(&m).unwrap().as_bytes()), Ok(m));
+    }
+
+    #[test]
+    fn signature_domain_changes_across_manifest_versions() {
+        let current = encode(&example()).unwrap();
+        let mut legacy = example();
+        legacy.format_version = LEGACY_FORMAT_VERSION;
+        legacy.application = None;
+        let older = encode(&legacy).unwrap();
+        let mut current_bytes = vec![0; SIGNED_DOMAIN_V2.len() + 4 + current.len()];
+        let mut older_bytes = vec![0; SIGNED_DOMAIN.len() + 4 + older.len()];
+        assert!(signed_message_into(current.as_bytes(), &mut current_bytes)
+            .unwrap()
+            .starts_with(SIGNED_DOMAIN_V2));
+        assert!(signed_message_into(older.as_bytes(), &mut older_bytes)
+            .unwrap()
+            .starts_with(SIGNED_DOMAIN));
+        assert_ne!(SIGNED_DOMAIN, SIGNED_DOMAIN_V2);
     }
 
     #[test]
