@@ -3,6 +3,12 @@
 #![doc = include_str!("../README.md")]
 
 extern crate alloc;
+
+pub mod developer;
+pub use developer::{
+    DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
+    encode_developer,
+};
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
