@@ -215,8 +215,10 @@ pub fn install<S: Store>(
     // immutable for the entire extraction below.
     let tar = TarArchiveRef::new(archive).map_err(|_| Error::Archive(xila_package_reader::Error::InvalidArchive))?;
     let mut entries = tar.entries();
-    let raw_manifest = entries.next().ok_or(Error::InvalidStoredManifest)?.data();
-    let signature = entries.next().ok_or(Error::InvalidStoredSignature)?.data();
+    let manifest_entry = entries.next().ok_or(Error::InvalidStoredManifest)?;
+    let signature_entry = entries.next().ok_or(Error::InvalidStoredSignature)?;
+    let raw_manifest = manifest_entry.data();
+    let signature = signature_entry.data();
     copy_verified(store, &format!("{}/{MANIFEST_PATH}", plan.staging_directory), raw_manifest)?;
     copy_verified(store, &format!("{}/{SIGNATURE_PATH}", plan.staging_directory), signature)?;
     for file in &manifest.files {
@@ -310,9 +312,8 @@ pub fn uninstall_active<S: Store>(
     let dir = format!("{BUNDLES_ROOT}/{package}/{}", record.version);
     let (manifest, raw) = verify_directory(store, &dir, key, policy)?;
     if manifest.name != package || manifest.version != record.version { return Err(Error::IdentityMismatch); }
-    record.resolve_application(&raw, policy).or_else(|e|
-        if e == lifecycle::Error::NoApplication { Ok(LaunchTarget { package: String::new(), entrypoint: String::new(), show_in_launcher: false }) } else { Err(e) }
-    )?;
+    let expected_record = ActivationRecord::for_manifest_bytes(&raw)?;
+    if record != expected_record { return Err(Error::IdentityMismatch); }
     store.remove_file(&format!("{ACTIVE_ROOT}/{package}"))?;
     store.sync_directory(ACTIVE_ROOT)?;
     store.remove_tree(&dir)?;
