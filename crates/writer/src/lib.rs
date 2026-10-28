@@ -3,7 +3,7 @@
 use std::io::{self, Write};
 use tar::{Builder, EntryType, Header};
 use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
-use xila_package_verification::ContentVerifier;
+use xila_package_bundle::verify_bytes;
 
 /// Path and bytes for a single file matching a manifest entry.
 pub struct SourceFile<'a> {
@@ -13,25 +13,6 @@ pub struct SourceFile<'a> {
 
 fn bad_input(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
-}
-
-fn nibble(byte: u8) -> io::Result<u8> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        _ => Err(bad_input("invalid digest")),
-    }
-}
-
-fn decode_digest(hex: &str) -> io::Result<[u8; 32]> {
-    if hex.len() != 64 {
-        return Err(bad_input("invalid digest length"));
-    }
-    let mut digest = [0u8; 32];
-    for (index, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        digest[index] = nibble(pair[0])? << 4 | nibble(pair[1])?;
-    }
-    Ok(digest)
 }
 
 fn append<W: Write>(archive: &mut Builder<W>, path: &str, bytes: &[u8]) -> io::Result<()> {
@@ -76,15 +57,8 @@ pub fn write_package<W: Write>(
         if !source.path.is_ascii() || source.path.len() > 99 {
             return Err(bad_input("file path does not fit USTAR"));
         }
-        let digest = decode_digest(&declared.sha256)?;
-        let mut verifier = ContentVerifier::new(declared.size, digest)
-            .map_err(|_| bad_input("invalid expected content"))?;
-        verifier
-            .update(source.bytes)
-            .map_err(|_| bad_input("incorrect file size"))?;
-        verifier
-            .verify()
-            .map_err(|_| bad_input("incorrect file digest"))?;
+        verify_bytes(declared, source.bytes)
+            .map_err(|_| bad_input("incorrect file size or digest"))?;
     }
     let mut archive = Builder::new(output);
     append(&mut archive, MANIFEST_PATH, json.as_bytes())?;
