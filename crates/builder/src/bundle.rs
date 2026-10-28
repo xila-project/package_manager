@@ -1,363 +1,521 @@
-//! Host-side construction of self-contained, relocatable Xila bundles.
+//! Build and sign self-contained Xila bundles (host tool only).
 //!
-//! A bundle is a directory, not an installation or an active-version record:
-//!
-//! <bundle>/
-//!   .xila/manifest.json
-//!   .xila/manifest.sig (optional)
-//!   <manifest.files[].path>
-//!
-//! The TAR representation uses exactly these relative paths and may later be
-//! unpacked or copied by an application. This module never accesses Xila VFS.
+//! The developer edits xila-package.json; build generates .xila/manifest.json
+//! containing hashes for all files. The optional detached Ed25519 signature
+//! authenticates the exact runtime manifest and hence every declared payload.
 
 use std::{
     fs,
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
-use crate::{Result, collect_files, hash_file, invalid, pack, safe_file};
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
+use ed25519_dalek::{Signer, SigningKey};
+use xila_package_manifest::{
+    Application, DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest,
+    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN, decode_developer,
+    encode_developer,
+};
+use xila_package_verification::PublicKey;
 
-fn read_canonical_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
-    if !fs::symlink_metadata(path)?.is_file() {
-        return Err(invalid("manifest must be a regular file").into());
-    }
-    let raw = fs::read(path)?;
-    let manifest =
-        xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid bundle manifest"))?;
-    let canonical =
-        xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid bundle manifest"))?;
-    if canonical.as_bytes() != raw {
-        return Err(invalid(
-            "manifest must use canonical JSON; regenerate it before building/signing",
-        )
-        .into());
-    }
-    Ok((manifest, raw))
-}
+use crate::{InventoryMode, Result, collect_files, hash_file, invalid, pack, safe_file};
 
-fn checked_signature(path: &Path) -> Result<[u8; 64]> {
-    if !fs::symlink_metadata(path)?.is_file() {
-        return Err(invalid("signature must be a regular file").into());
-    }
-    let raw = fs::read(path)?;
-    Ok(raw
-        .try_into()
-        .map_err(|_| invalid("signature must be exactly 64 bytes"))?)
-}
-
-fn validate_payload_inventory(
-    root: &Path,
-    manifest: &Manifest,
-    ignore_bundle_metadata: bool,
-) -> Result<()> {
-    let mut actual = Vec::new();
-    collect_files(root, root, &mut actual, ignore_bundle_metadata)?;
-    let mut expected = manifest.files.clone();
-    actual.sort_by(|a, b| a.path.cmp(&b.path));
-    expected.sort_by(|a, b| a.path.cmp(&b.path));
-    if actual != expected {
-        return Err(invalid(
-            "payload inventory, file sizes or SHA-256 differ from the manifest; run manifest update",
-        )
-        .into());
+fn check_regular_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(invalid("expected a regular file (no symlinks)").into());
     }
     Ok(())
 }
 
-fn destination_parent(destination: &Path) -> Result<PathBuf> {
+fn check_directory(path: &Path) -> Result<PathBuf> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid("expected a real directory (no symlinks)").into());
+    }
+    Ok(path.canonicalize()?)
+}
+
+fn output_parent(destination: &Path) -> Result<PathBuf> {
     if destination.file_name().is_none() {
-        return Err(invalid("output must name a bundle directory or archive").into());
+        return Err(invalid("output path must end in a name").into());
     }
     let parent = destination
         .parent()
-        .filter(|p| !p.as_os_str().is_empty())
+        .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    Ok(parent.canonicalize()?)
+    check_directory(parent)
 }
 
-fn reject_nested_output(destination: &Path, input_root: &Path) -> Result<()> {
-    if destination_parent(destination)?.starts_with(input_root) {
-        return Err(invalid("output must not reside inside the input directory").into());
+fn check_output_outside_source(destination: &Path, source: &Path) -> Result<()> {
+    if output_parent(destination)?.starts_with(source) {
+        return Err(invalid("output cannot be inside the input directory").into());
     }
     Ok(())
 }
 
-fn stage_path(destination: &Path) -> Result<PathBuf> {
-    let filename = destination
+fn check_output_absent(destination: &Path) -> Result<()> {
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err(invalid("destination already exists; refusing to overwrite").into());
+    }
+    Ok(())
+}
+
+fn temporary_directory(destination: &Path) -> Result<PathBuf> {
+    let name = destination
         .file_name()
-        .ok_or_else(|| invalid("missing destination filename"))?
+        .ok_or_else(|| invalid("output path must have a filename"))?
         .to_string_lossy();
     Ok(destination.with_file_name(format!(
-        ".{filename}.xila-build-{}",
+        ".{name}.xila-build-{}",
         std::process::id()
     )))
 }
 
-/// Create a **directory bundle**, not a TAR archive or an installed program.
-///
-/// All source payloads must be declared by the existing manifest, including
-/// the application executable and icons. A standalone executable package
-/// (application = null) works too. The caller supplies any detached signature
-/// made over the exact canonical manifest bytes; this function does not sign.
-pub fn build(
-    source: &Path,
-    manifest_path: &Path,
-    destination: &Path,
-    signature_path: Option<&Path>,
+fn read_runtime_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
+    check_regular_file(path)?;
+    let raw = fs::read(path)?;
+    let manifest =
+        xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid runtime manifest"))?;
+    let canonical =
+        xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid runtime manifest"))?;
+    if canonical.as_bytes() != raw {
+        return Err(invalid("noncanonical runtime manifest").into());
+    }
+    Ok((manifest, raw))
+}
+
+fn signing_message(raw_manifest: &[u8]) -> Result<Vec<u8>> {
+    let mut bytes = vec![0u8; SIGNED_DOMAIN.len() + 4 + raw_manifest.len()];
+    let len = xila_package_manifest::signed_message_into(raw_manifest, &mut bytes)
+        .map_err(|_| invalid("runtime manifest is too large"))?
+        .len();
+    bytes.truncate(len);
+    Ok(bytes)
+}
+
+/// Prepare a developer-owned source directory. Generated hashes and signature
+/// are deliberately absent from this human-authored configuration.
+pub fn init(
+    directory: &Path,
+    name: &str,
+    version: &str,
+    target: &str,
+    minimum_xila_abi: u32,
+    entrypoint: Option<&str>,
+    display_name: Option<&str>,
+    icon: Option<&str>,
+    standalone: bool,
 ) -> Result<()> {
-    let root = source.canonicalize()?;
-    if !root.is_dir() {
-        return Err(invalid("source must be a directory").into());
+    check_output_absent(directory)?;
+    if standalone && (entrypoint.is_some() || display_name.is_some() || icon.is_some()) {
+        return Err(invalid("standalone packages do not have application metadata").into());
     }
-    reject_nested_output(destination, &root)?;
-    if fs::symlink_metadata(destination).is_ok() {
-        return Err(invalid("bundle output already exists").into());
-    }
-    let (manifest, raw_manifest) = read_canonical_manifest(manifest_path)?;
-    if manifest_path.canonicalize()?.starts_with(&root) {
-        return Err(invalid("manifest must be outside the payload directory").into());
-    }
-    // Capture signature before touching output and reject malformed metadata.
-    let signature = signature_path.map(checked_signature).transpose()?;
-    validate_payload_inventory(&root, &manifest, false)?;
-
-    let stage = stage_path(destination)?;
-    // Exclusive creation: never clean up or overwrite another build's stage.
-    fs::create_dir(&stage)?;
+    let config = DeveloperManifest {
+        schema: Some(DEVELOPER_SCHEMA_URL.into()),
+        format_version: FORMAT_VERSION,
+        name: name.into(),
+        version: version.into(),
+        target: target.into(),
+        minimum_xila_abi,
+        capabilities: vec![],
+        application: if standalone {
+            None
+        } else {
+            Some(Application {
+                entrypoint: entrypoint.unwrap_or("bin/main.wasm").into(),
+                display_name: display_name.unwrap_or(name).into(),
+                icon: icon.unwrap_or_default().into(),
+                show_in_launcher: true,
+            })
+        },
+    };
+    let text = encode_developer(&config).map_err(|_| invalid("invalid authoring metadata"))?;
+    fs::create_dir(directory)?;
     let result = (|| -> Result<()> {
-        fs::create_dir(stage.join(".xila"))?;
-        fs::write(stage.join(MANIFEST_PATH), &raw_manifest)?;
-        if let Some(signature) = signature {
-            fs::write(stage.join(SIGNATURE_PATH), signature)?;
-        }
-
-        for file in &manifest.files {
-            let input = safe_file(&root, &file.path)?;
-            let output = stage.join(&file.path);
-            if let Some(parent) = output.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            // Files are copied, not linked: a bundle is fully self-contained
-            // and independent of source changes and build paths.
-            fs::copy(input, &output)?;
-            let (size, sha256) = hash_file(&output)?;
-            if size != file.size || sha256 != file.sha256 {
-                return Err(invalid("payload changed while creating the bundle").into());
-            }
-        }
-        // Publish the finished directory only after validating it.
-        validate_payload_inventory(&stage, &manifest, true)?;
-        if fs::symlink_metadata(destination).is_ok() {
-            return Err(invalid("bundle output already exists").into());
-        }
-        fs::rename(&stage, destination)?;
+        fs::create_dir(directory.join("bin"))?;
+        fs::create_dir(directory.join("resources"))?;
+        fs::write(directory.join(DEVELOPER_MANIFEST_FILENAME), text)?;
         Ok(())
     })();
-
     if result.is_err() {
-        let _ = fs::remove_dir_all(&stage);
+        let _ = fs::remove_dir_all(directory);
     }
     result
 }
 
-fn check_bundle_metadata(directory: &Path) -> Result<(PathBuf, Option<PathBuf>, Manifest)> {
-    let metadata = directory.join(".xila");
-    if !fs::symlink_metadata(&metadata)?.is_dir() {
-        return Err(invalid("bundle .xila must be a directory").into());
-    }
-    let manifest_path = directory.join(MANIFEST_PATH);
-    let (manifest, _) = read_canonical_manifest(&manifest_path)?;
-    let signature_path = directory.join(SIGNATURE_PATH);
-    let mut signature_present = false;
-    for entry in fs::read_dir(&metadata)? {
+fn checked_signature(path: &Path) -> Result<[u8; 64]> {
+    check_regular_file(path)?;
+    let raw = fs::read(path)?;
+    raw.try_into()
+        .map_err(|_| invalid("signature must be exactly 64 raw Ed25519 bytes").into())
+}
+
+fn checked_public_key(path: &Path) -> Result<PublicKey> {
+    check_regular_file(path)?;
+    let raw: [u8; 32] = fs::read(path)?
+        .try_into()
+        .map_err(|_| invalid("public key must be exactly 32 raw Ed25519 bytes"))?;
+    PublicKey::from_bytes(&raw).map_err(|_| invalid("invalid Ed25519 public key").into())
+}
+
+/// Sign the complete runtime file inventory with explicitly supplied key
+/// material. The private 32-byte seed is never copied to the bundle.
+fn sign_manifest(raw_manifest: &[u8], key_path: &Path) -> Result<[u8; 64]> {
+    check_regular_file(key_path)?;
+    let seed: [u8; 32] = fs::read(key_path)?
+        .try_into()
+        .map_err(|_| invalid("signing key must be a raw 32-byte Ed25519 seed").into())?;
+    let signer = SigningKey::from_bytes(&seed);
+    let message = signing_message(raw_manifest)?;
+    let signature = signer.sign(&message).to_bytes();
+    let public = PublicKey::from_bytes(&signer.verifying_key().to_bytes())
+        .map_err(|_| invalid("invalid signing public key"))?;
+    public
+        .verify(&message, &signature)
+        .map_err(|_| invalid("signature self-check failed"))?;
+    Ok(signature)
+}
+
+/// Validate all files currently present on disk, not just the entrypoint.
+/// Any edited translation, font, asset or executable invalidates the inventory.
+fn inspect_bundle(root: &Path) -> Result<(Manifest, Vec<u8>, Option<[u8; 64]>)> {
+    check_directory(&root.join(".xila"))?;
+    let (manifest, raw) = read_runtime_manifest(&root.join(MANIFEST_PATH))?;
+    let mut signature = None;
+    for entry in fs::read_dir(root.join(".xila"))? {
         let entry = entry?;
-        let name = entry.file_name();
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(invalid("bundle metadata must contain regular files only").into());
-        }
-        if name == "manifest.sig" {
-            signature_present = true;
-        } else if name != "manifest.json" {
-            return Err(invalid("unknown bundle metadata file").into());
+        check_regular_file(&entry.path())?;
+        if entry.file_name() == "manifest.sig" {
+            signature = Some(checked_signature(&entry.path())?);
+        } else if entry.file_name() != "manifest.json" {
+            return Err(invalid("unexpected .xila metadata").into());
         }
     }
-    let signature = if signature_present {
-        checked_signature(&signature_path)?;
-        Some(signature_path)
+    if fs::symlink_metadata(root.join(DEVELOPER_MANIFEST_FILENAME)).is_ok() {
+        return Err(invalid("developer config must not be shipped with the bundle").into());
+    }
+    let mut actual = Vec::new();
+    collect_files(root, root, &mut actual, InventoryMode::Bundle)?;
+    actual.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut declared = manifest.files.clone();
+    declared.sort_by(|a, b| a.path.cmp(&b.path));
+    if actual != declared {
+        return Err(invalid("bundle file inventory/hashes differ from runtime manifest").into());
+    }
+    Ok((manifest, raw, signature))
+}
+
+/// Construct an unpacked bundle from a folder containing xila-package.json.
+///
+/// The runtime manifest contains hash+length+path for *every* payload file.
+/// --signing-key is optional only for unsigned local development, and must
+/// point to an external raw 32-byte Ed25519 seed.
+pub fn build(source: &Path, output: &Path, signing_key: Option<&Path>) -> Result<()> {
+    let source = check_directory(source)?;
+    check_output_outside_source(output, &source)?;
+    check_output_absent(output)?;
+    if fs::symlink_metadata(source.join(".xila")).is_ok() {
+        return Err(invalid(".xila is reserved for generated metadata").into());
+    }
+    let developer_path = source.join(DEVELOPER_MANIFEST_FILENAME);
+    check_regular_file(&developer_path)?;
+    let config = decode_developer(&fs::read(&developer_path)?)
+        .map_err(|_| invalid("invalid developer manifest"))?;
+
+    let mut files = Vec::new();
+    collect_files(&source, &source, &mut files, InventoryMode::Developer)?;
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    for file in &files {
+        // The native writer uses restricted USTAR and rejects longer names.
+        if !file.path.is_ascii() || file.path.len() > 99 {
+            return Err(invalid("payload filename must be ASCII and <= 99 bytes").into());
+        }
+    }
+    let manifest = config
+        .into_bundle_manifest(files)
+        .map_err(|_| invalid("missing executable/icon or invalid application metadata"))?;
+    let raw = xila_package_manifest::encode(&manifest)
+        .map_err(|_| invalid("generated runtime manifest failed validation"))?;
+
+    let signature = if let Some(key_path) = signing_key {
+        let key_path = key_path.canonicalize()?;
+        if key_path.starts_with(&source) {
+            return Err(invalid("signing key must be outside source directory").into());
+        }
+        Some(sign_manifest(raw.as_bytes(), &key_path)?)
     } else {
         None
     };
-    Ok((manifest_path, signature, manifest))
+
+    let stage = temporary_directory(output)?;
+    fs::create_dir(&stage)?; // Exclusive: never remove an existing stage.
+    let operation = (|| -> Result<()> {
+        fs::create_dir(stage.join(".xila"))?;
+        fs::write(stage.join(MANIFEST_PATH), &raw)?;
+        if let Some(signature) = signature {
+            fs::write(stage.join(SIGNATURE_PATH), signature)?;
+        }
+        for file in &manifest.files {
+            let from = safe_file(&source, &file.path)?;
+            let to = stage.join(&file.path);
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(from, &to)?;
+            let (size, sha256) = hash_file(&to)?;
+            if size != file.size || sha256 != file.sha256 {
+                return Err(invalid("payload modified during bundle construction").into());
+            }
+        }
+        let (persisted, persisted_raw, persisted_signature) = inspect_bundle(&stage)?;
+        if persisted != manifest || persisted_raw != raw.as_bytes() {
+            return Err(invalid("bundle changed during construction").into());
+        }
+        if let Some(signature) = signature {
+            if persisted_signature != Some(signature) {
+                return Err(invalid("signature was not persisted").into());
+            }
+        }
+        check_output_absent(output)?;
+        fs::rename(&stage, output)?;
+        Ok(())
+    })();
+    if operation.is_err() {
+        let _ = fs::remove_dir_all(&stage);
+    }
+    operation
 }
 
-/// Produce a distributable .xpk from an already-built bundle directory.
-///
-/// Its TAR root has the same layout as the bundle directory, so unarchiving
-/// yields a self-contained bundle. No install hook or VFS use is involved.
+/// Export the exact bytes to be signed by an external signer/HSM/KMS/CI.
+/// This supports developer-owned signing identities without exposing a key.
+pub fn export_signing_payload(bundle: &Path, output: &Path) -> Result<()> {
+    let root = check_directory(bundle)?;
+    check_output_outside_source(output, &root)?;
+    check_output_absent(output)?;
+    let (_, raw, signature) = inspect_bundle(&root)?;
+    if signature.is_some() {
+        return Err(invalid("bundle is already signed").into());
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    file.write_all(&signing_message(&raw)?)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Attach a signature made elsewhere, after verifying it against a
+/// developer-supplied raw 32-byte public key. Never accept blind signatures.
+pub fn attach_signature(bundle: &Path, signature: &Path, public_key: &Path) -> Result<()> {
+    let root = check_directory(bundle)?;
+    let (_, raw, existing) = inspect_bundle(&root)?;
+    if existing.is_some() {
+        return Err(invalid("bundle is already signed").into());
+    }
+    let signature = checked_signature(signature)?;
+    let public = checked_public_key(public_key)?;
+    public
+        .verify(&signing_message(&raw)?, &signature)
+        .map_err(|_| invalid("detached signature did not verify"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(root.join(SIGNATURE_PATH))?;
+    file.write_all(&signature)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Validate manifest, all resources and optional publisher signature.
+/// Unsigned bundles are only accepted when no public key was supplied.
+pub fn verify(bundle: &Path, public_key: Option<&Path>) -> Result<Manifest> {
+    let root = check_directory(bundle)?;
+    let (manifest, raw, signature) = inspect_bundle(&root)?;
+    if let Some(public_key) = public_key {
+        let signature = signature.ok_or_else(|| invalid("signature is missing"))?;
+        checked_public_key(public_key)?
+            .verify(&signing_message(&raw)?, &signature)
+            .map_err(|_| invalid("bundle signature invalid"))?;
+    }
+    Ok(manifest)
+}
+
+/// Write a deterministic .xpk TAR archive from the *already validated* bundle.
 pub fn archive(bundle: &Path, output: &Path) -> Result<()> {
-    if fs::symlink_metadata(bundle)?.file_type().is_symlink() {
-        return Err(invalid("bundle root cannot be a symlink").into());
-    }
-    let root = bundle.canonicalize()?;
-    if !root.is_dir() {
-        return Err(invalid("bundle must be a directory").into());
-    }
-    reject_nested_output(output, &root)?;
-    let (manifest_path, signature, manifest) = check_bundle_metadata(&root)?;
-    validate_payload_inventory(&root, &manifest, true)?;
-    pack(&root, &manifest_path, output, signature.as_deref())
+    let root = check_directory(bundle)?;
+    check_output_outside_source(output, &root)?;
+    check_output_absent(output)?;
+    inspect_bundle(&root)?;
+    pack(
+        &root,
+        &root.join(MANIFEST_PATH),
+        output,
+        fs::symlink_metadata(root.join(SIGNATURE_PATH))
+            .is_ok()
+            .then(|| root.join(SIGNATURE_PATH))
+            .as_deref(),
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{generate, set_application};
-    use std::{fs, path::Path};
     use tempfile::tempdir;
+    use xila_package_manifest::{decode, decode_developer};
 
-    fn prepare_application(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    fn setup(root: &Path) -> (PathBuf, PathBuf) {
         let source = root.join("source");
-        fs::create_dir(&source).unwrap();
-        fs::create_dir_all(source.join("bin")).unwrap();
-        fs::create_dir_all(source.join("share/icons")).unwrap();
-        fs::write(source.join("bin/weather.wasm"), b"wasm content").unwrap();
-        fs::write(source.join("share/icons/weather.png"), b"icon content").unwrap();
-        let manifest = root.join("manifest.json");
-        generate(&source, &manifest, "community.weather", "1.2.3", "wasm32-wasip1", 2)
-            .unwrap();
-        set_application(
-            &manifest,
-            "bin/weather.wasm",
-            "Weather",
-            Some("share/icons/weather.png"),
+        init(
+            &source,
+            "community.weather",
+            "1.0.0",
+            "wasm32-wasip1",
+            1,
+            Some("bin/weather.wasm"),
+            Some("Weather"),
+            Some("resources/icon.png"),
             false,
         )
         .unwrap();
-        (source, manifest, root.join("Weather.app"))
+        fs::write(source.join("bin/weather.wasm"), b"wasm executable").unwrap();
+        fs::create_dir_all(source.join("resources/translations")).unwrap();
+        fs::write(source.join("resources/icon.png"), b"icon bytes").unwrap();
+        fs::write(source.join("resources/translations/en.json"), b"{\"hello\":\"world\"}").unwrap();
+        (source, root.join("Weather.app"))
     }
 
     #[test]
-    fn build_directory_and_archive_have_same_payload_and_app_metadata() {
-        let dir = tempdir().unwrap();
-        let (source, manifest, output) = prepare_application(dir.path());
-        build(&source, &manifest, &output, None).unwrap();
+    fn init_and_build_have_distinct_authoring_and_signed_manifest() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        let authored = decode_developer(&fs::read(source.join(DEVELOPER_MANIFEST_FILENAME)).unwrap()).unwrap();
+        assert_eq!(authored.name, "community.weather");
+        build(&source, &bundle, None).unwrap();
+        assert!(!bundle.join(DEVELOPER_MANIFEST_FILENAME).exists());
+        assert!(bundle.join(MANIFEST_PATH).exists());
+        assert!(!bundle.join(SIGNATURE_PATH).exists());
+        let runtime = decode(&fs::read(bundle.join(MANIFEST_PATH)).unwrap()).unwrap();
+        assert_eq!(runtime.files.len(), 3);
+        assert!(runtime.files.iter().any(|f| f.path == "resources/translations/en.json"));
+        assert_eq!(runtime.application.unwrap().entrypoint, "bin/weather.wasm");
         assert_eq!(
-            fs::read(output.join("bin/weather.wasm")).unwrap(),
-            b"wasm content"
+            fs::read(bundle.join("resources/icon.png")).unwrap(),
+            b"icon bytes"
         );
-        assert_eq!(
-            fs::read(output.join(MANIFEST_PATH)).unwrap(),
-            fs::read(manifest).unwrap()
-        );
-        assert!(!output.join(SIGNATURE_PATH).exists());
-        assert!(output.join("share/icons/weather.png").exists());
-
-        let archive_path = dir.path().join("Weather.xpk");
-        archive(&output, &archive_path).unwrap();
-        let bytes = fs::read(&archive_path).unwrap();
-        let inspected = xila_package_reader::inspect_unsigned(&bytes).unwrap();
-        let app = inspected.application.unwrap();
-        assert_eq!(app.entrypoint, "bin/weather.wasm");
-        assert_eq!(app.icon, "share/icons/weather.png");
-        assert_eq!(app.display_name, "Weather");
-        assert!(app.show_in_launcher);
-
-        // No references to the source directory: bundles survive its deletion.
-        fs::remove_dir_all(source).unwrap();
-        assert!(output.join("bin/weather.wasm").exists());
+        assert!(verify(&bundle, None).is_ok());
+        assert!(init(&source, "community.weather", "1.0.0", "wasm32-wasip1", 1, None, None, None, false).is_err());
     }
 
     #[test]
-    fn supports_standalone_executable_and_reproducible_archive() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source");
-        fs::create_dir(&source).unwrap();
-        fs::write(source.join("binary.wasm"), b"binary").unwrap();
-        let manifest = dir.path().join("manifest.json");
-        generate(&source, &manifest, "xila.tool", "1.0.0", "wasm32-wasip1", 1).unwrap();
-        let first = dir.path().join("first.app");
-        let second = dir.path().join("second.app");
-        build(&source, &manifest, &first, None).unwrap();
-        build(&source, &manifest, &second, None).unwrap();
-        let a = dir.path().join("first.xpk");
-        let b = dir.path().join("second.xpk");
-        archive(&first, &a).unwrap();
-        archive(&second, &b).unwrap();
-        assert_eq!(fs::read(a).unwrap(), fs::read(b).unwrap());
-        assert!(
-            xila_package_reader::inspect_unsigned(&fs::read(dir.path().join("first.xpk")).unwrap())
-                .unwrap()
-                .application
-                .is_none()
-        );
+    fn archive_roundtrip_and_detect_resource_tampering() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        build(&source, &bundle, None).unwrap();
+        let archive_path = temp.path().join("Weather.xpk");
+        archive(&bundle, &archive_path).unwrap();
+        let manifest = xila_package_reader::inspect_unsigned(&fs::read(&archive_path).unwrap()).unwrap();
+        assert_eq!(manifest.files.len(), 3);
+
+        fs::write(bundle.join("resources/icon.png"), b"changed").unwrap();
+        assert!(verify(&bundle, None).is_err());
+        assert!(archive(&bundle, &temp.path().join("tampered.xpk")).is_err());
+        assert!(!temp.path().join("tampered.xpk").exists());
     }
 
     #[test]
-    fn preserves_detached_signature_when_building_archive() {
-        let dir = tempdir().unwrap();
-        let (source, manifest, output) = prepare_application(dir.path());
-        let sig_path = dir.path().join("manifest.sig");
-        // Signature bytes are supplied by an external signer; the host builder
-        // only validates their length and preserves them unchanged.
-        fs::write(&sig_path, [42u8; 64]).unwrap();
-        build(&source, &manifest, &output, Some(&sig_path)).unwrap();
-        assert_eq!(fs::read(output.join(SIGNATURE_PATH)).unwrap(), [42u8; 64]);
-        let archive_path = dir.path().join("Weather.xpk");
-        archive(&output, &archive_path).unwrap();
-        let bytes = fs::read(archive_path).unwrap();
-        assert!(xila_package_reader::inspect_unsigned(&bytes).is_ok());
-        assert!(bytes.windows(64).any(|window| window == [42u8; 64]));
+    fn signed_bundle_authenticates_all_resources() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        let seed = [7u8; 32];
+        let private_path = temp.path().join("private.key");
+        let public_path = temp.path().join("public.key");
+        fs::write(&private_path, seed).unwrap();
+        let public = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        fs::write(&public_path, public).unwrap();
+        build(&source, &bundle, Some(&private_path)).unwrap();
+        assert!(verify(&bundle, Some(&public_path)).is_ok());
+        let xpk = temp.path().join("signed.xpk");
+        archive(&bundle, &xpk).unwrap();
+        let key = PublicKey::from_bytes(&public).unwrap();
+        let manifest = xila_package_reader::verify_signed(&fs::read(&xpk).unwrap(), &key).unwrap();
+        assert_eq!(manifest.files.len(), 3);
+
+        fs::write(bundle.join("resources/translations/en.json"), b"evil").unwrap();
+        assert!(verify(&bundle, Some(&public_path)).is_err());
+        assert!(archive(&bundle, &temp.path().join("bad.xpk")).is_err());
     }
 
     #[test]
-    fn never_publishes_partial_or_invalid_bundle() {
-        let dir = tempdir().unwrap();
-        let (source, manifest, output) = prepare_application(dir.path());
-        fs::write(source.join("bin/weather.wasm"), b"changed").unwrap();
-        assert!(build(&source, &manifest, &output, None).is_err());
-        assert!(!output.exists());
+    fn external_signer_round_trip_and_invalid_signature() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        build(&source, &bundle, None).unwrap();
+        let payload = temp.path().join("to-sign.bin");
+        export_signing_payload(&bundle, &payload).unwrap();
+        let seed = [8u8; 32];
+        let signer = SigningKey::from_bytes(&seed);
+        let public_path = temp.path().join("public.key");
+        fs::write(&public_path, signer.verifying_key().to_bytes()).unwrap();
+        let signature_path = temp.path().join("signature");
+        fs::write(&signature_path, signer.sign(&fs::read(&payload).unwrap()).to_bytes()).unwrap();
+        attach_signature(&bundle, &signature_path, &public_path).unwrap();
+        assert!(verify(&bundle, Some(&public_path)).is_ok());
+        assert!(export_signing_payload(&bundle, &temp.path().join("other.bin")).is_err());
 
-        // An unlisted resource must never silently enter the bundle.
-        fs::write(source.join("bin/weather.wasm"), b"wasm content").unwrap();
-        fs::write(source.join("unexpected.txt"), b"extra").unwrap();
-        assert!(build(&source, &manifest, &output, None).is_err());
-        assert!(!output.exists());
-        fs::remove_file(source.join("unexpected.txt")).unwrap();
-
-        // Do not clobber any existing destination.
-        fs::create_dir(&output).unwrap();
-        fs::write(output.join("important"), b"keep").unwrap();
-        assert!(build(&source, &manifest, &output, None).is_err());
-        assert_eq!(fs::read(output.join("important")).unwrap(), b"keep");
+        let new_bundle = temp.path().join("unsigned.app");
+        build(&source, &new_bundle, None).unwrap();
+        let wrong_sig = temp.path().join("wrong.sig");
+        fs::write(&wrong_sig, [0u8; 64]).unwrap();
+        assert!(attach_signature(&new_bundle, &wrong_sig, &public_path).is_err());
+        assert!(!new_bundle.join(SIGNATURE_PATH).exists());
     }
 
     #[test]
-    fn rejects_nested_outputs_and_unexpected_bundle_metadata() {
-        let dir = tempdir().unwrap();
-        let (source, manifest, output) = prepare_application(dir.path());
-        assert!(build(&source, &manifest, &source.join("nested.app"), None).is_err());
-        build(&source, &manifest, &output, None).unwrap();
+    fn reject_unexpected_files_and_invalid_entrypoint() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        fs::remove_file(source.join("bin/weather.wasm")).unwrap();
+        assert!(build(&source, &bundle, None).is_err());
+        assert!(!bundle.exists());
+        fs::write(source.join("bin/weather.wasm"), b"restored").unwrap();
+        fs::create_dir(source.join(".xila")).unwrap();
+        assert!(build(&source, &bundle, None).is_err());
+    }
 
-        fs::write(output.join(".xila/unknown"), b"extra").unwrap();
-        assert!(archive(&output, &dir.path().join("bad.xpk")).is_err());
-        fs::remove_file(output.join(".xila/unknown")).unwrap();
-
-        assert!(archive(&output, &output.join("nested.xpk")).is_err());
-        fs::write(output.join("payload.txt"), b"undeclared").unwrap();
-        assert!(archive(&output, &dir.path().join("bad.xpk")).is_err());
+    #[test]
+    fn do_not_overwrite_existing_bundle_or_build_inside_source() {
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        assert!(build(&source, &source.join("nested.app"), None).is_err());
+        fs::create_dir(&bundle).unwrap();
+        fs::write(bundle.join("important"), b"keep").unwrap();
+        assert!(build(&source, &bundle, None).is_err());
+        assert_eq!(fs::read(bundle.join("important")).unwrap(), b"keep");
     }
 
     #[cfg(unix)]
     #[test]
-    fn refuses_source_symlinks() {
+    fn reject_symlinked_payloads() {
         use std::os::unix::fs::symlink;
-        let dir = tempdir().unwrap();
-        let (source, manifest, output) = prepare_application(dir.path());
-        symlink(source.join("bin/weather.wasm"), source.join("alias.wasm")).unwrap();
-        assert!(build(&source, &manifest, &output, None).is_err());
-        assert!(!output.exists());
+        let temp = tempdir().unwrap();
+        let (source, bundle) = setup(temp.path());
+        symlink(source.join("bin/weather.wasm"), source.join("shortcut.wasm")).unwrap();
+        assert!(build(&source, &bundle, None).is_err());
+        assert!(!bundle.exists());
+    }
+
+    #[test]
+    fn executable_only_package_can_be_built() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("tool");
+        init(&source, "xila.tool", "1.0.0", "wasm32-wasip1", 1, None, None, None, true).unwrap();
+        fs::write(source.join("bin/tool.wasm"), b"standalone wasm").unwrap();
+        let bundle = temp.path().join("Tool.app");
+        build(&source, &bundle, None).unwrap();
+        let manifest = verify(&bundle, None).unwrap();
+        assert!(manifest.application.is_none());
     }
 }
