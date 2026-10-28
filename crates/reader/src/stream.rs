@@ -5,9 +5,11 @@
 //! File contents are authenticated incrementally with ContentVerifier.
 
 use alloc::{vec, vec::Vec};
-use tar_no_std::{StreamEvent, TarStreamParser, BLOCKSIZE};
+use tar_no_std::{BLOCKSIZE, StreamEvent, TarStreamParser};
 use xila_package_bundle::decode_sha256;
-use xila_package_manifest::{MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
+use xila_package_manifest::{
+    MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
+};
 use xila_package_verification::{ContentVerifier, PublicKey};
 
 use crate::Error;
@@ -126,8 +128,7 @@ impl<'a> StreamingVerifier<'a> {
                 }
                 // Construct the exact signed message *while* reading the
                 // manifest, avoiding a second allocation/copy for Ed25519.
-                self.signed_message =
-                    Vec::with_capacity(SIGNED_DOMAIN.len() + 4 + size);
+                self.signed_message = Vec::with_capacity(SIGNED_DOMAIN.len() + 4 + size);
                 self.signed_message.extend_from_slice(SIGNED_DOMAIN);
                 self.signed_message
                     .extend_from_slice(&(size as u32).to_le_bytes());
@@ -152,8 +153,7 @@ impl<'a> StreamingVerifier<'a> {
                 if declared.path != path || declared.size != size as u64 {
                     return Err(Error::UnexpectedEntry);
                 }
-                let digest = decode_sha256(&declared.sha256)
-                    .map_err(|_| Error::InvalidDigest)?;
+                let digest = decode_sha256(&declared.sha256).map_err(|_| Error::InvalidDigest)?;
                 self.current_file = Some(
                     ContentVerifier::new(declared.size, digest)
                         .map_err(|_| Error::InvalidDigest)?,
@@ -179,9 +179,8 @@ impl<'a> StreamingVerifier<'a> {
                 self.signed_message.extend_from_slice(bytes);
                 if next == size {
                     let start = SIGNED_DOMAIN.len() + 4;
-                    let decoded =
-                        xila_package_manifest::decode(&self.signed_message[start..])
-                            .map_err(|_| Error::InvalidManifest)?;
+                    let decoded = xila_package_manifest::decode(&self.signed_message[start..])
+                        .map_err(|_| Error::InvalidManifest)?;
                     self.manifest = Some(decoded);
                     self.state = State::AfterManifest;
                 } else {
@@ -306,9 +305,7 @@ mod tests {
     use alloc::{string::ToString, vec};
     use ed25519_dalek::{Signer, SigningKey};
     use xila_package_bundle::{FileHasher, signing_message};
-    use xila_package_manifest::{
-        Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL,
-    };
+    use xila_package_manifest::{Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL};
     use xila_package_writer::{SourceFile, write_package};
 
     fn hashed_file(path: &str, contents: &[u8]) -> ManifestFile {
@@ -344,17 +341,26 @@ mod tests {
         let private = SigningKey::from_bytes(&[7_u8; 32]);
         let public = PublicKey::from_bytes(&private.verifying_key().to_bytes()).unwrap();
         let json = xila_package_manifest::encode(&manifest).unwrap();
-        let signature = private.sign(&signing_message(json.as_bytes()).unwrap()).to_bytes();
+        let signature = private
+            .sign(&signing_message(json.as_bytes()).unwrap())
+            .to_bytes();
         let mut archive = Vec::new();
         write_package(
             &mut archive,
             &manifest,
             &[
-                SourceFile { path: "bin/main.wasm", bytes: &wasm },
-                SourceFile { path: "resources/icon.png", bytes: &icon },
+                SourceFile {
+                    path: "bin/main.wasm",
+                    bytes: &wasm,
+                },
+                SourceFile {
+                    path: "resources/icon.png",
+                    bytes: &icon,
+                },
             ],
             sign.then_some(&signature),
-        ).unwrap();
+        )
+        .unwrap();
         (archive, public, icon)
     }
 
@@ -383,10 +389,7 @@ mod tests {
         let actual = from_bytes::<core::convert::Infallible>(&archive, Some(&public)).unwrap();
         assert_eq!(actual.files.len(), 2);
         assert_eq!(actual.files[0].size, 8 * 1024 + 17);
-        assert_eq!(
-            crate::verify_signed(&archive, &public).unwrap(),
-            actual
-        );
+        assert_eq!(crate::verify_signed(&archive, &public).unwrap(), actual);
     }
 
     #[test]
@@ -403,7 +406,8 @@ mod tests {
     #[test]
     fn rejects_modified_resource_and_truncated_archive() {
         let (mut archive, public, icon) = fixture(true);
-        let location = archive.windows(icon.len())
+        let location = archive
+            .windows(icon.len())
             .position(|bytes| bytes == icon)
             .unwrap();
         archive[location] ^= 1;
@@ -418,9 +422,13 @@ mod tests {
         let end_of_payload = archive
             .chunks_exact(512)
             .rposition(|block| block.iter().any(|&value| value != 0))
-            .unwrap() + 1;
+            .unwrap()
+            + 1;
         assert_eq!(
-            from_bytes::<core::convert::Infallible>(&archive[..end_of_payload * 512], Some(&public)),
+            from_bytes::<core::convert::Infallible>(
+                &archive[..end_of_payload * 512],
+                Some(&public)
+            ),
             Err(StreamError::Package(Error::InvalidArchive))
         );
         assert_eq!(
@@ -435,9 +443,10 @@ mod tests {
         // Convert the first payload header into a directory header, fixing
         // its checksum. TarStreamParser *skips* special entries: our package
         // verifier must reject that skipped header, not ignore it.
-        let manifest_len = xila_package_manifest::encode(
-            &crate::inspect_unsigned(&archive).unwrap(),
-        ).unwrap().len();
+        let manifest_len =
+            xila_package_manifest::encode(&crate::inspect_unsigned(&archive).unwrap())
+                .unwrap()
+                .len();
         let offset = 512 + manifest_len.div_ceil(512) * 512;
         let block = &mut archive[offset..offset + 512];
         block[156] = b'5';
