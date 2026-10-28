@@ -16,6 +16,15 @@ no compatibility decoder, schema migration or second signature domain for
 the earlier v1 draft. Regenerate/repackage unsigned development artifacts
 with the revised schema; re-sign any signed manifests after regeneration.
 
+The JSON Schema is maintained in
+[schemas/package-manifest.schema.json](../../schemas/package-manifest.schema.json).
+For editor completion and validation, authored manifests can include
+`"$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json"`.
+`xila-package manifest generate` emits this hint by default. It is covered
+by signed manifest bytes but **never fetched at runtime** and is not a trust
+anchor. JSON Schema validation is advisory and cannot replace verifying the
+file hashes, manifest/file reference consistency or publisher authorization.
+
 The format is **versioned but still experimental**. It uses Miniserde JSON,
 which allocates memory during decoding; it is not a zero-allocation MCU parser.
 The input limit is `MAX_MANIFEST_BYTES`, with additional file-count and
