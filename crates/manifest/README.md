@@ -4,18 +4,40 @@ The shared archive manifest schema, portable to `no_std + alloc`. It contains
 package identity, target/ABI requirements, declared capabilities and the
 inventory of files embedded in a Xila archive.
 
+The experimental **v1** schema now carries an optional `application` descriptor,
+**without adding a second identity, version, signature or capability manifest**.
+A package with `application: null` carries standalone executables/resources;
+an application descriptor enables launcher discovery. Its `entrypoint`
+references a bundle-relative, inventory-verified executable or a preinstalled
+system executable. This metadata does not grant permissions or authorization.
+
+This is an intentional breaking change **within experimental v1**. There is
+no compatibility decoder, schema migration or second signature domain for
+the earlier v1 draft. Regenerate/repackage unsigned development artifacts
+with the revised schema; re-sign any signed manifests after regeneration.
+
+The JSON Schema is maintained in
+[schemas/package-manifest.schema.json](../../schemas/package-manifest.schema.json).
+For editor completion and validation, authored manifests can include
+`"$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json"`.
+`xila-package manifest generate` emits this hint by default. It is covered
+by signed manifest bytes but **never fetched at runtime** and is not a trust
+anchor. JSON Schema validation is advisory and cannot replace verifying the
+file hashes, manifest/file reference consistency or publisher authorization.
+
 The format is **versioned but still experimental**. It uses Miniserde JSON,
 which allocates memory during decoding; it is not a zero-allocation MCU parser.
 The input limit is `MAX_MANIFEST_BYTES`, with additional file-count and
-content-size bounds. The signature domain separator covers the **exact encoded
+content-size bounds. The v1 signature domain separator covers the **exact encoded
 manifest bytes**, not an arbitrary reserialization.
 
 ## Example
 
 ```rust
-use xila_package_manifest::{Manifest, ManifestFile, FORMAT_VERSION, encode, decode};
+use xila_package_manifest::{Manifest, ManifestFile, Application, FORMAT_VERSION, encode, decode};
 
 let manifest = Manifest {
+    schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
     name: "community.weather".into(),
     version: "1.0.0".into(),
@@ -27,6 +49,12 @@ let manifest = Manifest {
         size: 3,
         sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
     }],
+    application: Some(Application {
+        entrypoint: "bin/weather.wasm".into(),
+        display_name: "Weather".into(),
+        icon: "".into(),
+        show_in_launcher: true,
+    }),
 };
 let json = encode(&manifest).unwrap();
 assert_eq!(decode(json.as_bytes()).unwrap(), manifest);

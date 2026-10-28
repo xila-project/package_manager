@@ -104,7 +104,8 @@ mod tests {
 
     fn fixture() -> Manifest {
         Manifest {
-            format_version: 1,
+            schema: Some(xila_package_manifest::SCHEMA_URL.into()),
+            format_version: xila_package_manifest::FORMAT_VERSION,
             name: "xila.calculator".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
@@ -115,6 +116,7 @@ mod tests {
                 size: 3,
                 sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
             }],
+            application: None,
         }
     }
 

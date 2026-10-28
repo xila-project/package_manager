@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
+  "title": "Xila package manifest (experimental v1)",
+  "description": "Authoring and structural validation for the experimental .xpk manifest. Validation is not a substitute for SHA-256, publisher trust, application reference resolution, or installation policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "name",
+    "version",
+    "target",
+    "minimum_xila_abi",
+    "capabilities",
+    "files",
+    "application"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL. This pointer is not a trust anchor and is never fetched by the Xila runtime.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1,
+      "description": "Experimental v1 wire format. Breaking changes may occur before the format is frozen."
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 96,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9.+-]+$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "minimum_xila_abi": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "application": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/application"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "application": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "application"
+        ]
+      },
+      "then": {
+        "properties": {
+          "files": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?!\\.xila/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
+      "description": "Nonempty bundle-relative path. No . or .. components, symlinks or special entries; the runtime additionally enforces UTF-8 byte-size limits."
+    },
+    "systemExecutable": {
+      "type": "string",
+      "pattern": "^/(?:system|applications)/executables/(?!\\.\\.?(?:/|$))(?!.*(?:/)\\.\\.?(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$",
+      "description": "Reference to an existing preinstalled executable. This does not imply permissions or package ownership."
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hex digest of uncompressed file content."
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entrypoint",
+        "display_name",
+        "icon",
+        "show_in_launcher"
+      ],
+      "properties": {
+        "entrypoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/relativePath"
+            },
+            {
+              "$ref": "#/$defs/systemExecutable"
+            }
+          ],
+          "description": "Bundle-local path must match a declared files[].path, which is validated by the Rust implementation."
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "\\S"
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "$ref": "#/$defs/relativePath"
+            }
+          ],
+          "description": "Empty for fallback icon; otherwise path must match files[].path."
+        },
+        "show_in_launcher": {
+          "type": "boolean",
+          "description": "Launcher discovery only; does not automatically pin to Dock."
+        }
+      }
+    }
+  }
+}

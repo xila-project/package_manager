@@ -7,7 +7,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
-use xila_package_manifest::{FORMAT_VERSION, Manifest, ManifestFile};
+use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
 use xila_package_verification::Sha256Verifier;
 use xila_package_writer::SourceFile;
 
@@ -108,6 +108,7 @@ fn generate(
     collect_files(&root, &root, &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
+        schema: Some(xila_package_manifest::SCHEMA_URL.into()),
         format_version: FORMAT_VERSION,
         name: name.into(),
         version: version.into(),
@@ -115,6 +116,7 @@ fn generate(
         minimum_xila_abi,
         capabilities: vec![],
         files,
+        application: None,
     };
     write_manifest(output, &manifest)
 }
@@ -131,6 +133,29 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     collect_files(&root, &root, &mut files)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     manifest.files = files;
+    write_manifest(manifest_path, &manifest)
+}
+
+/// Mark an existing package as an application without duplicating its
+/// identity/version/ABI and without executing its code.
+fn set_application(
+    manifest_path: &Path,
+    entrypoint: &str,
+    display_name: &str,
+    icon: Option<&str>,
+    hidden: bool,
+) -> Result<()> {
+    let bytes = fs::read(manifest_path)?;
+    let mut manifest =
+        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+    // Adding application metadata changes the exact bytes. Any detached
+    // signature must be produced *after* this operation.
+    manifest.application = Some(Application {
+        entrypoint: entrypoint.into(),
+        display_name: display_name.into(),
+        icon: icon.unwrap_or_default().into(),
+        show_in_launcher: !hidden,
+    });
     write_manifest(manifest_path, &manifest)
 }
 
@@ -257,6 +282,21 @@ enum ManifestOperation<'a> {
         /// Minimum Xila runtime application binary interface version.
         minimum_xila_abi: u32,
     },
+    /// Add application metadata to an existing manifest without code execution.
+    Application {
+        /// Manifest JSON file (upgraded to v2).
+        manifest: &'a str,
+        /// Bundle-relative executable, or trusted preinstalled system path.
+        entrypoint: &'a str,
+        /// Fallback application name shown to users.
+        display_name: &'a str,
+        /// Bundle-relative icon from the manifest file inventory.
+        #[arg(long)]
+        icon: Option<&'a str>,
+        /// Hide from the launcher without making it unlaunchable.
+        #[arg(long)]
+        hidden: bool,
+    },
     /// Refresh file sizes and hashes in an existing manifest.
     Update {
         /// Directory containing payload files.
@@ -297,6 +337,13 @@ fn run() -> Result<()> {
                 directory,
                 manifest,
             } => update(Path::new(directory), Path::new(manifest)),
+            ManifestOperation::Application {
+                manifest,
+                entrypoint,
+                display_name,
+                icon,
+                hidden,
+            } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
         },
         Command::Pack {
             directory,

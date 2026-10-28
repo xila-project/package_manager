@@ -12,6 +12,7 @@ use xila_package_manifest::{Manifest, ManifestFile, FORMAT_VERSION};
 use xila_package_writer::{SourceFile, write_package};
 
 let manifest = Manifest {
+    schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
     name: "community.example".into(),
     version: "1.0.0".into(),
@@ -23,6 +24,7 @@ let manifest = Manifest {
         size: 3,
         sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
     }],
+    application: None,
 };
 let mut archive = Vec::new();
 write_package(

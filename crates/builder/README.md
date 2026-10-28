@@ -9,12 +9,16 @@ subcommands and built-in help.
 ```sh
 xila-package manifest generate ./app ./manifest.json community.weather 1.0.0 wasm32-wasip1 1
 xila-package manifest update ./app ./manifest.json
+# Optional: turn a standalone payload package into a discoverable app
+xila-package manifest application ./manifest.json bin/weather.wasm Weather
 xila-package pack ./app ./manifest.json ./weather.xpk
 ```
 
 The source directory contains application files and the manifest JSON
 is stored outside that directory. `manifest update` recalculates file sizes
 and digests while preserving the manifest identity and capabilities;
+`manifest application` adds an entrypoint and display metadata to the same
+experimental v1 manifest. Configure this **before** signing;
 `pack` verifies the archive through the separate TAR reader.
 
 An optional final argument to `pack` provides an externally generated,

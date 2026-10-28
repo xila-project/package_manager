@@ -15,6 +15,22 @@ Shared Rust workspace for building, inspecting and eventually installing Xila ap
 | `xila-package-builder` | Host-only `xila-package` executable to generate, update and package applications |
 | `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
+The **experimental v1 JSON Schema** is maintained in
+[`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
+For editor validation, use the following optional field in a manifest:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
+  "format_version": 1
+}
+```
+
+This snippet shows the schema hint only, not a complete manifest.
+`manifest generate` emits `$schema` automatically. The schema helps developers
+and CI catch structural mistakes; it does not authenticate package content or
+grant runtime capabilities.
+
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
 
 ## Native packaging workflow

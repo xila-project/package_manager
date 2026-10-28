@@ -1,4 +1,5 @@
 {
+  "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
   "format_version": 1,
   "name": "community.example",
   "version": "0.1.0",
@@ -11,5 +12,6 @@
       "size": 0,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
-  ]
+  ],
+  "application": null
 }
