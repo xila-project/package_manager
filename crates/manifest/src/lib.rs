@@ -8,6 +8,10 @@ use miniserde::{Deserialize, Serialize};
 
 /// Current experimental manifest format version.
 pub const FORMAT_VERSION: u32 = 1;
+/// Editor-facing JSON Schema hosted in the package-manager repository.
+/// This is a tooling hint, never a package trust anchor.
+pub const SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json";
 /// Maximum accepted manifest JSON byte length.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 /// Maximum number of payload files in a manifest.
@@ -33,11 +37,15 @@ pub enum Error {
     InvalidTarget,
     InvalidFileList,
     InvalidApplication,
+    InvalidSchema,
 }
 
 /// A complete Xila archive manifest describing identity and every payload file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
+    /// Optional editor hint; not looked up by the Xila runtime.
+    #[serde(rename = "$schema")]
+    pub schema: Option<String>,
     pub format_version: u32,
     pub name: String,
     pub version: String,
@@ -105,6 +113,9 @@ fn valid_identifier(value: &str) -> bool {
 
 /// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
+    if manifest.schema.as_deref().is_some_and(|url| url != SCHEMA_URL) {
+        return Err(Error::InvalidSchema);
+    }
     if manifest.format_version != FORMAT_VERSION {
         return Err(Error::UnsupportedVersion);
     }
@@ -236,6 +247,7 @@ mod tests {
 
     pub fn example() -> Manifest {
         Manifest {
+            schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
             name: "xila.calculator".to_string(),
             version: "1.0.0".to_string(),
@@ -260,6 +272,17 @@ mod tests {
         let m = example();
         let json = encode(&m).unwrap();
         assert_eq!(decode(json.as_bytes()).unwrap(), m);
+    }
+    #[test]
+    fn validates_the_schema_editor_hint() {
+        let mut m = example();
+        let json = encode(&m).unwrap();
+        assert!(json.contains(r#""$schema":"https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json""#));
+        assert_eq!(decode(json.as_bytes()), Ok(m.clone()));
+        m.schema = Some("https://example.com/untrusted.json".to_string());
+        assert_eq!(validate(&m), Err(Error::InvalidSchema));
+        m.schema = None;
+        assert_eq!(validate(&m), Ok(()));
     }
     #[test]
     fn reject_unsafe_paths_and_duplicates() {
