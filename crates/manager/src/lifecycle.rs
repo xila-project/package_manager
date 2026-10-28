@@ -6,10 +6,7 @@
 //! activation publication. In particular, merely constructing a Plan does not
 //! make bytes executable.
 
-use alloc::{
-    format,
-    string::String,
-};
+use alloc::{format, string::String};
 use miniserde::{Deserialize, Serialize};
 use xila_package_manifest::{Manifest, decode, validate, validate_path};
 use xila_package_verification::Sha256Verifier;
