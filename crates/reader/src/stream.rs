@@ -4,8 +4,12 @@
 //! bounded signed metadata and the parsed manifest are retained in memory.
 //! File contents are authenticated incrementally with ContentVerifier.
 
-use alloc::{vec, vec::Vec};
-use tar_no_std::{BLOCKSIZE, StreamEvent, TarStreamParser};
+use alloc::vec::Vec;
+use tar_no_std::{StreamEvent, TarStreamParser};
+
+// USTAR's fixed 512-byte block size; tar-no-std deliberately keeps its
+// internal BLOCKSIZE constant private.
+const BLOCKSIZE: usize = 512;
 use xila_package_bundle::decode_sha256;
 use xila_package_manifest::{
     MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
@@ -302,7 +306,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{string::ToString, vec};
+    use alloc::{format, string::ToString, vec};
     use ed25519_dalek::{Signer, SigningKey};
     use xila_package_bundle::{FileHasher, signing_message};
     use xila_package_manifest::{Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL};
