@@ -138,9 +138,7 @@ pub fn preflight(
     }
     // Manifest versions are valid display strings, but "."/".." may not
     // become standalone filesystem components.
-    if manifest.version.contains('/')
-        || validate_path(&manifest.version).is_err()
-    {
+    if manifest.version.contains('/') || validate_path(&manifest.version).is_err() {
         return Err(Error::InvalidVersionPath);
     }
     let parent = format!("{BUNDLES_ROOT}/{}", manifest.name);
@@ -239,8 +237,7 @@ impl ActivationRecord {
             return Err(Error::InvalidActivation);
         }
         let text = core::str::from_utf8(raw).map_err(|_| Error::InvalidActivation)?;
-        let record: Self =
-            miniserde::json::from_str(text).map_err(|_| Error::InvalidActivation)?;
+        let record: Self = miniserde::json::from_str(text).map_err(|_| Error::InvalidActivation)?;
         record.validate()?;
         Ok(record)
     }
@@ -267,7 +264,10 @@ impl ActivationRecord {
         let entrypoint = if app.entrypoint.starts_with('/') {
             app.entrypoint.clone()
         } else {
-            format!("{BUNDLES_ROOT}/{}/{}/{}", self.package, self.version, app.entrypoint)
+            format!(
+                "{BUNDLES_ROOT}/{}/{}/{}",
+                self.package, self.version, app.entrypoint
+            )
         };
         Ok(LaunchTarget {
             package: self.package.clone(),
@@ -321,7 +321,7 @@ pub fn classify_recovery(
 mod tests {
     use super::*;
     use alloc::vec;
-    use xila_package_manifest::{Application, ManifestFile, FORMAT_VERSION, SCHEMA_URL};
+    use xila_package_manifest::{Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL};
 
     fn manifest() -> Manifest {
         Manifest {
@@ -426,7 +426,10 @@ mod tests {
         let mut system = m.clone();
         system.application.as_mut().unwrap().entrypoint =
             "/system/executables/calculator".to_string();
-        assert_eq!(policy().check(&system), Err(Error::ExternalEntrypointDenied));
+        assert_eq!(
+            policy().check(&system),
+            Err(Error::ExternalEntrypointDenied)
+        );
     }
 
     #[test]
@@ -441,7 +444,10 @@ mod tests {
             plan.activation_record_path,
             "/applications/active/org.xila.calculator"
         );
-        assert_eq!(preflight(&m, &policy(), 0, guaranteed_storage()), Err(Error::InvalidTransaction));
+        assert_eq!(
+            preflight(&m, &policy(), 0, guaranteed_storage()),
+            Err(Error::InvalidTransaction)
+        );
         let mut bad = m.clone();
         bad.version = "..".to_string();
         assert_eq!(
@@ -478,9 +484,18 @@ mod tests {
     #[test]
     fn uninstalled_and_partial_bundles_are_never_autoactivated() {
         assert_eq!(classify_recovery(true, true, true, true), Recovery::Active);
-        assert_eq!(classify_recovery(true, false, true, true), Recovery::InactiveVersion);
-        assert_eq!(classify_recovery(false, false, false, true), Recovery::UntrustedStaging);
-        assert_eq!(classify_recovery(false, false, false, false), Recovery::Unavailable);
+        assert_eq!(
+            classify_recovery(true, false, true, true),
+            Recovery::InactiveVersion
+        );
+        assert_eq!(
+            classify_recovery(false, false, false, true),
+            Recovery::UntrustedStaging
+        );
+        assert_eq!(
+            classify_recovery(false, false, false, false),
+            Recovery::Unavailable
+        );
     }
 
     #[test]
