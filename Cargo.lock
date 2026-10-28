@@ -430,9 +430,13 @@ dependencies = [
 name = "xila-package-manager"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "miniserde",
+ "tar-no-std",
  "xila-package-manifest",
+ "xila-package-reader",
  "xila-package-verification",
+ "xila-package-writer",
 ]
 
 [[package]]
