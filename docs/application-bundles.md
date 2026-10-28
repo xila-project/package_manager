@@ -1,4 +1,4 @@
-# Xila self-contained application bundles (v2 draft)
+# Xila self-contained application bundles (experimental v1 draft)
 
 > This is an incremental schema/contract proposal, **not** a working device
 > installer. It must be reconciled with the streaming container decision in
@@ -15,7 +15,7 @@
   display name, an optional icon and launcher visibility. An application is
   **not** an executable.
 - **Executable**: runs independently with the existing
-  `executable::execute` API. A v2 package with `application: null` is a
+  `executable::execute` API. A package with `application: null` is a
   legitimate distribution of one or more standalone binaries.
 
 No second `Info.plist`-style file containing duplicate identity/version
@@ -47,7 +47,8 @@ An example of the manifest's application metadata:
 
 ```json
 {
-  "format_version": 2,
+  "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
+  "format_version": 1,
   "name": "xila.calculator",
   "version": "1.0.0",
   "target": "wasm32-wasip1",
@@ -136,27 +137,35 @@ Never infer authority merely from a cryptographic signature.
 - Remove guest `__install` and the `wasm --install` mode **only after**
   platform seeding and launcher migrations pass their integration tests.
 
-## Schema compatibility and signatures
+## Experimental v1 schema, JSON Schema and signatures
 
-- Legacy v1 manifests deserialize as `application: None`. Their archived
-  JSON and domain `XILA-PACKAGE-MANIFEST-V1\0` remain unchanged.
-- New v2 manifests require the `application` field (object or null).
-  The signed message uses the domain
-  `XILA-PACKAGE-MANIFEST-V2\0`, the little-endian u32 byte length,
-  then the **exact stored JSON bytes**. No JSON reserialization during
-  verification. v1 and v2 signatures are deliberately non-interchangeable.
+- This is a **breaking update of experimental v1**, not a new version.
+  There is deliberately no legacy reader, format migration or secondary
+  signature domain. Rebuild development packages and re-sign signed bytes.
+- JSON Schema lives at
+  [schemas/package-manifest.schema.json](../schemas/package-manifest.schema.json).
+  The optional `$schema` property points to the canonical raw GitHub URL for
+  editor support and is included in the exact signed manifest bytes if
+  present. This URL is a development hint, **not** a trust anchor: Xila
+  never fetches it during runtime validation or installation.
+- The signed message remains `XILA-PACKAGE-MANIFEST-V1\\0`, followed by the
+  little-endian u32 length and **exact stored JSON bytes**, with no
+  reserialization during signature verification.
 - `application.entrypoint` and optional icon must resolve to declared
   files for bundle-local resources. All declared files remain
   SHA-256-verified; an external system entrypoint is never counted as a
   package-owned file.
 - Application display metadata does not grant capabilities, override
   authorization, or identify a trusted publisher.
+- The schema catches common editing mistakes; it does not enforce every
+  semantic invariant (e.g. entrypoint membership, path uniqueness, combined
+  sizes). The Rust validator and installer remain authoritative.
 
 ## Remaining work
 
 - **package_manager**: decide streaming TAR versus CPIO (Core #402),
   bounded reader, streaming writer, encrypted/trusted publication checks,
-  signature envelope, manifest migration and builder CLI for application
+  signature envelope and builder CLI for application
   metadata.
 - **core**: versioned staging, trust-aware installer, activation record,
   stable application identity mapped to task/private storage and a
