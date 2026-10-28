@@ -373,7 +373,7 @@ mod tests {
         trusted: Option<&PublicKey>,
     ) -> Result<Manifest, StreamError<E>> {
         assert_eq!(bytes.len() % 512, 0);
-        let mut blocks = bytes.chunks_exact(512);
+        let mut blocks = bytes.as_chunks::<512>().0.iter();
         inspect_streaming(
             |buf| {
                 if let Some(chunk) = blocks.next() {
@@ -424,7 +424,7 @@ mod tests {
         // Remove the final two-block terminator *and* optional zero padding,
         // but keep the entire authenticated content.
         let end_of_payload = archive
-            .chunks_exact(512)
+            .as_chunks::<512>().0.iter()
             .rposition(|block| block.iter().any(|&value| value != 0))
             .unwrap()
             + 1;
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn source_io_failure_does_not_become_truncated_success() {
         let (archive, _, _) = fixture(false);
-        let mut blocks = archive.chunks_exact(512);
+        let mut blocks = archive.as_chunks::<512>().0.iter();
         let mut reads = 0;
         let result = inspect_streaming(
             |buf| {
