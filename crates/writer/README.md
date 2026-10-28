@@ -12,6 +12,7 @@ use xila_package_manifest::{Manifest, ManifestFile, FORMAT_VERSION};
 use xila_package_writer::{SourceFile, write_package};
 
 let manifest = Manifest {
+    schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
     name: "community.example".into(),
     version: "1.0.0".into(),
