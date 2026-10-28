@@ -115,6 +115,7 @@ fn generate(
         minimum_xila_abi,
         capabilities: vec![],
         files,
+        application: None,
     };
     write_manifest(output, &manifest)
 }
