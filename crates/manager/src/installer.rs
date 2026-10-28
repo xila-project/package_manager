@@ -5,14 +5,21 @@
 //! upstream streaming API lands. File writes and re-verification use fixed
 //! 4096-byte buffers; no payload is copied into a second RAM buffer.
 
-use alloc::{format, string::{String, ToString}, vec, vec::Vec};
-use tar_no_std::TarArchiveRef;
-use xila_package_manifest::{MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
-use xila_package_verification::{ContentVerifier, PublicKey};
 use crate::lifecycle::{
-    self, ActivationRecord, LaunchTarget, Plan, Policy, StorageGuarantees, ACTIVE_ROOT,
-    BUNDLES_ROOT, MAX_ACTIVATION_BYTES,
+    self, ACTIVE_ROOT, ActivationRecord, BUNDLES_ROOT, LaunchTarget, MAX_ACTIVATION_BYTES, Plan,
+    Policy, StorageGuarantees,
 };
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use tar_no_std::TarArchiveRef;
+use xila_package_manifest::{
+    MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
+};
+use xila_package_verification::{ContentVerifier, PublicKey};
 
 pub const IO_CHUNK: usize = 4096;
 
@@ -65,15 +72,20 @@ pub enum Error {
 }
 
 impl From<StoreError> for Error {
-    fn from(value: StoreError) -> Self { Self::Storage(value) }
+    fn from(value: StoreError) -> Self {
+        Self::Storage(value)
+    }
 }
 
 impl From<lifecycle::Error> for Error {
-    fn from(value: lifecycle::Error) -> Self { Self::Lifecycle(value) }
+    fn from(value: lifecycle::Error) -> Self {
+        Self::Lifecycle(value)
+    }
 }
 
 fn directory(path: &str) -> Result<&str, Error> {
-    path.rsplit_once('/').map(|(prefix, _)| if prefix.is_empty() { "/" } else { prefix })
+    path.rsplit_once('/')
+        .map(|(prefix, _)| if prefix.is_empty() { "/" } else { prefix })
         .ok_or(Error::Lifecycle(lifecycle::Error::InvalidPath))
 }
 
@@ -81,7 +93,9 @@ fn ensure_directories<S: Store>(store: &mut S, path: &str) -> Result<(), Error> 
     // create_directory is explicitly idempotent and must check directory
     // identity and prevent traversal; it is NOT a mkdir-if-anything-exists.
     for (index, byte) in path.bytes().enumerate().skip(1) {
-        if byte == b'/' { store.create_directory(&path[..index])?; }
+        if byte == b'/' {
+            store.create_directory(&path[..index])?;
+        }
     }
     store.create_directory(path)?;
     Ok(())
@@ -90,7 +104,9 @@ fn ensure_directories<S: Store>(store: &mut S, path: &str) -> Result<(), Error> 
 fn copy_verified<S: Store>(store: &mut S, path: &str, data: &[u8]) -> Result<(), Error> {
     ensure_directories(store, directory(path)?)?;
     store.create_file_new(path)?;
-    for chunk in data.chunks(IO_CHUNK) { store.append(path, chunk)?; }
+    for chunk in data.chunks(IO_CHUNK) {
+        store.append(path, chunk)?;
+    }
     store.sync_file(path)?;
     Ok(())
 }
@@ -102,62 +118,102 @@ fn read_bounded<S: Store>(store: &S, path: &str, maximum: usize) -> Result<Vec<u
         // Read one byte beyond the max to detect oversized files without a
         // filesystem metadata/size API.
         let remaining = maximum.saturating_add(1).saturating_sub(result.len());
-        if remaining == 0 { return Err(Error::CorruptInstalledFile); }
-        let len = store.read_at(path, result.len() as u64, &mut buffer[..remaining.min(IO_CHUNK)])?;
-        if len == 0 { return Ok(result); }
-        if len > remaining { return Err(Error::CorruptInstalledFile); }
+        if remaining == 0 {
+            return Err(Error::CorruptInstalledFile);
+        }
+        let len = store.read_at(
+            path,
+            result.len() as u64,
+            &mut buffer[..remaining.min(IO_CHUNK)],
+        )?;
+        if len == 0 {
+            return Ok(result);
+        }
+        if len > remaining {
+            return Err(Error::CorruptInstalledFile);
+        }
         result.extend_from_slice(&buffer[..len]);
-        if result.len() > maximum { return Err(Error::CorruptInstalledFile); }
+        if result.len() > maximum {
+            return Err(Error::CorruptInstalledFile);
+        }
     }
 }
 
 fn sha256_from_hex(hex: &str) -> Result<[u8; 32], Error> {
     let mut result = [0u8; 32];
-    if hex.len() != 64 { return Err(Error::CorruptInstalledFile); }
+    if hex.len() != 64 {
+        return Err(Error::CorruptInstalledFile);
+    }
     for (i, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
-        let a = (pair[0] as char).to_digit(16).ok_or(Error::CorruptInstalledFile)?;
-        let b = (pair[1] as char).to_digit(16).ok_or(Error::CorruptInstalledFile)?;
+        let a = (pair[0] as char)
+            .to_digit(16)
+            .ok_or(Error::CorruptInstalledFile)?;
+        let b = (pair[1] as char)
+            .to_digit(16)
+            .ok_or(Error::CorruptInstalledFile)?;
         result[i] = (a * 16 + b) as u8;
     }
     Ok(result)
 }
 
-fn verify_payload<S: Store>(
-    store: &S, path: &str, size: u64, hash: &str,
-) -> Result<(), Error> {
+fn verify_payload<S: Store>(store: &S, path: &str, size: u64, hash: &str) -> Result<(), Error> {
     let mut verifier = ContentVerifier::new(size, sha256_from_hex(hash)?)
         .map_err(|_| Error::CorruptInstalledFile)?;
     let mut offset = 0u64;
     let mut buffer = [0u8; IO_CHUNK];
     loop {
         let bytes = store.read_at(path, offset, &mut buffer)?;
-        if bytes == 0 { break; }
-        offset = offset.checked_add(bytes as u64).ok_or(Error::CorruptInstalledFile)?;
-        verifier.update(&buffer[..bytes]).map_err(|_| Error::CorruptInstalledFile)?;
+        if bytes == 0 {
+            break;
+        }
+        offset = offset
+            .checked_add(bytes as u64)
+            .ok_or(Error::CorruptInstalledFile)?;
+        verifier
+            .update(&buffer[..bytes])
+            .map_err(|_| Error::CorruptInstalledFile)?;
     }
     verifier.verify().map_err(|_| Error::CorruptInstalledFile)
 }
 
 fn verify_directory<S: Store>(
-    store: &S, directory: &str, key: &PublicKey, policy: &Policy<'_>,
+    store: &S,
+    directory: &str,
+    key: &PublicKey,
+    policy: &Policy<'_>,
 ) -> Result<(Manifest, Vec<u8>), Error> {
-    let raw = read_bounded(store, &format!("{directory}/{MANIFEST_PATH}"), MAX_MANIFEST_BYTES)?;
+    let raw = read_bounded(
+        store,
+        &format!("{directory}/{MANIFEST_PATH}"),
+        MAX_MANIFEST_BYTES,
+    )?;
     let manifest = xila_package_manifest::decode(&raw).map_err(|_| Error::InvalidStoredManifest)?;
     policy.check(&manifest)?;
     let sig = read_bounded(store, &format!("{directory}/{SIGNATURE_PATH}"), 64)?;
-    let signature: &[u8; 64] = sig.as_slice().try_into().map_err(|_| Error::InvalidStoredSignature)?;
+    let signature: &[u8; 64] = sig
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::InvalidStoredSignature)?;
     let mut signed = vec![0u8; SIGNED_DOMAIN.len() + 4 + raw.len()];
     let signed = xila_package_manifest::signed_message_into(&raw, &mut signed)
         .map_err(|_| Error::InvalidStoredManifest)?;
-    key.verify(signed, signature).map_err(|_| Error::InvalidStoredSignature)?;
+    key.verify(signed, signature)
+        .map_err(|_| Error::InvalidStoredSignature)?;
     for file in &manifest.files {
-        verify_payload(store, &format!("{directory}/{}", file.path), file.size, &file.sha256)?;
+        verify_payload(
+            store,
+            &format!("{directory}/{}", file.path),
+            file.size,
+            &file.sha256,
+        )?;
     }
     Ok((manifest, raw))
 }
 
 fn sync_staging_directories<S: Store>(
-    store: &mut S, stage: &str, manifest: &Manifest,
+    store: &mut S,
+    stage: &str,
+    manifest: &Manifest,
 ) -> Result<(), Error> {
     let metadata_parent = format!("{stage}/.xila");
     store.sync_directory(&metadata_parent)?;
@@ -168,9 +224,13 @@ fn sync_staging_directories<S: Store>(
         let mut current = parent;
         loop {
             store.sync_directory(current)?;
-            if current == stage { break; }
+            if current == stage {
+                break;
+            }
             current = directory(current)?;
-            if current.len() < stage.len() { break; }
+            if current.len() < stage.len() {
+                break;
+            }
         }
     }
     store.sync_directory(stage)?;
@@ -178,12 +238,21 @@ fn sync_staging_directories<S: Store>(
 }
 
 fn publish_record<S: Store>(
-    store: &mut S, plan: &Plan, record: &ActivationRecord,
+    store: &mut S,
+    plan: &Plan,
+    record: &ActivationRecord,
 ) -> Result<(), Error> {
     ensure_directories(store, ACTIVE_ROOT)?;
-    copy_verified(store, &plan.temporary_activation_path, record.encode()?.as_bytes())?;
+    copy_verified(
+        store,
+        &plan.temporary_activation_path,
+        record.encode()?.as_bytes(),
+    )?;
     store.sync_directory(ACTIVE_ROOT)?;
-    store.replace_file(&plan.temporary_activation_path, &plan.activation_record_path)?;
+    store.replace_file(
+        &plan.temporary_activation_path,
+        &plan.activation_record_path,
+    )?;
     store.sync_directory(ACTIVE_ROOT)?;
     Ok(())
 }
@@ -196,8 +265,11 @@ fn publish_record<S: Store>(
 /// On failure before activation an old active record remains untouched.
 /// Inactive published versions and staging leftovers are recoverable.
 pub fn install<S: Store>(
-    store: &mut S, archive: &[u8], key: &PublicKey,
-    policy: &Policy<'_>, nonce: u64,
+    store: &mut S,
+    archive: &[u8],
+    key: &PublicKey,
+    policy: &Policy<'_>,
+    nonce: u64,
 ) -> Result<ActivationRecord, Error> {
     // Verify signature, all TAR names/types, declared lengths and hashes
     // before touching destination storage. Only caller-selected keys are used.
@@ -219,19 +291,33 @@ pub fn install<S: Store>(
     let signature_entry = entries.next().ok_or(Error::InvalidStoredSignature)?;
     let raw_manifest = manifest_entry.data();
     let signature = signature_entry.data();
-    copy_verified(store, &format!("{}/{MANIFEST_PATH}", plan.staging_directory), raw_manifest)?;
-    copy_verified(store, &format!("{}/{SIGNATURE_PATH}", plan.staging_directory), signature)?;
+    copy_verified(
+        store,
+        &format!("{}/{MANIFEST_PATH}", plan.staging_directory),
+        raw_manifest,
+    )?;
+    copy_verified(
+        store,
+        &format!("{}/{SIGNATURE_PATH}", plan.staging_directory),
+        signature,
+    )?;
     for file in &manifest.files {
         let entry = entries.next().ok_or(Error::CorruptInstalledFile)?;
         // The reader has already verified order, path, size and hash.
-        copy_verified(store, &format!("{}/{}", plan.staging_directory, file.path), entry.data())?;
+        copy_verified(
+            store,
+            &format!("{}/{}", plan.staging_directory, file.path),
+            entry.data(),
+        )?;
     }
     sync_staging_directories(store, &plan.staging_directory, &manifest)?;
 
     // Read back *stored* bytes and independently verify them, including the
     // actual detached signature and each payload's on-disk SHA-256.
     let (staged, persisted_raw) = verify_directory(store, &plan.staging_directory, key, policy)?;
-    if staged != manifest || persisted_raw != raw_manifest { return Err(Error::CorruptInstalledFile); }
+    if staged != manifest || persisted_raw != raw_manifest {
+        return Err(Error::CorruptInstalledFile);
+    }
     let record = ActivationRecord::for_manifest_bytes(&persisted_raw)?;
     store.sync_directory(&plan.staging_directory)?;
     // No-replace publication is an indispensable adapter guarantee.
@@ -255,10 +341,14 @@ fn checked_id(package: &str) -> Result<(), Error> {
 fn current_record<S: Store>(store: &S, package: &str) -> Result<ActivationRecord, Error> {
     checked_id(package)?;
     let path = format!("{ACTIVE_ROOT}/{package}");
-    if !store.exists(&path)? { return Err(Error::MissingActiveRecord); }
+    if !store.exists(&path)? {
+        return Err(Error::MissingActiveRecord);
+    }
     let raw = read_bounded(store, &path, MAX_ACTIVATION_BYTES)?;
     let record = ActivationRecord::decode(&raw)?;
-    if record.package != package { return Err(Error::IdentityMismatch); }
+    if record.package != package {
+        return Err(Error::IdentityMismatch);
+    }
     Ok(record)
 }
 
@@ -266,7 +356,9 @@ fn current_record<S: Store>(store: &S, package: &str) -> Result<ActivationRecord
 /// payloads before returning an application candidate. No task is spawned;
 /// OS execution permissions must still be enforced by a future adapter.
 pub fn resolve_active<S: Store>(
-    store: &S, package: &str, key: &PublicKey,
+    store: &S,
+    package: &str,
+    key: &PublicKey,
     policy: &Policy<'_>,
 ) -> Result<LaunchTarget, Error> {
     store.guarantees().require_crash_safe()?;
@@ -276,25 +368,39 @@ pub fn resolve_active<S: Store>(
     if manifest.name != record.package || manifest.version != record.version {
         return Err(Error::IdentityMismatch);
     }
-    record.resolve_application(&raw, policy).map_err(Error::Lifecycle)
+    record
+        .resolve_application(&raw, policy)
+        .map_err(Error::Lifecycle)
 }
 
 /// Re-activate an existing verified version (rollback/upgrade) without
 /// reinstalling or deleting any user data. Package and version must match
 /// the signed manifest stored at the destination.
 pub fn activate_existing<S: Store>(
-    store: &mut S, package: &str, version: &str, key: &PublicKey,
-    policy: &Policy<'_>, nonce: u64,
+    store: &mut S,
+    package: &str,
+    version: &str,
+    key: &PublicKey,
+    policy: &Policy<'_>,
+    nonce: u64,
 ) -> Result<ActivationRecord, Error> {
     checked_id(package)?;
-    if version == "." || version == ".." || version.contains('/') || xila_package_manifest::validate_path(version).is_err() {
+    if version == "."
+        || version == ".."
+        || version.contains('/')
+        || xila_package_manifest::validate_path(version).is_err()
+    {
         return Err(Error::Lifecycle(lifecycle::Error::InvalidVersionPath));
     }
-    if nonce == 0 { return Err(Error::Lifecycle(lifecycle::Error::InvalidTransaction)); }
+    if nonce == 0 {
+        return Err(Error::Lifecycle(lifecycle::Error::InvalidTransaction));
+    }
     store.guarantees().require_crash_safe()?;
     let dir = format!("{BUNDLES_ROOT}/{package}/{version}");
     let (manifest, raw) = verify_directory(store, &dir, key, policy)?;
-    if manifest.name != package || manifest.version != version { return Err(Error::IdentityMismatch); }
+    if manifest.name != package || manifest.version != version {
+        return Err(Error::IdentityMismatch);
+    }
     let record = ActivationRecord::for_manifest_bytes(&raw)?;
     let plan = lifecycle::preflight(&manifest, policy, nonce, store.guarantees())?;
     publish_record(store, &plan, &record)?;
@@ -305,7 +411,10 @@ pub fn activate_existing<S: Store>(
 /// inactive versions and all user/system application data. After the
 /// deactivation sync, a power loss cannot expose the deleted active bundle.
 pub fn uninstall_active<S: Store>(
-    store: &mut S, package: &str, key: &PublicKey, policy: &Policy<'_>,
+    store: &mut S,
+    package: &str,
+    key: &PublicKey,
+    policy: &Policy<'_>,
 ) -> Result<(), Error> {
     store.guarantees().require_crash_safe()?;
     let record = current_record(store, package)?;
@@ -324,10 +433,15 @@ pub fn uninstall_active<S: Store>(
 /// Remove an abandoned, untrusted staging directory for a known transaction
 /// nonce. Never deletes published versions or modifies the active pointer.
 pub fn discard_staging<S: Store>(
-    store: &mut S, manifest: &Manifest, policy: &Policy<'_>, nonce: u64,
+    store: &mut S,
+    manifest: &Manifest,
+    policy: &Policy<'_>,
+    nonce: u64,
 ) -> Result<bool, Error> {
     let plan = lifecycle::preflight(manifest, policy, nonce, store.guarantees())?;
-    if !store.exists(&plan.staging_directory)? { return Ok(false); }
+    if !store.exists(&plan.staging_directory)? {
+        return Ok(false);
+    }
     store.remove_tree(&plan.staging_directory)?;
     store.sync_directory(&plan.bundle_parent)?;
     Ok(true)
