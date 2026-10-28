@@ -9,3 +9,8 @@ publish = false
 
 [lib]
 name = "xila_package_manager"
+
+[dependencies]
+xila-package-manifest = { path = "../manifest" }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256"] }
+miniserde = { version = "0.1.46", default-features = false }
