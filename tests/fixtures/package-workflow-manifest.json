@@ -1,5 +1,5 @@
 {
-  "format_version": 2,
+  "format_version": 1,
   "name": "community.example",
   "version": "0.1.0",
   "target": "wasm32-wasip1",
