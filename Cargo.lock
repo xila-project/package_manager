@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-builder"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getargs",
  "getargs-derive",
@@ -428,18 +428,18 @@ dependencies = [
 
 [[package]]
 name = "xila-package-manager"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "xila-package-manifest"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "miniserde",
 ]
 
 [[package]]
 name = "xila-package-reader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tar-no-std",
  "xila-package-manifest",
@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-writer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tar",
  "xila-package-manifest",
