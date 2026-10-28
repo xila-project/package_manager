@@ -4,8 +4,8 @@
 extern crate alloc;
 
 use tar_no_std::TarArchiveRef;
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_bundle::{verify_bytes, verify_signature};
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_verification::PublicKey;
 
 /// Reasons a TAR archive, manifest or supplied signature was rejected.
@@ -61,8 +61,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
 
     if let Some(key) = trusted {
         let signature = signature.ok_or(Error::MissingSignature)?;
-        verify_signature(raw_manifest, &signature, key)
-            .map_err(|_| Error::InvalidSignature)?;
+        verify_signature(raw_manifest, &signature, key).map_err(|_| Error::InvalidSignature)?;
     }
 
     for declared in &manifest.files {
