@@ -3,7 +3,13 @@
 #![doc = include_str!("../README.md")]
 
 extern crate alloc;
+
+pub mod developer;
 use alloc::{string::String, vec::Vec};
+pub use developer::{
+    DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
+    encode_developer,
+};
 use miniserde::{Deserialize, Serialize};
 
 /// Current experimental manifest format version.

@@ -417,6 +417,7 @@ dependencies = [
 name = "xila-package-builder"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "getargs",
  "getargs-derive",
  "tempfile",

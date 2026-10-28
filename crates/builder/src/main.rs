@@ -1,4 +1,12 @@
 #![doc = include_str!("../README.md")]
+mod bundle;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InventoryMode {
+    Legacy,
+    Developer,
+    Bundle,
+}
 use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
@@ -44,7 +52,12 @@ fn hash_file(path: &Path) -> Result<(u64, String)> {
     Ok((total, hex))
 }
 
-fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) -> Result<()> {
+fn collect_files(
+    root: &Path,
+    current: &Path,
+    output: &mut Vec<ManifestFile>,
+    mode: InventoryMode,
+) -> Result<()> {
     let mut paths = fs::read_dir(current)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<io::Result<Vec<_>>>()?;
@@ -54,8 +67,26 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<ManifestFile>) ->
         if metadata.file_type().is_symlink() {
             return Err(invalid("symbolic links are not allowed").into());
         }
+        if current == root {
+            if path.file_name().is_some_and(|name| name == ".xila") {
+                if mode == InventoryMode::Bundle && metadata.is_dir() {
+                    continue;
+                }
+                return Err(invalid(".xila is reserved for bundle metadata").into());
+            }
+            if mode == InventoryMode::Developer
+                && path
+                    .file_name()
+                    .is_some_and(|name| name == xila_package_manifest::DEVELOPER_MANIFEST_FILENAME)
+            {
+                if !metadata.is_file() {
+                    return Err(invalid("developer manifest is not a regular file").into());
+                }
+                continue;
+            }
+        }
         if metadata.is_dir() {
-            collect_files(root, &path, output)?;
+            collect_files(root, &path, output, mode)?;
             continue;
         }
         if !metadata.is_file() {
@@ -105,7 +136,7 @@ fn generate(
         return Err(invalid("output manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files)?;
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let manifest = Manifest {
         schema: Some(xila_package_manifest::SCHEMA_URL.into()),
@@ -130,7 +161,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
         return Err(invalid("manifest must reside outside the source directory").into());
     }
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files)?;
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
     files.sort_by(|a, b| a.path.cmp(&b.path));
     manifest.files = files;
     write_manifest(manifest_path, &manifest)
@@ -246,6 +277,8 @@ struct Cli<'a> {
 enum Command<'a> {
     /// Generate or update a package manifest.
     Manifest(ManifestCommand<'a>),
+    /// Build an unpacked, self-contained application bundle or archive it.
+    Bundle(BundleCommand<'a>),
     /// Create an archive from the validated manifest and source files.
     Pack {
         /// Directory containing the application payload files.
@@ -256,6 +289,82 @@ enum Command<'a> {
         output: &'a str,
         /// Optional 64-byte Ed25519 signature prepared outside this tool.
         signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct BundleCommand<'a> {
+    #[command(subcommand)]
+    command: BundleOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum BundleOperation<'a> {
+    /// Create the developer source layout and editable xila-package.json.
+    Init {
+        /// New directory to create (must not exist).
+        directory: &'a str,
+        /// Reverse-DNS application/package identifier, e.g. community.weather.
+        name: &'a str,
+        /// Version string.
+        version: &'a str,
+        /// Target architecture (e.g. wasm32-wasip1).
+        target: &'a str,
+        /// Minimum supported Xila ABI.
+        minimum_xila_abi: u32,
+        /// Bundle-relative executable path (default bin/main.wasm).
+        #[arg(long)]
+        entrypoint: Option<&'a str>,
+        /// Fallback launcher name (default package identifier).
+        #[arg(long)]
+        display_name: Option<&'a str>,
+        /// Bundle-relative application icon path.
+        #[arg(long)]
+        icon: Option<&'a str>,
+        /// Initialize a standalone executable package without an application.
+        #[arg(long)]
+        standalone: bool,
+    },
+    /// Generate the final hashed .xila manifest and unpacked bundle directory.
+    Build {
+        /// Directory containing editable xila-package.json and all payload files.
+        directory: &'a str,
+        /// New output bundle directory (must not exist).
+        output: &'a str,
+        /// Optional raw 32-byte Ed25519 private seed file outside source.
+        #[arg(long)]
+        signing_key: Option<&'a str>,
+    },
+    /// Export domain-separated manifest bytes for external signing/HSM/CI.
+    SigningPayload {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// File to create containing the exact message to sign.
+        output: &'a str,
+    },
+    /// Verify and attach an externally produced signature to a built bundle.
+    AttachSignature {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// Raw 64-byte Ed25519 signature.
+        signature: &'a str,
+        /// Raw 32-byte Ed25519 public key for signature verification.
+        public_key: &'a str,
+    },
+    /// Verify every payload hash and optionally the publisher's signature.
+    Verify {
+        /// Previously built bundle directory.
+        directory: &'a str,
+        /// Trusted public key (required for authentication, not just integrity).
+        #[arg(long)]
+        public_key: Option<&'a str>,
+    },
+    /// Create a deterministic .xpk archive from a completed bundle directory.
+    Archive {
+        /// Path to the self-contained bundle directory.
+        directory: &'a str,
+        /// Destination .xpk archive.
+        output: &'a str,
     },
 }
 
@@ -344,6 +453,60 @@ fn run() -> Result<()> {
                 icon,
                 hidden,
             } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
+        },
+        Command::Bundle(BundleCommand { command }) => match command {
+            BundleOperation::Init {
+                directory,
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            } => bundle::init(bundle::InitOptions {
+                directory: Path::new(directory),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            }),
+            BundleOperation::Build {
+                directory,
+                output,
+                signing_key,
+            } => bundle::build(
+                Path::new(directory),
+                Path::new(output),
+                signing_key.map(Path::new),
+            ),
+            BundleOperation::SigningPayload { directory, output } => {
+                bundle::export_signing_payload(Path::new(directory), Path::new(output))
+            }
+            BundleOperation::AttachSignature {
+                directory,
+                signature,
+                public_key,
+            } => bundle::attach_signature(
+                Path::new(directory),
+                Path::new(signature),
+                Path::new(public_key),
+            ),
+            BundleOperation::Verify {
+                directory,
+                public_key,
+            } => {
+                bundle::verify(Path::new(directory), public_key.map(Path::new))?;
+                Ok(())
+            }
+            BundleOperation::Archive { directory, output } => {
+                bundle::archive(Path::new(directory), Path::new(output))
+            }
         },
         Command::Pack {
             directory,
