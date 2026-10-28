@@ -465,8 +465,8 @@ fn run() -> Result<()> {
                 display_name,
                 icon,
                 standalone,
-            } => bundle::init(
-                Path::new(directory),
+            } => bundle::init(bundle::InitOptions {
+                directory: Path::new(directory),
                 name,
                 version,
                 target,
@@ -475,7 +475,7 @@ fn run() -> Result<()> {
                 display_name,
                 icon,
                 standalone,
-            ),
+            }),
             BundleOperation::Build {
                 directory,
                 output,
