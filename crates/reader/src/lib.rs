@@ -86,7 +86,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
             raw_manifest,
             &mut message,
         )
-            .map_err(|_| Error::InvalidManifest)?;
+        .map_err(|_| Error::InvalidManifest)?;
         key.verify(raw, &signature)
             .map_err(|_| Error::InvalidSignature)?;
     }
