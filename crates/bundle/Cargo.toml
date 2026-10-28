@@ -1,0 +1,13 @@
+[package]
+publish = false
+name = "xila-package-bundle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Portable no_std bundle inventory, SHA-256 and Ed25519 signing-message primitives"
+
+[dependencies]
+xila-package-manifest = { path = "../manifest" }
+xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }

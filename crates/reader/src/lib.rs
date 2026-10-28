@@ -3,10 +3,10 @@
 #![doc = include_str!("../README.md")]
 extern crate alloc;
 
-use alloc::vec;
 use tar_no_std::TarArchiveRef;
-use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN};
-use xila_package_verification::{ContentVerifier, PublicKey};
+use xila_package_bundle::{verify_bytes, verify_signature};
+use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
+use xila_package_verification::PublicKey;
 
 /// Reasons a TAR archive, manifest or supplied signature was rejected.
 #[derive(Debug, PartialEq, Eq)]
@@ -17,25 +17,6 @@ pub enum Error {
     MissingSignature,
     InvalidSignature,
     InvalidDigest,
-}
-
-fn nibble(ch: u8) -> Result<u8, Error> {
-    match ch {
-        b'0'..=b'9' => Ok(ch - b'0'),
-        b'a'..=b'f' => Ok(ch - b'a' + 10),
-        _ => Err(Error::InvalidDigest),
-    }
-}
-
-fn decode_digest(hex: &str) -> Result<[u8; 32], Error> {
-    if hex.len() != 64 {
-        return Err(Error::InvalidDigest);
-    }
-    let mut bytes = [0u8; 32];
-    for (n, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        bytes[n] = nibble(pair[0])? << 4 | nibble(pair[1])?;
-    }
-    Ok(bytes)
 }
 
 fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifest, Error> {
@@ -80,11 +61,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
 
     if let Some(key) = trusted {
         let signature = signature.ok_or(Error::MissingSignature)?;
-        let mut message = vec![0u8; SIGNED_DOMAIN.len() + 4 + raw_manifest.len()];
-        let raw = xila_package_manifest::signed_message_into(raw_manifest, &mut message)
-            .map_err(|_| Error::InvalidManifest)?;
-        key.verify(raw, &signature)
-            .map_err(|_| Error::InvalidSignature)?;
+        verify_signature(raw_manifest, &signature, key).map_err(|_| Error::InvalidSignature)?;
     }
 
     for declared in &manifest.files {
@@ -94,13 +71,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
         if path != declared.path || present.size() as u64 != declared.size {
             return Err(Error::UnexpectedEntry);
         }
-        let digest = decode_digest(&declared.sha256)?;
-        let mut verifier =
-            ContentVerifier::new(declared.size, digest).map_err(|_| Error::InvalidDigest)?;
-        verifier
-            .update(present.data())
-            .map_err(|_| Error::InvalidDigest)?;
-        verifier.verify().map_err(|_| Error::InvalidDigest)?;
+        verify_bytes(declared, present.data()).map_err(|_| Error::InvalidDigest)?;
         entry = entries.next();
     }
     if entry.is_some() {

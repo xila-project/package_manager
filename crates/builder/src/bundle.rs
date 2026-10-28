@@ -11,10 +11,10 @@ use std::{
 };
 
 use ed25519_dalek::{Signer, SigningKey};
+use xila_package_bundle::{Inventory, verify_signature};
 use xila_package_manifest::{
     Application, DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest,
-    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN, decode_developer,
-    encode_developer,
+    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, decode_developer, encode_developer,
 };
 use xila_package_verification::PublicKey;
 
@@ -83,12 +83,8 @@ fn read_runtime_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
 }
 
 fn signing_message(raw_manifest: &[u8]) -> Result<Vec<u8>> {
-    let mut bytes = vec![0u8; SIGNED_DOMAIN.len() + 4 + raw_manifest.len()];
-    let len = xila_package_manifest::signed_message_into(raw_manifest, &mut bytes)
-        .map_err(|_| invalid("runtime manifest is too large"))?
-        .len();
-    bytes.truncate(len);
-    Ok(bytes)
+    xila_package_bundle::signing_message(raw_manifest)
+        .map_err(|_| invalid("invalid signing message").into())
 }
 
 /// Prepare a developer-owned source directory. Generated hashes and signature
@@ -181,8 +177,7 @@ fn sign_manifest(raw_manifest: &[u8], key_path: &Path) -> Result<[u8; 64]> {
     let signature = signer.sign(&message).to_bytes();
     let public = PublicKey::from_bytes(&signer.verifying_key().to_bytes())
         .map_err(|_| invalid("invalid signing public key"))?;
-    public
-        .verify(&message, &signature)
+    verify_signature(raw_manifest, &signature, &public)
         .map_err(|_| invalid("signature self-check failed"))?;
     Ok(signature)
 }
@@ -235,15 +230,18 @@ pub fn build(source: &Path, output: &Path, signing_key: Option<&Path>) -> Result
 
     let mut files = Vec::new();
     collect_files(&source, &source, &mut files, InventoryMode::Developer)?;
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    for file in &files {
+    let mut inventory = Inventory::new();
+    for file in files {
         // The native writer uses restricted USTAR and rejects longer names.
         if !file.path.is_ascii() || file.path.len() > 99 {
             return Err(invalid("payload filename must be ASCII and <= 99 bytes").into());
         }
+        inventory
+            .push(file)
+            .map_err(|_| invalid("invalid bundle inventory"))?;
     }
-    let manifest = config
-        .into_bundle_manifest(files)
+    let manifest = inventory
+        .finish(config)
         .map_err(|_| invalid("missing executable/icon or invalid application metadata"))?;
     let raw = xila_package_manifest::encode(&manifest)
         .map_err(|_| invalid("generated runtime manifest failed validation"))?;
@@ -273,7 +271,7 @@ pub fn build(source: &Path, output: &Path, signing_key: Option<&Path>) -> Result
                 fs::create_dir_all(parent)?;
             }
             fs::copy(from, &to)?;
-            let (size, sha256) = hash_file(&to)?;
+            let (size, sha256) = hash_file(&to, &file.path)?;
             if size != file.size || sha256 != file.sha256 {
                 return Err(invalid("payload modified during bundle construction").into());
             }
@@ -326,8 +324,7 @@ pub fn attach_signature(bundle: &Path, signature: &Path, public_key: &Path) -> R
     }
     let signature = checked_signature(signature)?;
     let public = checked_public_key(public_key)?;
-    public
-        .verify(&signing_message(&raw)?, &signature)
+    verify_signature(&raw, &signature, &public)
         .map_err(|_| invalid("detached signature did not verify"))?;
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -345,8 +342,7 @@ pub fn verify(bundle: &Path, public_key: Option<&Path>) -> Result<Manifest> {
     let (manifest, raw, signature) = inspect_bundle(&root)?;
     if let Some(public_key) = public_key {
         let signature = signature.ok_or_else(|| invalid("signature is missing"))?;
-        checked_public_key(public_key)?
-            .verify(&signing_message(&raw)?, &signature)
+        verify_signature(&raw, &signature, &checked_public_key(public_key)?)
             .map_err(|_| invalid("bundle signature invalid"))?;
     }
     Ok(manifest)

@@ -10,6 +10,7 @@ Shared Rust workspace for building, signing and validating Xila application bund
 | --- | --- |
 | `xila-package-verification` | `no_std` incremental SHA-256 and strict Ed25519 verification, migrated from Xila Core |
 | `xila-package-manifest` | Shared versioned schema and validation via Miniserde JSON (`no_std + alloc`) |
+| `xila-package-bundle` | `no_std + alloc` streaming hashes, file inventory and signing helpers, reusable with Xila VFS |
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
 | `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them |
@@ -32,6 +33,23 @@ and CI catch structural mistakes; it does not authenticate package content or
 grant runtime capabilities.
 
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
+
+## Portable logic reused by Xila
+
+The existing `xila-package-manifest` crate uses `miniserde` for both the
+developer-authored JSON and the signed runtime JSON, just like Xila Core.
+
+The `xila-package` CLI uses `getargs`/`getargs-derive`, as does Xila's
+command-line Shell. The parser now avoids the optional `std` feature, since
+`from_args` can parse borrowed strings without it.
+
+The new `xila-package-bundle` crate uses the existing
+`xila-package-verification` SHA-256/Ed25519 primitives for incremental
+file hashing, complete inventories and signature-message verification.
+It contains **no `std::fs` or `tar` dependency**. The native builder
+retains directory traversal, file copying, signing-key file reads and TAR
+creation; these can be replaced with Xila-specific adapters later without
+changing the portable bundle and manifest formats.
 
 ## Native bundle build workflow
 
