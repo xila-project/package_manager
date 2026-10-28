@@ -139,7 +139,7 @@ fn sha256_from_hex(hex: &str) -> Result<[u8; 32], Error> {
     if hex.len() != 64 {
         return Err(Error::CorruptInstalledFile);
     }
-    for (i, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let a = (pair[0] as char)
             .to_digit(16)
             .ok_or(Error::CorruptInstalledFile)?;
