@@ -2,20 +2,19 @@
 #![forbid(unsafe_code)]
 //! # Xila package manager
 //!
-//! Platform-independent coordination layer for future Xila application
-//! installation and repository operations.
+//! The portable, offline-first lifecycle contract lives in [`lifecycle`].
+//! It validates install policies, immutable bundle paths, the persistent
+//! activation record and the backend guarantees required for power-loss-safe
+//! publication.
 //!
-//! **This crate currently has no public installer API.** The existing
-//! subcrates provide:
+//! This is a **planning/metadata layer**, not yet a working installer.
+//! Archive extraction, trusted-key selection, VFS integration, streaming
+//! writes and actual power-loss guarantees remain platform responsibilities.
+//! Never treat a planned path or activation digest alone as authorization
+//! to execute code.
 //!
-//! - `xila-package-manifest`: a versioned `no_std + alloc` archive schema.
-//! - `xila-package-reader`: full-buffer TAR inspection and verification.
-//! - `xila-package-verification`: cryptographic primitives.
-//! - `xila-package-writer`: host-only TAR creation.
-//! - `xila-package-builder`: host-only command-line packaging.
-//!
-//! The eventual embedded installer will require explicit abstractions for
-//! filesystems, networking, trust roots, and atomic installation. No platform
-//! dependency or speculative API is introduced by this placeholder.
-//!
-//! See the [Xila package-management tracking issue](https://github.com/xila-project/core/issues/308).
+//! See [Core #491](https://github.com/xila-project/core/issues/491).
+
+extern crate alloc;
+
+pub mod lifecycle;
