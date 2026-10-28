@@ -374,7 +374,7 @@ mod tests {
         m.format_version = LEGACY_FORMAT_VERSION;
         m.application = None;
         let serialized = encode(&m).unwrap();
-        assert!(!serialized.contains("\\"application\\""));
+        assert!(!serialized.contains("\"application\""));
         assert_eq!(decode(serialized.as_bytes()), Ok(m));
         let mut output = vec![0; SIGNED_DOMAIN.len() + 4 + serialized.len()];
         assert!(
