@@ -147,9 +147,8 @@ fn set_application(
     let bytes = fs::read(manifest_path)?;
     let mut manifest =
         xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
-    // Upgrading a legacy unsigned manifest changes its exact bytes. Any
-    // detached signature must be produced *after* this operation.
-    manifest.format_version = FORMAT_VERSION;
+    // Adding application metadata changes the exact bytes. Any detached
+    // signature must be produced *after* this operation.
     manifest.application = Some(Application {
         entrypoint: entrypoint.into(),
         display_name: display_name.into(),
