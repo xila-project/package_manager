@@ -12,9 +12,12 @@ name = "xila-package"
 path = "src/main.rs"
 
 [dependencies]
-getargs-derive = { version = "0.1.0", features = ["std"] }
-getargs = "0.5"
+# Same no_std getargs/getargs-derive family as the Xila command-line Shell.
+# from_args borrows its inputs, so the native binary does not need the std feature.
+getargs-derive = { version = "0.1.0", default-features = false }
+getargs = { version = "0.5", default-features = false }
 xila-package-manifest = { path = "../manifest" }
+xila-package-bundle = { path = "../bundle" }
 xila-package-writer = { path = "../writer" }
 xila-package-reader = { path = "../reader" }
 xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
