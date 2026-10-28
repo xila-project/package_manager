@@ -28,6 +28,7 @@ manifest bytes**, not an arbitrary reserialization.
 use xila_package_manifest::{Manifest, ManifestFile, Application, FORMAT_VERSION, encode, decode};
 
 let manifest = Manifest {
+    schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
     name: "community.weather".into(),
     version: "1.0.0".into(),
