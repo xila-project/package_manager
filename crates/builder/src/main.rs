@@ -10,13 +10,12 @@ enum InventoryMode {
 use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
-    fmt::Write as _,
     fs::{self, File},
     io::{self, Read},
     path::{Path, PathBuf},
 };
 use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
-use xila_package_verification::Sha256Verifier;
+use xila_package_bundle::FileHasher;
 use xila_package_writer::SourceFile;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -25,31 +24,22 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
-fn hash_file(path: &Path) -> Result<(u64, String)> {
+fn hash_file(path: &Path, relative: &str) -> Result<(u64, String)> {
     let mut file = File::open(path)?;
-    let mut hasher = Sha256Verifier::new();
-    let mut total = 0_u64;
+    let mut hasher =
+        FileHasher::new(relative).map_err(|_| invalid("invalid file path for hashing"))?;
     let mut buffer = [0u8; 8192];
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
         }
-        total = total
-            .checked_add(read as u64)
-            .ok_or_else(|| invalid("file too large"))?;
         hasher
             .update(&buffer[..read])
-            .map_err(|_| invalid("hash failure"))?;
+            .map_err(|_| invalid("file hashing failed"))?;
     }
-    let mut hex = String::with_capacity(64);
-    for b in hasher
-        .finalize()
-        .map_err(|_| invalid("hash finalization failure"))?
-    {
-        write!(&mut hex, "{b:02x}")?;
-    }
-    Ok((total, hex))
+    let metadata = hasher.finish().map_err(|_| invalid("file hashing failed"))?;
+    Ok((metadata.size, metadata.sha256))
 }
 
 fn collect_files(
@@ -99,7 +89,7 @@ fn collect_files(
         }
         let name = components.join("/");
         xila_package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
-        let (size, sha256) = hash_file(&path)?;
+        let (size, sha256) = hash_file(&path, &name)?;
         output.push(ManifestFile {
             path: name,
             size,
