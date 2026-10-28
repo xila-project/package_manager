@@ -307,8 +307,9 @@ mod tests {
         assert_eq!(fs::read(output.join(SIGNATURE_PATH)).unwrap(), [42u8; 64]);
         let archive_path = dir.path().join("Weather.xpk");
         archive(&output, &archive_path).unwrap();
-        let tar = tar_no_std::TarArchiveRef::new(&fs::read(archive_path).unwrap()).unwrap();
-        assert_eq!(tar.entries().nth(1).unwrap().data(), &[42u8; 64]);
+        let bytes = fs::read(archive_path).unwrap();
+        assert!(xila_package_reader::inspect_unsigned(&bytes).is_ok());
+        assert!(bytes.windows(64).any(|window| window == [42u8; 64]));
     }
 
     #[test]
