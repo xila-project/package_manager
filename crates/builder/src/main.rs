@@ -75,7 +75,9 @@ fn collect_files(
                 return Err(invalid(".xila is reserved for bundle metadata").into());
             }
             if mode == InventoryMode::Developer
-                && path.file_name().is_some_and(|name| name == xila_package_manifest::DEVELOPER_MANIFEST_FILENAME)
+                && path
+                    .file_name()
+                    .is_some_and(|name| name == xila_package_manifest::DEVELOPER_MANIFEST_FILENAME)
             {
                 if !metadata.is_file() {
                     return Err(invalid("developer manifest is not a regular file").into());
