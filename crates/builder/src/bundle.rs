@@ -426,17 +426,20 @@ mod tests {
             b"icon bytes"
         );
         assert!(verify(&bundle, None).is_ok());
-        assert!(init(InitOptions {
-            directory: &source,
-            name: "community.weather",
-            version: "1.0.0",
-            target: "wasm32-wasip1",
-            minimum_xila_abi: 1,
-            entrypoint: None,
-            display_name: None,
-            icon: None,
-            standalone: false,
-        }).is_err());
+        assert!(
+            init(InitOptions {
+                directory: &source,
+                name: "community.weather",
+                version: "1.0.0",
+                target: "wasm32-wasip1",
+                minimum_xila_abi: 1,
+                entrypoint: None,
+                display_name: None,
+                icon: None,
+                standalone: false,
+            })
+            .is_err()
+        );
     }
 
     #[test]
