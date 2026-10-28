@@ -3,6 +3,9 @@
 #![doc = include_str!("../README.md")]
 extern crate alloc;
 
+mod stream;
+pub use stream::{StreamError, StreamingVerifier, inspect_streaming};
+
 use tar_no_std::TarArchiveRef;
 use xila_package_bundle::{verify_bytes, verify_signature};
 use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
