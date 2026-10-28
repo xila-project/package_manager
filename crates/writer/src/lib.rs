@@ -104,6 +104,7 @@ mod tests {
 
     fn fixture() -> Manifest {
         Manifest {
+            schema: Some(xila_package_manifest::SCHEMA_URL.into()),
             format_version: xila_package_manifest::FORMAT_VERSION,
             name: "xila.calculator".into(),
             version: "1.0.0".into(),
