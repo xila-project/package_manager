@@ -312,7 +312,7 @@ mod tests {
     fn standalone_package_has_no_application() {
         let mut m = example();
         m.application = None;
-        assert_eq!(decode(encode(&m).unwrap().as_bytes()), Ok(m));
+        assert_eq!(decode(encode(&m).unwrap().as_bytes()), Ok(m.clone()));
         m.files.clear();
         assert_eq!(validate(&m), Err(Error::InvalidFileList));
     }
