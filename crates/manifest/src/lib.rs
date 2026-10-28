@@ -7,9 +7,7 @@ use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
 /// Current experimental manifest format version.
-pub const FORMAT_VERSION: u32 = 2;
-/// Original experimental archives remain readable during migration.
-pub const LEGACY_FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 1;
 /// Maximum accepted manifest JSON byte length.
 pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 /// Maximum number of payload files in a manifest.
@@ -20,8 +18,6 @@ pub const MANIFEST_PATH: &str = ".xila/manifest.json";
 pub const SIGNATURE_PATH: &str = ".xila/manifest.sig";
 /// Domain separator proposed for signing exact manifest bytes.
 pub const SIGNED_DOMAIN: &[u8] = b"XILA-PACKAGE-MANIFEST-V1\0";
-/// V2 signatures use a distinct domain to avoid version confusion.
-pub const SIGNED_DOMAIN_V2: &[u8] = b"XILA-PACKAGE-MANIFEST-V2\0";
 
 /// Reasons a package manifest or path is rejected.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,7 +46,7 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     pub files: Vec<ManifestFile>,
     /// `None` means a standalone executable/data package, not an application.
-    /// Explicitly encoded as JSON null in v2; absent in legacy v1 archives.
+    /// Encoded as JSON null for packages without an application.
     pub application: Option<Application>,
 }
 
@@ -67,50 +63,6 @@ pub struct Application {
     pub icon: String,
     /// Discovery in the launcher, never an instruction to pin to the Dock.
     pub show_in_launcher: bool,
-}
-
-/// Decoder for original v1 archives, which had no application discriminator.
-#[derive(Serialize, Deserialize)]
-struct LegacyManifest {
-    format_version: u32,
-    name: String,
-    version: String,
-    target: String,
-    minimum_xila_abi: u32,
-    capabilities: Vec<String>,
-    files: Vec<ManifestFile>,
-}
-impl From<LegacyManifest> for Manifest {
-    fn from(legacy: LegacyManifest) -> Self {
-        Self {
-            format_version: legacy.format_version,
-            name: legacy.name,
-            version: legacy.version,
-            target: legacy.target,
-            minimum_xila_abi: legacy.minimum_xila_abi,
-            capabilities: legacy.capabilities,
-            files: legacy.files,
-            application: None,
-        }
-    }
-}
-impl From<&Manifest> for LegacyManifest {
-    fn from(value: &Manifest) -> Self {
-        Self {
-            format_version: value.format_version,
-            name: value.name.clone(),
-            version: value.version.clone(),
-            target: value.target.clone(),
-            minimum_xila_abi: value.minimum_xila_abi,
-            capabilities: value.capabilities.clone(),
-            files: value.files.clone(),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct FormatHeader {
-    format_version: u32,
 }
 
 /// One payload file and the expected hash of its uncompressed bytes.
@@ -153,8 +105,7 @@ fn valid_identifier(value: &str) -> bool {
 
 /// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
-    if manifest.format_version != FORMAT_VERSION && manifest.format_version != LEGACY_FORMAT_VERSION
-    {
+    if manifest.format_version != FORMAT_VERSION {
         return Err(Error::UnsupportedVersion);
     }
     if !valid_identifier(&manifest.name)
@@ -207,9 +158,6 @@ pub fn validate(manifest: &Manifest) -> Result<(), Error> {
             return Err(Error::InvalidSize);
         }
     }
-    if manifest.format_version == LEGACY_FORMAT_VERSION && manifest.application.is_some() {
-        return Err(Error::InvalidApplication);
-    }
     if manifest.files.is_empty() && manifest.application.is_none() {
         return Err(Error::InvalidFileList);
     }
@@ -248,16 +196,8 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let header: FormatHeader = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
-    let value = match header.format_version {
-        LEGACY_FORMAT_VERSION => {
-            let legacy: LegacyManifest =
-                miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
-            legacy.into()
-        }
-        FORMAT_VERSION => miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?,
-        _ => return Err(Error::UnsupportedVersion),
-    };
+    let value: Manifest =
+        miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
     validate(&value)?;
     Ok(value)
 }
@@ -265,48 +205,28 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
 /// Serialize a validated manifest to bounded JSON for use inside TAR.
 pub fn encode(value: &Manifest) -> Result<String, Error> {
     validate(value)?;
-    let json = if value.format_version == LEGACY_FORMAT_VERSION {
-        miniserde::json::to_string(&LegacyManifest::from(value))
-    } else {
-        miniserde::json::to_string(value)
-    };
+    let json = miniserde::json::to_string(value);
     if json.len() > MAX_MANIFEST_BYTES {
         return Err(Error::TooLarge);
     }
     Ok(json)
 }
 
-/// Sign exact stored bytes using a versioned domain. Call after decoding the
-/// manifest to avoid an additional parse on constrained devices.
-pub fn signed_message_for_version_into<'a>(
-    version: u32,
-    bytes: &[u8],
-    output: &'a mut [u8],
-) -> Result<&'a [u8], Error> {
+/// Prepare the signature message from the exact stored manifest bytes,
+/// without reserializing the JSON or allocating internally.
+pub fn signed_message_into<'a>(bytes: &[u8], output: &'a mut [u8]) -> Result<&'a [u8], Error> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(Error::TooLarge);
     }
-    let domain = match version {
-        LEGACY_FORMAT_VERSION => SIGNED_DOMAIN,
-        FORMAT_VERSION => SIGNED_DOMAIN_V2,
-        _ => return Err(Error::UnsupportedVersion),
-    };
-    let prefix = domain.len();
+    let prefix = SIGNED_DOMAIN.len();
     let len = prefix + 4 + bytes.len();
     if output.len() < len {
         return Err(Error::TooLarge);
     }
-    output[..prefix].copy_from_slice(domain);
+    output[..prefix].copy_from_slice(SIGNED_DOMAIN);
     output[prefix..prefix + 4].copy_from_slice(&(bytes.len() as u32).to_le_bytes());
     output[prefix + 4..len].copy_from_slice(bytes);
     Ok(&output[..len])
-}
-
-/// Build the signed bytes for the given serialized manifest, without
-/// reserializing it or silently assuming the legacy signature domain.
-pub fn signed_message_into<'a>(bytes: &[u8], output: &'a mut [u8]) -> Result<&'a [u8], Error> {
-    let manifest = decode(bytes)?;
-    signed_message_for_version_into(manifest.format_version, bytes, output)
 }
 
 #[cfg(test)]
@@ -364,22 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_archives_remain_decodable_and_use_the_v1_domain() {
-        let mut m = example();
-        m.format_version = LEGACY_FORMAT_VERSION;
-        m.application = None;
-        let serialized = encode(&m).unwrap();
-        assert!(!serialized.contains("\"application\""));
-        assert_eq!(decode(serialized.as_bytes()), Ok(m));
-        let mut output = vec![0; SIGNED_DOMAIN.len() + 4 + serialized.len()];
-        assert!(
-            signed_message_into(serialized.as_bytes(), &mut output)
-                .unwrap()
-                .starts_with(SIGNED_DOMAIN)
-        );
-    }
-
-    #[test]
     fn standalone_package_has_no_application() {
         let mut m = example();
         m.application = None;
@@ -398,31 +302,13 @@ mod tests {
     }
 
     #[test]
-    fn signature_domain_changes_across_manifest_versions() {
-        let current = encode(&example()).unwrap();
-        let mut legacy = example();
-        legacy.format_version = LEGACY_FORMAT_VERSION;
-        legacy.application = None;
-        let older = encode(&legacy).unwrap();
-        let mut current_bytes = vec![0; SIGNED_DOMAIN_V2.len() + 4 + current.len()];
-        let mut older_bytes = vec![0; SIGNED_DOMAIN.len() + 4 + older.len()];
-        assert!(signed_message_into(current.as_bytes(), &mut current_bytes)
-            .unwrap()
-            .starts_with(SIGNED_DOMAIN_V2));
-        assert!(signed_message_into(older.as_bytes(), &mut older_bytes)
-            .unwrap()
-            .starts_with(SIGNED_DOMAIN));
-        assert_ne!(SIGNED_DOMAIN, SIGNED_DOMAIN_V2);
-    }
-
-    #[test]
     fn reject_large_input_and_validate_signed_message() {
         let json = encode(&example()).unwrap();
-        let mut bytes = vec![0; SIGNED_DOMAIN_V2.len() + 4 + json.len()];
+        let mut bytes = vec![0; SIGNED_DOMAIN.len() + 4 + json.len()];
         let message = signed_message_into(json.as_bytes(), &mut bytes).unwrap();
-        assert!(message.starts_with(SIGNED_DOMAIN_V2));
+        assert!(message.starts_with(SIGNED_DOMAIN));
         assert_eq!(
-            &message[SIGNED_DOMAIN_V2.len()..SIGNED_DOMAIN_V2.len() + 4],
+            &message[SIGNED_DOMAIN.len()..SIGNED_DOMAIN.len() + 4],
             &(json.len() as u32).to_le_bytes()
         );
         assert_eq!(
