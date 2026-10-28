@@ -21,24 +21,26 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v7
-      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: target
           cache-generation: v1-package-manager
-      - name: Verify committed dependency lockfile
+      - name: "Validate | Cargo lockfile"
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
-      - name: Check formatting
+      - name: "Lint | Rust formatting"
         run: mise run format:check
-      - name: Check workspace
+      - name: "Validate | Cargo workspace"
         run: mise run check
-      - name: Lint workspace
+      - name: "Lint | Cargo workspace"
         run: mise run clippy
-      - name: Run tests
+      - name: "Test | Cargo workspace"
         run: mise run test
-      - name: Build and check Rustdoc
+      - name: "Build | Rust documentation"
         run: mise run doc:check
-      - name: Upload generated Rust API documentation
+      - name: "Report | Upload Rust documentation"
         uses: actions/upload-artifact@v7
         with:
           name: rustdoc
@@ -51,10 +53,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - name: "Setup | Python"
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Install schema validator
+      - name: "Setup | JSON Schema validator"
         run: python -m pip install jsonschema==4.25.1
-      - name: Validate schema and sample manifests
+      - name: "Validate | Package manifest samples"
         run: python -m unittest discover -s tests -p 'test_manifest_schema.py'

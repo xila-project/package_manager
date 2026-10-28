@@ -19,13 +19,15 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+      - name: "Setup | Rust toolchain"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-enabled: "false"
-      - name: Compile native release executable
+      - name: "Build | Linux ARM64 package builder"
         run: cargo build --locked --release --target aarch64-unknown-linux-gnu --package xila-package-builder
-      - name: Execute ARM64 release binary
+      - name: "Test | ARM64 release executable"
         run: target/aarch64-unknown-linux-gnu/release/xila-package --version
