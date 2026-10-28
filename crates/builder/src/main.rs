@@ -298,18 +298,66 @@ struct BundleCommand<'a> {
 
 #[derive(Debug, Subcommand)]
 enum BundleOperation<'a> {
-    /// Construct a directory bundle containing manifest, executables and resources.
-    Build {
-        /// Directory containing payload files.
+    /// Create the developer source layout and editable xila-package.json.
+    Init {
+        /// New directory to create (must not exist).
         directory: &'a str,
-        /// Canonical manifest JSON produced by 'manifest generate/update'.
-        manifest: &'a str,
-        /// Output self-contained bundle directory (for example Weather.app).
-        output: &'a str,
-        /// Optional externally generated detached 64-byte Ed25519 signature.
-        signature: Option<&'a str>,
+        /// Reverse-DNS application/package identifier, e.g. community.weather.
+        name: &'a str,
+        /// Version string.
+        version: &'a str,
+        /// Target architecture (e.g. wasm32-wasip1).
+        target: &'a str,
+        /// Minimum supported Xila ABI.
+        minimum_xila_abi: u32,
+        /// Bundle-relative executable path (default bin/main.wasm).
+        #[arg(long)]
+        entrypoint: Option<&'a str>,
+        /// Fallback launcher name (default package identifier).
+        #[arg(long)]
+        display_name: Option<&'a str>,
+        /// Bundle-relative application icon path.
+        #[arg(long)]
+        icon: Option<&'a str>,
+        /// Initialize a standalone executable package without an application.
+        #[arg(long)]
+        standalone: bool,
     },
-    /// Create a deterministic .xpk archive from an already-built directory bundle.
+    /// Generate the final hashed .xila manifest and unpacked bundle directory.
+    Build {
+        /// Directory containing editable xila-package.json and all payload files.
+        directory: &'a str,
+        /// New output bundle directory (must not exist).
+        output: &'a str,
+        /// Optional raw 32-byte Ed25519 private seed file outside source.
+        #[arg(long)]
+        signing_key: Option<&'a str>,
+    },
+    /// Export domain-separated manifest bytes for external signing/HSM/CI.
+    SigningPayload {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// File to create containing the exact message to sign.
+        output: &'a str,
+    },
+    /// Verify and attach an externally produced signature to a built bundle.
+    AttachSignature {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// Raw 64-byte Ed25519 signature.
+        signature: &'a str,
+        /// Raw 32-byte Ed25519 public key for signature verification.
+        public_key: &'a str,
+    },
+    /// Verify every payload hash and optionally the publisher's signature.
+    Verify {
+        /// Previously built bundle directory.
+        directory: &'a str,
+        /// Trusted public key (required for authentication, not just integrity).
+        #[arg(long)]
+        public_key: Option<&'a str>,
+    },
+    /// Create a deterministic .xpk archive from a completed bundle directory.
     Archive {
         /// Path to the self-contained bundle directory.
         directory: &'a str,
@@ -405,17 +453,55 @@ fn run() -> Result<()> {
             } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
         },
         Command::Bundle(BundleCommand { command }) => match command {
+            BundleOperation::Init {
+                directory,
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            } => bundle::init(
+                Path::new(directory),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            ),
             BundleOperation::Build {
                 directory,
-                manifest,
                 output,
-                signature,
+                signing_key,
             } => bundle::build(
                 Path::new(directory),
-                Path::new(manifest),
                 Path::new(output),
-                signature.map(Path::new),
+                signing_key.map(Path::new),
             ),
+            BundleOperation::SigningPayload { directory, output } => {
+                bundle::export_signing_payload(Path::new(directory), Path::new(output))
+            }
+            BundleOperation::AttachSignature {
+                directory,
+                signature,
+                public_key,
+            } => bundle::attach_signature(
+                Path::new(directory),
+                Path::new(signature),
+                Path::new(public_key),
+            ),
+            BundleOperation::Verify {
+                directory,
+                public_key,
+            } => {
+                bundle::verify(Path::new(directory), public_key.map(Path::new))?;
+                Ok(())
+            }
             BundleOperation::Archive { directory, output } => {
                 bundle::archive(Path::new(directory), Path::new(output))
             }
