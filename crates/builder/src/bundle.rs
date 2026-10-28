@@ -66,10 +66,7 @@ fn temporary_directory(destination: &Path) -> Result<PathBuf> {
         .file_name()
         .ok_or_else(|| invalid("output path must have a filename"))?
         .to_string_lossy();
-    Ok(destination.with_file_name(format!(
-        ".{name}.xila-build-{}",
-        std::process::id()
-    )))
+    Ok(destination.with_file_name(format!(".{name}.xila-build-{}", std::process::id())))
 }
 
 fn read_runtime_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
@@ -77,8 +74,8 @@ fn read_runtime_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
     let raw = fs::read(path)?;
     let manifest =
         xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid runtime manifest"))?;
-    let canonical =
-        xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid runtime manifest"))?;
+    let canonical = xila_package_manifest::encode(&manifest)
+        .map_err(|_| invalid("invalid runtime manifest"))?;
     if canonical.as_bytes() != raw {
         return Err(invalid("noncanonical runtime manifest").into());
     }
@@ -383,7 +380,11 @@ mod tests {
         fs::write(source.join("bin/weather.wasm"), b"wasm executable").unwrap();
         fs::create_dir_all(source.join("resources/translations")).unwrap();
         fs::write(source.join("resources/icon.png"), b"icon bytes").unwrap();
-        fs::write(source.join("resources/translations/en.json"), b"{\"hello\":\"world\"}").unwrap();
+        fs::write(
+            source.join("resources/translations/en.json"),
+            b"{\"hello\":\"world\"}",
+        )
+        .unwrap();
         (source, root.join("Weather.app"))
     }
 
@@ -391,7 +392,8 @@ mod tests {
     fn init_and_build_have_distinct_authoring_and_signed_manifest() {
         let temp = tempdir().unwrap();
         let (source, bundle) = setup(temp.path());
-        let authored = decode_developer(&fs::read(source.join(DEVELOPER_MANIFEST_FILENAME)).unwrap()).unwrap();
+        let authored =
+            decode_developer(&fs::read(source.join(DEVELOPER_MANIFEST_FILENAME)).unwrap()).unwrap();
         assert_eq!(authored.name, "community.weather");
         build(&source, &bundle, None).unwrap();
         assert!(!bundle.join(DEVELOPER_MANIFEST_FILENAME).exists());
@@ -399,14 +401,32 @@ mod tests {
         assert!(!bundle.join(SIGNATURE_PATH).exists());
         let runtime = decode(&fs::read(bundle.join(MANIFEST_PATH)).unwrap()).unwrap();
         assert_eq!(runtime.files.len(), 3);
-        assert!(runtime.files.iter().any(|f| f.path == "resources/translations/en.json"));
+        assert!(
+            runtime
+                .files
+                .iter()
+                .any(|f| f.path == "resources/translations/en.json")
+        );
         assert_eq!(runtime.application.unwrap().entrypoint, "bin/weather.wasm");
         assert_eq!(
             fs::read(bundle.join("resources/icon.png")).unwrap(),
             b"icon bytes"
         );
         assert!(verify(&bundle, None).is_ok());
-        assert!(init(&source, "community.weather", "1.0.0", "wasm32-wasip1", 1, None, None, None, false).is_err());
+        assert!(
+            init(
+                &source,
+                "community.weather",
+                "1.0.0",
+                "wasm32-wasip1",
+                1,
+                None,
+                None,
+                None,
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -416,7 +436,8 @@ mod tests {
         build(&source, &bundle, None).unwrap();
         let archive_path = temp.path().join("Weather.xpk");
         archive(&bundle, &archive_path).unwrap();
-        let manifest = xila_package_reader::inspect_unsigned(&fs::read(&archive_path).unwrap()).unwrap();
+        let manifest =
+            xila_package_reader::inspect_unsigned(&fs::read(&archive_path).unwrap()).unwrap();
         assert_eq!(manifest.files.len(), 3);
 
         fs::write(bundle.join("resources/icon.png"), b"changed").unwrap();
@@ -460,7 +481,11 @@ mod tests {
         let public_path = temp.path().join("public.key");
         fs::write(&public_path, signer.verifying_key().to_bytes()).unwrap();
         let signature_path = temp.path().join("signature");
-        fs::write(&signature_path, signer.sign(&fs::read(&payload).unwrap()).to_bytes()).unwrap();
+        fs::write(
+            &signature_path,
+            signer.sign(&fs::read(&payload).unwrap()).to_bytes(),
+        )
+        .unwrap();
         attach_signature(&bundle, &signature_path, &public_path).unwrap();
         assert!(verify(&bundle, Some(&public_path)).is_ok());
         assert!(export_signing_payload(&bundle, &temp.path().join("other.bin")).is_err());
@@ -502,7 +527,11 @@ mod tests {
         use std::os::unix::fs::symlink;
         let temp = tempdir().unwrap();
         let (source, bundle) = setup(temp.path());
-        symlink(source.join("bin/weather.wasm"), source.join("shortcut.wasm")).unwrap();
+        symlink(
+            source.join("bin/weather.wasm"),
+            source.join("shortcut.wasm"),
+        )
+        .unwrap();
         assert!(build(&source, &bundle, None).is_err());
         assert!(!bundle.exists());
     }
@@ -511,7 +540,18 @@ mod tests {
     fn executable_only_package_can_be_built() {
         let temp = tempdir().unwrap();
         let source = temp.path().join("tool");
-        init(&source, "xila.tool", "1.0.0", "wasm32-wasip1", 1, None, None, None, true).unwrap();
+        init(
+            &source,
+            "xila.tool",
+            "1.0.0",
+            "wasm32-wasip1",
+            1,
+            None,
+            None,
+            None,
+            true,
+        )
+        .unwrap();
         fs::write(source.join("bin/tool.wasm"), b"standalone wasm").unwrap();
         let bundle = temp.path().join("Tool.app");
         build(&source, &bundle, None).unwrap();
