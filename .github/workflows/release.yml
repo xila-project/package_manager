@@ -27,14 +27,16 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: true
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Setup | Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
-      - name: Open or update release pull request
+      - name: "Publish | Prepare version pull request"
         uses: release-plz/action@v0.5
         with:
           command: release-pr
@@ -51,14 +53,16 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: true
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Setup | Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
-      - name: Select release-plz configuration
+      - name: "Setup | Release configuration"
         id: release-config
         shell: bash
         env:
@@ -89,7 +93,7 @@ jobs:
           else
             echo "path=release-plz.toml" >> "$GITHUB_OUTPUT"
           fi
-      - name: Release Git tag and GitHub release
+      - name: "Publish | Git tag and GitHub release"
         id: release-plz
         uses: release-plz/action@v0.5
         with:
@@ -97,7 +101,7 @@ jobs:
           config: ${{ steps.release-config.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Identify the native binary release
+      - name: "Validate | Native binary release"
         id: tag
         env:
           RELEASES: ${{ steps.release-plz.outputs.releases }}
@@ -129,17 +133,19 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_TAG: ${{ needs.release.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.release.outputs.tag }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - name: "Setup | Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99.0"
           targets: ${{ matrix.target }}
-      - name: Build native executable
+      - name: "Build | Native executable"
         run: cargo build --locked --release --target ${{ matrix.target }} --package xila-package-builder
-      - name: Package and upload Unix binary
+      - name: "Publish | Unix binary archive"
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -150,7 +156,7 @@ jobs:
           tar -czf "$archive" -C "target/$TARGET/release" xila-package
           shasum -a 256 "$archive" > "$archive.sha256"
           gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256"
-      - name: Package and upload Windows binary
+      - name: "Publish | Windows binary archive"
         if: runner.os == 'Windows'
         shell: pwsh
         env:

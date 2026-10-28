@@ -16,15 +16,17 @@ jobs:
   inputs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Test Wasm input staging and path safety
+      - name: "Test | Wasm staging and path safety"
         run: python3 -m unittest discover -s tests -p 'test_package_wasm.py' -v
-      - name: Create minimal valid Wasm module
+      - name: "Setup | Minimal valid Wasm fixture"
         run: |
           printf '\x00asm\x01\x00\x00\x00' > example.wasm
-      - uses: actions/upload-artifact@v7
+      - name: "Report | Upload test fixture"
+        uses: actions/upload-artifact@v7
         with:
           name: reusable-smoke-wasm
           path: example.wasm
@@ -42,11 +44,12 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v7
+      - name: "Setup | Download package artifact"
+        uses: actions/download-artifact@v7
         with:
           name: reusable-smoke-xila-package
           path: out
-      - name: Verify the generated package and checksum
+      - name: "Validate | Package and checksum"
         env:
           EXPECTED_SHA256: ${{ needs.package.outputs.sha256 }}
           EXPECTED_FILENAME: ${{ needs.package.outputs.filename }}
