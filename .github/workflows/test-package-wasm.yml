@@ -13,6 +13,8 @@ on:
       - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
       - "tests/fixtures/package-workflow-developer.json"
+      - "tests/fixtures/package-workflow-shortcut.json"
+      - "tests/test_package_wasm.py"
   workflow_dispatch:
 
 permissions:
@@ -47,6 +49,7 @@ jobs:
     with:
       wasm-artifact: reusable-smoke-wasm
       manifest-path: tests/fixtures/package-workflow-developer.json
+      shortcut-path: tests/fixtures/package-workflow-shortcut.json
       builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
       artifact-name: reusable-smoke-xila-package
       upload-artifact: true
@@ -83,5 +86,12 @@ jobs:
               entry = manifest["files"][0]
               assert entry["sha256"] == hashlib.sha256(wasm).hexdigest()
               assert entry["size"] == len(wasm)
+              shortcut_bytes = tar.extractfile("shortcut.json").read()
+              shortcut = json.loads(shortcut_bytes)
+              assert shortcut["arguments"] == ["@bundle/bin/example.wasm"]
+              hashes = {file["path"]: file for file in manifest["files"]}
+              assert "shortcut.json" in hashes
+              assert hashes["shortcut.json"]["sha256"] == hashlib.sha256(shortcut_bytes).hexdigest()
+              assert hashes["shortcut.json"]["size"] == len(shortcut_bytes)
           print("Xila archive smoke test passed.")
           PY
