@@ -25,14 +25,14 @@ class StageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 helper.within(root, "linked.wasm")
 
-    def test_does_not_accept_manifest_with_multiple_payloads(self):
+    def test_rejects_legacy_runtime_manifest_instead_of_developer_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "example.wasm").write_bytes(b"\0asm\1\0\0\0")
             (root / "manifest.json").write_text(json.dumps({
                 "files": [{"path": "a.wasm"}, {"path": "b.wasm"}]
             }))
-            with self.assertRaisesRegex(ValueError, "exactly one"):
+            with self.assertRaisesRegex(ValueError, "developer manifests"):
                 helper.pack(
                     wasm_root=root, wasm_path="example.wasm",
                     manifest_root=root, manifest_path="manifest.json",
