@@ -38,6 +38,9 @@ jobs:
           path: example.wasm
   package:
     needs: inputs
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/package-wasm.yml
     with:
       wasm-artifact: reusable-smoke-wasm
