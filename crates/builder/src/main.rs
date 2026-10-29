@@ -11,7 +11,7 @@ use getargs_derive::{GetArgs, Subcommand};
 use std::{
     env,
     fs::{self, File},
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 use xila_package_bundle::FileHasher;
@@ -257,6 +257,37 @@ fn pack(
     operation
 }
 
+/// Export the exact canonical manifest message for an external Ed25519 signer.
+fn manifest_signing_payload(manifest: &Path, output: &Path) -> Result<()> {
+    let raw = fs::read(manifest)?;
+    let decoded = xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid manifest"))?;
+    let canonical =
+        xila_package_manifest::encode(&decoded).map_err(|_| invalid("invalid manifest"))?;
+    if canonical.as_bytes() != raw {
+        return Err(invalid("cannot sign a noncanonical manifest").into());
+    }
+    let message = xila_package_bundle::signing_message(&raw)
+        .map_err(|_| invalid("invalid signing message"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    file.write_all(&message)?;
+    Ok(())
+}
+
+/// Verify a signed archive against a caller-selected raw Ed25519 public key.
+fn verify_archive(archive: &Path, public_key: &Path) -> Result<()> {
+    let raw: [u8; 32] = fs::read(public_key)?
+        .try_into()
+        .map_err(|_| invalid("public key must be exactly 32 raw bytes"))?;
+    let key = xila_package_verification::PublicKey::from_bytes(&raw)
+        .map_err(|_| invalid("invalid Ed25519 public key"))?;
+    xila_package_reader::verify_signed(&fs::read(archive)?, &key)
+        .map_err(|_| invalid("signed package verification failed"))?;
+    Ok(())
+}
+
 /// Build and inspect packages for Xila.
 #[derive(Debug, GetArgs)]
 #[command(name = "xila-package", version)]
@@ -271,6 +302,11 @@ enum Command<'a> {
     Manifest(ManifestCommand<'a>),
     /// Build an unpacked, self-contained application bundle or archive it.
     Bundle(BundleCommand<'a>),
+    /// Verify a signed archive against an externally trusted raw public key.
+    Verify {
+        archive: &'a str,
+        public_key: &'a str,
+    },
     /// Create an archive from the validated manifest and source files.
     Pack {
         /// Directory containing the application payload files.
@@ -398,6 +434,8 @@ enum ManifestOperation<'a> {
         #[arg(long)]
         hidden: bool,
     },
+    /// Export the exact canonical manifest signing payload.
+    SigningPayload { manifest: &'a str, output: &'a str },
     /// Refresh file sizes and hashes in an existing manifest.
     Update {
         /// Directory containing payload files.
@@ -434,6 +472,9 @@ fn run() -> Result<()> {
                 target,
                 minimum_xila_abi,
             ),
+            ManifestOperation::SigningPayload { manifest, output } => {
+                manifest_signing_payload(Path::new(manifest), Path::new(output))
+            }
             ManifestOperation::Update {
                 directory,
                 manifest,
@@ -500,6 +541,10 @@ fn run() -> Result<()> {
                 bundle::archive(Path::new(directory), Path::new(output))
             }
         },
+        Command::Verify {
+            archive,
+            public_key,
+        } => verify_archive(Path::new(archive), Path::new(public_key)),
         Command::Pack {
             directory,
             manifest,
