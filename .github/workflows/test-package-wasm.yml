@@ -12,6 +12,7 @@ on:
       - "tests/test_signing_workflow.py"
       - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
+      - "tests/fixtures/package-workflow-developer.json"
   workflow_dispatch:
 
 permissions:
@@ -45,7 +46,7 @@ jobs:
     uses: ./.github/workflows/package-wasm.yml
     with:
       wasm-artifact: reusable-smoke-wasm
-      manifest-path: tests/fixtures/package-workflow-manifest.json
+      manifest-path: tests/fixtures/package-workflow-developer.json
       builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
       artifact-name: reusable-smoke-xila-package
       upload-artifact: true
