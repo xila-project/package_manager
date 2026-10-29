@@ -7,6 +7,8 @@ on:
       - ".github/workflows/test-package-wasm.yml"
       - "tools/package_wasm.py"
       - "tools/openbao_sign.py"
+      - "tools/sign_ephemeral.py"
+      - "tests/test_sign_ephemeral.py"
       - "tools/unpack_signing_input.py"
       - "tests/test_openbao_sign.py"
       - "tests/test_signing_workflow.py"
