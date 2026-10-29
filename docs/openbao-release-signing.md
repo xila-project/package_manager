@@ -3,14 +3,26 @@
 Tagged releases use OpenBao Transit to sign the canonical manifest with Ed25519,
 and verify the resulting archive against an independently pinned public key.
 
-**Temporary development signing:** `sign-artifact: true` on a trusted push to
-`main` instead generates a new one-off Ed25519 key for each package job.
+**Temporary development signing:** `sign-artifact: true` on trusted `main`
+pushes uses a fixed 32-byte Ed25519 signing seed stored only in the calling
+repository's Actions secret `XILA_DEV_SIGNING_SEED_B64` (base64-encoded).
+The same key is used across development packages and CI runs until rotated.
 The Actions artifact includes the signed `.xpk`, its `.sha256`, and the
 companion `.xpk.pub` (raw 32-byte Ed25519 public key); the private key is
-destroyed with the job. This path uses neither NetBird nor OpenBao.
+never uploaded or committed. This path uses neither NetBird nor OpenBao.
 The companion public key is **untrusted** and must never establish publisher
 identity merely because it accompanies the package. Pull requests remain
 unsigned. The installer must apply its own explicit trust policy.
+
+Set the secret **once** on the calling repository (without printing it):
+
+```sh
+openssl rand -base64 32 | gh secret set XILA_DEV_SIGNING_SEED_B64 \
+  --repo xila-project/applications
+```
+
+To rotate, set a newly generated seed using the same command. Never reuse this
+temporary development key as the OpenBao release signing key.
 
 ## Prerequisites
 
