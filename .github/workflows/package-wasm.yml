@@ -16,6 +16,11 @@ on:
         description: "Relative path to the archive manifest JSON in the caller repository or manifest artifact"
         required: true
         type: string
+      shortcut-path:
+        description: "Optional application-owned shortcut.json relative to caller repository (included in the signed bundle)"
+        required: false
+        type: string
+        default: ""
       manifest-artifact:
         description: "Optional Actions artifact name containing a generated manifest"
         required: false
@@ -127,6 +132,7 @@ jobs:
         env:
           INPUT_WASM_PATH: ${{ inputs.wasm-path }}
           INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+          INPUT_SHORTCUT_PATH: ${{ inputs.shortcut-path }}
           INPUT_MANIFEST_ARTIFACT: ${{ inputs.manifest-artifact }}
         run: |
           set -euo pipefail
@@ -139,6 +145,7 @@ jobs:
             --wasm-path "$INPUT_WASM_PATH" \
             --manifest-root "$manifest_root" \
             --manifest-path "$INPUT_MANIFEST_PATH" \
+            --shortcut-path "$INPUT_SHORTCUT_PATH" \
             --staging "$RUNNER_TEMP/xila-package-payload" \
             --manifest-output "$RUNNER_TEMP/xila-package-manifest.json" \
             --output "$RUNNER_TEMP/xila-package-dist" \
