@@ -1,11 +1,28 @@
 # Configure application release signing
 
-Main-branch CI and the tagged application release workflow sign each package's canonical manifest
-using ordinary Ed25519 in OpenBao Transit. The manifest binds the executable and
-all declared resources. A separate job verifies the completed `.xpk` with an
-independently pinned public key before publication. Pull request packages stay
-unsigned and do not access NetBird or OpenBao. This does not provision an
-installer trust root or enable signature enforcement in Xila.
+Tagged releases use OpenBao Transit to sign the canonical manifest with Ed25519,
+and verify the resulting archive against an independently pinned public key.
+
+**Temporary development signing:** `sign-artifact: true` on trusted `main`
+pushes uses a fixed 32-byte Ed25519 signing seed stored only in the calling
+repository's Actions secret `XILA_DEV_SIGNING_SEED_B64` (base64-encoded).
+The same key is used across development packages and CI runs until rotated.
+The Actions artifact includes the signed `.xpk`, its `.sha256`, and the
+companion `.xpk.pub` (raw 32-byte Ed25519 public key); the private key is
+never uploaded or committed. This path uses neither NetBird nor OpenBao.
+The companion public key is **untrusted** and must never establish publisher
+identity merely because it accompanies the package. Pull requests remain
+unsigned. The installer must apply its own explicit trust policy.
+
+Set the secret **once** on the calling repository (without printing it):
+
+```sh
+openssl rand -base64 32 | gh secret set XILA_DEV_SIGNING_SEED_B64 \
+  --repo xila-project/applications
+```
+
+To rotate, set a newly generated seed using the same command. Never reuse this
+temporary development key as the OpenBao release signing key.
 
 ## Prerequisites
 
@@ -16,10 +33,10 @@ installer trust root or enable signature enforcement in Xila.
   ephemeral-peer** setup key for the CI group (six packages may be signed in
   sequence). Restrict that group's NetBird policy to the OpenBao service and
   arrange internal DNS for `vault.xila.dev`. Give the key an appropriate
-  expiry and usage limit; rotate it as needed.
+  expiry and usage limit; rotate it as needed. This is only needed for tagged releases.
 - Protect the Applications `main` branch, release workflow, and `v*` tags.
-  Signing checks that the tagged commit is an ancestor of main. The OIDC role
-  also binds the caller workflow, branch or tag, event and pinned reusable workflow.
+  Signing checks that the tagged commit is an ancestor of main. The release OIDC
+  role binds the caller workflow, tag, event and pinned reusable workflow.
 - Run the following from an administrator shell authenticated to OpenBao, with
   `bao`, `jq` and `gh` installed. Do not put private keys or tokens in Git.
 
@@ -75,17 +92,11 @@ jq -n --arg sha "$SIGNING_SHA" '{
   token_max_ttl: "15m"
 }' > /tmp/xila-openbao-role.json
 bao write auth/jwt/role/xila-app-release @/tmp/xila-openbao-role.json
-jq '.bound_claims.ref_type = "branch" |
-    .bound_claims.ref = "refs/heads/main" |
-    .bound_claims.sub = "repo:xila-project/applications:ref:refs/heads/main" |
-    .bound_claims.workflow_ref = "xila-project/applications/.github/workflows/ci.yml@refs/heads/main"' \
-    /tmp/xila-openbao-role.json > /tmp/xila-openbao-ci-role.json
-bao write auth/jwt/role/xila-app-ci @/tmp/xila-openbao-ci-role.json
-rm /tmp/xila-openbao-role.json /tmp/xila-openbao-ci-role.json
+rm /tmp/xila-openbao-role.json
 ```
 
-Both roles grant no key read, export, key creation or policy administration. The
-workflow requests version 1 explicitly, and must be updated together with the
+The release role grants no key read, export, key creation or policy administration.
+The workflow requests version 1 explicitly, and must be updated together with the
 pinned public key when the Transit key is rotated. The public key is **not**
 secret, but authenticate and preserve it independently of OpenBao: it is the
 trust anchor used to check what OpenBao signed.
@@ -108,7 +119,6 @@ bao read -format=json transit/keys/xila-applications \
 
 Configure a separate copy of that 32-byte public key as the verifier's trusted
 key through its trust policy. Merely publishing signed files does not make the
-current runtime reject untrusted packages. If you change the pinned reusable
-workflow commit, update both OpenBao roles' `job_workflow_ref` bindings and the
-GitHub builder SHA together. If the key rotates, publish and deploy the new
+current runtime reject untrusted packages. If you change the pinned reusable workflow commit for release signing, update
+its OpenBao role's `job_workflow_ref` binding and the GitHub builder SHA together. If the key rotates, publish and deploy the new
 trusted public key and update the key-version variable in a coordinated change.

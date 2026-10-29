@@ -102,8 +102,25 @@ workflow is independent from release-plz: use your own release-plz
 process to create versioned tags, then attach your package artifacts
 using this workflow.
 
-**Security and format status:** these are unsigned development archives.
-The existing archive verifier checks content integrity, not publisher
-identity or authorization. Do not treat the presence of a GitHub Release
-or checksum as a trusted package signature. Signed publication and
-registry admission require additional work.
+**Security and format status:** By default, CI packages are unsigned.
+On trusted `main` pushes only, `sign-artifact: true` requires the caller
+to pass the `XILA_DEV_SIGNING_SEED_B64` Actions secret (base64 of a 32-byte
+Ed25519 private seed). It signs the canonical manifest, verifies the package,
+and publishes the signed archive together with its SHA-256 checksum and
+raw 32-byte public key. The **same public key** is stable across builds until
+that secret is rotated. The Actions artifact contains:
+
+- `<name>-<version>-<target>.xpk`
+- `<name>-<version>-<target>.xpk.sha256`
+- `<name>-<version>-<target>.xpk.pub`
+
+Verify locally with `xila-package verify archive.xpk archive.xpk.pub`.
+The private seed is not stored in Git or uploaded with the package; configure it
+once with `openssl rand -base64 32 | gh secret set XILA_DEV_SIGNING_SEED_B64
+--repo xila-project/applications` and explicitly forward the secret to the
+reusable workflow. Missing or malformed secrets fail the signing job.
+The public key is **not trusted** simply because it is shipped beside the archive.
+An installer must independently decide whether to allow unrecognized
+signers. Pull-request artifacts remain unsigned; tagged-release signing
+still uses OpenBao with a separately pinned release key.
+
