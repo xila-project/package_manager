@@ -45,6 +45,7 @@ def pack(
     manifest_output: Path,
     output: Path,
     builder: Path,
+    shortcut_path: str = "",
 ) -> tuple[str, str]:
     source_manifest = within(manifest_root, manifest_path)
     if source_manifest.stat().st_size > MAX_MANIFEST:
@@ -84,6 +85,38 @@ def pack(
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(wasm, destination)
 
+    # Launcher presentation is source-owned by each application, not the
+    # package manifest. The built bundle authenticates shortcut.json exactly
+    # like every other resource through the runtime SHA-256 inventory.
+    if shortcut_path:
+        shortcut_file = within(manifest_root, shortcut_path)
+        if shortcut_file.stat().st_size > 2048:
+            raise ValueError("shortcut.json exceeds graphical Shell's 2048-byte limit")
+        shortcut = json.loads(shortcut_file.read_text(encoding="utf-8"))
+        if not isinstance(shortcut, dict):
+            raise ValueError("application shortcut must be a JSON object")
+        schema = "https://raw.githubusercontent.com/xila-project/applications/main/schemas/shell-shortcut.schema.json"
+        allowed = {"$schema", "name", "command", "arguments", "terminal", "icon_string", "icon_color"}
+        if set(shortcut) - allowed or shortcut.get("$schema") != schema:
+            raise ValueError("unexpected launcher shortcut schema or fields")
+        if shortcut.get("name") != application.get("display_name"):
+            raise ValueError("shortcut name must match application display name")
+        if shortcut.get("command") != "/applications/executables/wasm":
+            raise ValueError("shortcut must invoke the shared Xila Wasm launcher")
+        if shortcut.get("arguments") != ["@bundle/" + entrypoint]:
+            raise ValueError("shortcut must launch the bundle-local verified entrypoint")
+        if not isinstance(shortcut.get("terminal"), bool):
+            raise ValueError("shortcut terminal flag must be boolean")
+        icon = shortcut.get("icon_string")
+        color = shortcut.get("icon_color")
+        if not isinstance(icon, str) or len(icon) > 8 or not icon:
+            raise ValueError("invalid shortcut icon string")
+        if not isinstance(color, list) or len(color) != 3 or any(
+            type(value) is not int or value < 0 or value > 255 for value in color
+        ):
+            raise ValueError("invalid shortcut RGB color")
+        shutil.copyfile(shortcut_file, staging / "shortcut.json")
+
     # Rust validates identity, manifest, file inventory, paths and content
     # digests. No private key is present on the pull-request runner.
     filename = f"{metadata['name']}-{metadata['version']}-{metadata['target']}.xpk"
@@ -117,6 +150,7 @@ def main() -> None:
     parser.add_argument("--manifest-output", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--builder", required=True, type=Path)
+    parser.add_argument("--shortcut-path", default="", help="Application-owned shortcut JSON path relative to --manifest-root")
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     filename, digest = pack(
@@ -128,6 +162,7 @@ def main() -> None:
         manifest_output=args.manifest_output,
         output=args.output,
         builder=args.builder,
+        shortcut_path=args.shortcut_path,
     )
     print(f"Generated v1 bundle: {filename} (sha256: {digest})")
     if args.github_output is not None:
