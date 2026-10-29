@@ -37,7 +37,7 @@ on:
         type: boolean
         default: true
       sign-artifact:
-        description: "Sign main-branch development artifacts with a one-off, untrusted Ed25519 key"
+        description: "Sign main-branch development artifacts using the temporary XILA_DEV_SIGNING_SEED_B64 secret"
         required: false
         type: boolean
         default: false
@@ -53,7 +53,10 @@ on:
         default: ""
     secrets:
       NETBIRD_SETUP_KEY:
-        description: "Ephemeral NetBird setup key for the signing peer"
+        description: "Ephemeral NetBird setup key for release signing"
+        required: false
+      XILA_DEV_SIGNING_SEED_B64:
+        description: "Base64-encoded raw 32-byte Ed25519 seed for development signing on main"
         required: false
     outputs:
       filename:
@@ -281,12 +284,14 @@ jobs:
             manifest signing-payload \
             "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
             "$RUNNER_TEMP/signing-work/signing-payload"
-      - name: "Sign | Generate ephemeral development key"
+      - name: "Sign | Use temporary development signing key"
         if: inputs.sign-artifact && !inputs.publish-release
         shell: bash
+        env:
+          XILA_DEV_SIGNING_SEED_B64: ${{ secrets.XILA_DEV_SIGNING_SEED_B64 }}
         run: |
           set -euo pipefail
-          python3 package-manager/tools/sign_ephemeral.py \
+          python3 package-manager/tools/sign_with_seed.py \
             "$RUNNER_TEMP/signing-work/signing-payload" \
             "$RUNNER_TEMP/signing-work/signature" \
             "$RUNNER_TEMP/signing-work/public.key"
@@ -330,7 +335,7 @@ jobs:
           sha256sum "$PACKAGE_FILENAME" > "$PACKAGE_FILENAME.sha256"
           if [[ "$EPHEMERAL_SIGNING" == true ]]; then
             # Raw 32-byte public key, accepted by 'xila-package verify'.
-            # It is intentionally not a trust anchor.
+            # It is intentionally not a trust anchor; the seed is never published.
             cp "$RUNNER_TEMP/signing-work/public.key" "$PACKAGE_FILENAME.pub"
           fi
           printf 'sha256=%s\n' "$(sha256sum "$PACKAGE_FILENAME" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
