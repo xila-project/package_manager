@@ -1,11 +1,16 @@
 # Configure application release signing
 
-Main-branch CI and the tagged application release workflow sign each package's canonical manifest
-using ordinary Ed25519 in OpenBao Transit. The manifest binds the executable and
-all declared resources. A separate job verifies the completed `.xpk` with an
-independently pinned public key before publication. Pull request packages stay
-unsigned and do not access NetBird or OpenBao. This does not provision an
-installer trust root or enable signature enforcement in Xila.
+Tagged releases use OpenBao Transit to sign the canonical manifest with Ed25519,
+and verify the resulting archive against an independently pinned public key.
+
+**Temporary development signing:** `sign-artifact: true` on a trusted push to
+`main` instead generates a new one-off Ed25519 key for each package job.
+The Actions artifact includes the signed `.xpk`, its `.sha256`, and the
+companion `.xpk.pub` (raw 32-byte Ed25519 public key); the private key is
+destroyed with the job. This path uses neither NetBird nor OpenBao.
+The companion public key is **untrusted** and must never establish publisher
+identity merely because it accompanies the package. Pull requests remain
+unsigned. The installer must apply its own explicit trust policy.
 
 ## Prerequisites
 
@@ -84,7 +89,7 @@ bao write auth/jwt/role/xila-app-ci @/tmp/xila-openbao-ci-role.json
 rm /tmp/xila-openbao-role.json /tmp/xila-openbao-ci-role.json
 ```
 
-Both roles grant no key read, export, key creation or policy administration. The
+The OpenBao signing roles grant no key read, export, key creation or policy administration. The
 workflow requests version 1 explicitly, and must be updated together with the
 pinned public key when the Transit key is rotated. The public key is **not**
 secret, but authenticate and preserve it independently of OpenBao: it is the
@@ -108,7 +113,6 @@ bao read -format=json transit/keys/xila-applications \
 
 Configure a separate copy of that 32-byte public key as the verifier's trusted
 key through its trust policy. Merely publishing signed files does not make the
-current runtime reject untrusted packages. If you change the pinned reusable
-workflow commit, update both OpenBao roles' `job_workflow_ref` bindings and the
-GitHub builder SHA together. If the key rotates, publish and deploy the new
+current runtime reject untrusted packages. If you change the pinned reusable workflow commit for release signing, update
+its OpenBao role's `job_workflow_ref` binding and the GitHub builder SHA together. If the key rotates, publish and deploy the new
 trusted public key and update the key-version variable in a coordinated change.
