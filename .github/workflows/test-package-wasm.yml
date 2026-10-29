@@ -6,6 +6,10 @@ on:
       - ".github/workflows/package-wasm.yml"
       - ".github/workflows/test-package-wasm.yml"
       - "tools/package_wasm.py"
+      - "tools/openbao_sign.py"
+      - "tools/unpack_signing_input.py"
+      - "tests/test_openbao_sign.py"
+      - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
   workflow_dispatch:
 
@@ -22,6 +26,8 @@ jobs:
           persist-credentials: false
       - name: "Test | Wasm staging and path safety"
         run: python3 -m unittest discover -s tests -p 'test_package_wasm.py' -v
+      - name: "Test | Signing client and input safety"
+        run: python3 -m unittest discover -s tests -p 'test_*sign*.py' -v
       - name: "Setup | Minimal valid Wasm fixture"
         run: |
           printf '\x00asm\x01\x00\x00\x00' > example.wasm
@@ -32,6 +38,9 @@ jobs:
           path: example.wasm
   package:
     needs: inputs
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/package-wasm.yml
     with:
       wasm-artifact: reusable-smoke-wasm

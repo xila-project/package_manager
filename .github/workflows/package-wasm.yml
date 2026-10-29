@@ -46,16 +46,20 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      NETBIRD_SETUP_KEY:
+        description: "Ephemeral NetBird setup key for the release signing peer"
+        required: false
     outputs:
       filename:
         description: "Generated package filename"
         value: ${{ jobs.package.outputs.filename }}
       sha256:
         description: "SHA-256 of generated archive"
-        value: ${{ jobs.package.outputs.sha256 }}
+        value: ${{ !inputs.publish-release && jobs.package.outputs.sha256 || jobs.sign.outputs.sha256 }}
       artifact-name:
         description: "Name of the Actions artifact containing the package (when upload is enabled)"
-        value: ${{ jobs.package.outputs.artifact_name }}
+        value: ${{ inputs.publish-release && format('{0}-signed', inputs.artifact-name) || jobs.package.outputs.artifact_name }}
 
 jobs:
   package:
@@ -120,8 +124,22 @@ jobs:
             --output "$RUNNER_TEMP/xila-package-dist" \
             --builder "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
             --github-output "$GITHUB_OUTPUT"
+      - name: "Prepare | Save verified package inputs for signing"
+        if: inputs.publish-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -cf "$RUNNER_TEMP/xila-signing-input.tar" -C "$RUNNER_TEMP" xila-package-payload xila-package-manifest.json
+      - name: "Report | Upload package signing inputs"
+        if: inputs.publish-release
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}-signing-input
+          path: ${{ runner.temp }}/xila-signing-input.tar
+          if-no-files-found: error
+          retention-days: 1
       - name: "Report | Upload application package"
-        if: inputs.upload-artifact || inputs.publish-release
+        if: inputs.upload-artifact && !inputs.publish-release
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
@@ -129,10 +147,112 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  sign:
+    name: Sign and verify application package
+    needs: package
+    if: inputs.publish-release && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      sha256: ${{ steps.sign.outputs.sha256 }}
+    steps:
+      - name: "Validate | Signing builder revision"
+        env:
+          BUILDER_REF: ${{ inputs.builder-ref }}
+          TRUSTED_BUILDER_REF: ${{ vars.XILA_SIGNING_BUILDER_SHA }}
+        run: |
+          set -euo pipefail
+          [[ "$TRUSTED_BUILDER_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$BUILDER_REF" = "$TRUSTED_BUILDER_REF"
+      - name: "Setup | Checkout tagged caller"
+        uses: actions/checkout@v7
+        with:
+          path: caller
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Validate | Release commit belongs to main"
+        working-directory: caller
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+      - name: "Setup | Checkout pinned package builder"
+        uses: actions/checkout@v7
+        with:
+          repository: xila-project/package_manager
+          ref: ${{ inputs.builder-ref }}
+          path: package-manager
+          persist-credentials: false
+      - name: "Setup | Download package inputs"
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}-signing-input
+          path: ${{ runner.temp }}/xila-signing-download
+      - name: "Setup | Rust toolchain"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.0"
+      - name: "Build | Host package builder"
+        run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
+      - name: "Setup | Connect ephemeral NetBird peer"
+        env:
+          NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+          NB_MANAGEMENT_URL: https://netbird.anneraud.fr
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$NB_SETUP_KEY"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/netbird.tar.gz" https://github.com/netbirdio/netbird/releases/download/v0.82.0/netbird_0.82.0_linux_amd64.tar.gz
+          echo 'b569f65de303d21317bc716f3116002e2cf175ae22a9f6d2bed91200a2f5000b  '"$RUNNER_TEMP/netbird.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/netbird.tar.gz" -C "$RUNNER_TEMP" netbird
+          sudo install -m 0755 "$RUNNER_TEMP/netbird" /usr/local/bin/netbird
+          sudo netbird service install
+          sudo netbird service start
+          sudo --preserve-env=NB_SETUP_KEY,NB_MANAGEMENT_URL netbird up
+      - name: "Sign | Authenticate and verify package"
+        id: sign
+        shell: bash
+        env:
+          OPENBAO_ADDR: https://vault.xila.dev
+          OPENBAO_JWT_MOUNT: jwt
+          OPENBAO_JWT_ROLE: xila-app-release
+          OPENBAO_TRANSIT_MOUNT: transit
+          OPENBAO_TRANSIT_KEY: xila-applications
+          OPENBAO_KEY_VERSION: ${{ vars.XILA_OPENBAO_KEY_VERSION }}
+          PUBLIC_KEY_B64: ${{ vars.XILA_SIGNING_PUBLIC_KEY_B64 }}
+          PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
+        run: |
+          set -euo pipefail
+          test -n "$OPENBAO_KEY_VERSION" && test -n "$PUBLIC_KEY_B64"
+          mkdir -p "$RUNNER_TEMP/signing-work" "$RUNNER_TEMP/xila-signed-dist"
+          python3 package-manager/tools/unpack_signing_input.py "$RUNNER_TEMP/xila-signing-download/xila-signing-input.tar" "$RUNNER_TEMP/signing-work"
+          printf '%s' "$PUBLIC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/signing-work/public.key"
+          test "$(wc -c < "$RUNNER_TEMP/signing-work/public.key")" -eq 32
+          builder="$GITHUB_WORKSPACE/package-manager/target/release/xila-package"
+          "$builder" manifest signing-payload "$RUNNER_TEMP/signing-work/xila-package-manifest.json" "$RUNNER_TEMP/signing-work/signing-payload"
+          python3 package-manager/tools/openbao_sign.py "$RUNNER_TEMP/signing-work/signing-payload" "$RUNNER_TEMP/signing-work/signature"
+          "$builder" pack "$RUNNER_TEMP/signing-work/xila-package-payload" "$RUNNER_TEMP/signing-work/xila-package-manifest.json" "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" "$RUNNER_TEMP/signing-work/signature"
+          "$builder" verify "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" "$RUNNER_TEMP/signing-work/public.key"
+          cd "$RUNNER_TEMP/xila-signed-dist"
+          sha256sum "$PACKAGE_FILENAME" > "$PACKAGE_FILENAME.sha256"
+          printf 'sha256=%s\n' "$(sha256sum "$PACKAGE_FILENAME" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: "Report | Upload signed package"
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}-signed
+          path: ${{ runner.temp }}/xila-signed-dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: "Cleanup | Disconnect NetBird"
+        if: always()
+        run: sudo netbird down || true
+
   publish-release:
     name: Attach Xila archive to GitHub Release
-    needs: package
-    if: inputs.publish-release && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+    needs: [package, sign]
+    if: inputs.publish-release && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: "Setup | Checkout caller release tag"
@@ -143,7 +263,7 @@ jobs:
       - name: "Setup | Download package archive"
         uses: actions/download-artifact@v7
         with:
-          name: ${{ inputs.artifact-name }}
+          name: ${{ inputs.artifact-name }}-signed
           path: ${{ runner.temp }}/xila-package-dist
       - name: "Validate | Release tag and commit"
         env:

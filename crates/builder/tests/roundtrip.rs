@@ -131,3 +131,83 @@ fn supports_derived_help_and_version() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("generate"));
 }
+
+#[test]
+fn external_signing_authenticates_manifest_and_payload() {
+    use ed25519_dalek::{Signer, SigningKey};
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("source");
+    fs::create_dir_all(source.join("bin")).unwrap();
+    fs::write(source.join("bin/app.wasm"), b"wasm payload").unwrap();
+    let manifest = temp.path().join("manifest.json");
+    let payload = temp.path().join("payload.bin");
+    let sig = temp.path().join("signature.bin");
+    let key = temp.path().join("public.key");
+    let archive = temp.path().join("app.xpk");
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let args = |items: &[&str]| Command::new(cli).args(items).status().unwrap().success();
+    assert!(args(&[
+        "manifest",
+        "generate",
+        source.to_str().unwrap(),
+        manifest.to_str().unwrap(),
+        "xila.test",
+        "1.0.0",
+        "wasm32-wasip1",
+        "1"
+    ]));
+    assert!(args(&[
+        "manifest",
+        "signing-payload",
+        manifest.to_str().unwrap(),
+        payload.to_str().unwrap()
+    ]));
+    let mut noncanonical = fs::read(&manifest).unwrap();
+    noncanonical.push(b' ');
+    let noncanonical_path = temp.path().join("noncanonical.json");
+    fs::write(&noncanonical_path, noncanonical).unwrap();
+    assert!(!args(&[
+        "manifest",
+        "signing-payload",
+        noncanonical_path.to_str().unwrap(),
+        temp.path().join("bad-payload").to_str().unwrap()
+    ]));
+    let signer = SigningKey::from_bytes(&[42; 32]);
+    fs::write(&sig, signer.sign(&fs::read(&payload).unwrap()).to_bytes()).unwrap();
+    fs::write(&key, signer.verifying_key().to_bytes()).unwrap();
+    assert!(args(&[
+        "pack",
+        source.to_str().unwrap(),
+        manifest.to_str().unwrap(),
+        archive.to_str().unwrap(),
+        sig.to_str().unwrap()
+    ]));
+    assert!(args(&[
+        "verify",
+        archive.to_str().unwrap(),
+        key.to_str().unwrap()
+    ]));
+    let wrong = temp.path().join("wrong.key");
+    fs::write(
+        &wrong,
+        SigningKey::from_bytes(&[43; 32]).verifying_key().to_bytes(),
+    )
+    .unwrap();
+    assert!(!args(&[
+        "verify",
+        archive.to_str().unwrap(),
+        wrong.to_str().unwrap()
+    ]));
+    let mut corrupted = fs::read(&archive).unwrap();
+    let index = corrupted
+        .windows(b"wasm payload".len())
+        .position(|bytes| bytes == b"wasm payload")
+        .unwrap();
+    corrupted[index] ^= 1;
+    fs::write(&archive, corrupted).unwrap();
+    assert!(!args(&[
+        "verify",
+        archive.to_str().unwrap(),
+        key.to_str().unwrap()
+    ]));
+}
