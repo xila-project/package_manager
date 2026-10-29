@@ -23,6 +23,8 @@ class SigningRequestContextTests(unittest.TestCase):
     def test_development_signing_stays_separate_from_release_signing(self):
         workflow = WORKFLOW.read_text()
         self.assertIn('if: inputs.sign-artifact && !inputs.publish-release', workflow)
+        self.assertIn('XILA_DEV_SIGNING_SEED_B64: ${{ secrets.XILA_DEV_SIGNING_SEED_B64 }}', workflow)
+        self.assertIn('package-manager/tools/sign_with_seed.py', workflow)
         for step in ('Validate | Signing builder revision',
                      'Setup | Connect ephemeral NetBird peer',
                      'Diagnose | OpenBao connectivity',
