@@ -9,6 +9,7 @@ on:
       - "tools/openbao_sign.py"
       - "tools/unpack_signing_input.py"
       - "tests/test_openbao_sign.py"
+      - "tests/test_signing_workflow.py"
       - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
   workflow_dispatch:

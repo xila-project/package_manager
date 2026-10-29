@@ -36,6 +36,11 @@ on:
         required: false
         type: boolean
         default: true
+      sign-artifact:
+        description: "Sign artifacts from trusted main-branch pushes"
+        required: false
+        type: boolean
+        default: false
       publish-release:
         description: "Attach the .xpk package and checksum to a tagged GitHub Release"
         required: false
@@ -48,7 +53,7 @@ on:
         default: ""
     secrets:
       NETBIRD_SETUP_KEY:
-        description: "Ephemeral NetBird setup key for the release signing peer"
+        description: "Ephemeral NetBird setup key for the signing peer"
         required: false
     outputs:
       filename:
@@ -56,10 +61,10 @@ on:
         value: ${{ jobs.package.outputs.filename }}
       sha256:
         description: "SHA-256 of generated archive"
-        value: ${{ !inputs.publish-release && jobs.package.outputs.sha256 || jobs.sign.outputs.sha256 }}
+        value: ${{ !(inputs.publish-release || inputs.sign-artifact) && jobs.package.outputs.sha256 || jobs.sign.outputs.sha256 }}
       artifact-name:
         description: "Name of the Actions artifact containing the package (when upload is enabled)"
-        value: ${{ inputs.publish-release && format('{0}-signed', inputs.artifact-name) || jobs.package.outputs.artifact_name }}
+        value: ${{ jobs.package.outputs.artifact_name }}
 
 jobs:
   package:
@@ -72,6 +77,21 @@ jobs:
       sha256: ${{ steps.pack.outputs.sha256 }}
       artifact_name: ${{ inputs.artifact-name }}
     steps:
+      - name: "Validate | Signing request context"
+        env:
+          SIGN_ARTIFACT: ${{ inputs.sign-artifact }}
+          PUBLISH_RELEASE: ${{ inputs.publish-release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$SIGN_ARTIFACT" == true && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/heads/main ) ]]; then
+            echo "::error::sign-artifact requires a push to main"
+            exit 1
+          fi
+          if [[ "$PUBLISH_RELEASE" == true && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/tags/v* ) ]]; then
+            echo "::error::publish-release requires a version tag push"
+            exit 1
+          fi
       - name: "Setup | Checkout caller manifest"
         uses: actions/checkout@v7
         with:
@@ -125,13 +145,13 @@ jobs:
             --builder "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
             --github-output "$GITHUB_OUTPUT"
       - name: "Prepare | Save verified package inputs for signing"
-        if: inputs.publish-release
+        if: inputs.publish-release || inputs.sign-artifact
         shell: bash
         run: |
           set -euo pipefail
           tar -cf "$RUNNER_TEMP/xila-signing-input.tar" -C "$RUNNER_TEMP" xila-package-payload xila-package-manifest.json
       - name: "Report | Upload package signing inputs"
-        if: inputs.publish-release
+        if: inputs.publish-release || inputs.sign-artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}-signing-input
@@ -139,7 +159,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - name: "Report | Upload application package"
-        if: inputs.upload-artifact && !inputs.publish-release
+        if: inputs.upload-artifact && !inputs.publish-release && !inputs.sign-artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
@@ -150,7 +170,7 @@ jobs:
   sign:
     name: Sign and verify application package
     needs: package
-    if: inputs.publish-release && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && ((inputs.publish-release && startsWith(github.ref, 'refs/tags/v')) || (inputs.sign-artifact && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -166,13 +186,13 @@ jobs:
           set -euo pipefail
           [[ "$TRUSTED_BUILDER_REF" =~ ^[0-9a-f]{40}$ ]]
           test "$BUILDER_REF" = "$TRUSTED_BUILDER_REF"
-      - name: "Setup | Checkout tagged caller"
+      - name: "Setup | Checkout caller"
         uses: actions/checkout@v7
         with:
           path: caller
           fetch-depth: 0
           persist-credentials: false
-      - name: "Validate | Release commit belongs to main"
+      - name: "Validate | Signing commit belongs to main"
         working-directory: caller
         run: |
           set -euo pipefail
@@ -217,7 +237,7 @@ jobs:
         env:
           OPENBAO_ADDR: https://vault.xila.dev
           OPENBAO_JWT_MOUNT: jwt
-          OPENBAO_JWT_ROLE: xila-app-release
+          OPENBAO_JWT_ROLE: ${{ inputs.publish-release && 'xila-app-release' || 'xila-app-ci' }}
           OPENBAO_TRANSIT_MOUNT: transit
           OPENBAO_TRANSIT_KEY: xila-applications
           OPENBAO_KEY_VERSION: ${{ vars.XILA_OPENBAO_KEY_VERSION }}
@@ -241,7 +261,7 @@ jobs:
       - name: "Report | Upload signed package"
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.artifact-name }}-signed
+          name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/xila-signed-dist/*
           if-no-files-found: error
           retention-days: 14
@@ -263,7 +283,7 @@ jobs:
       - name: "Setup | Download package archive"
         uses: actions/download-artifact@v7
         with:
-          name: ${{ inputs.artifact-name }}-signed
+          name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/xila-package-dist
       - name: "Validate | Release tag and commit"
         env:
