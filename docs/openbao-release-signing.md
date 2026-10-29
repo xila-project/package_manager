@@ -21,10 +21,10 @@ unsigned. The installer must apply its own explicit trust policy.
   ephemeral-peer** setup key for the CI group (six packages may be signed in
   sequence). Restrict that group's NetBird policy to the OpenBao service and
   arrange internal DNS for `vault.xila.dev`. Give the key an appropriate
-  expiry and usage limit; rotate it as needed.
+  expiry and usage limit; rotate it as needed. This is only needed for tagged releases.
 - Protect the Applications `main` branch, release workflow, and `v*` tags.
-  Signing checks that the tagged commit is an ancestor of main. The OIDC role
-  also binds the caller workflow, branch or tag, event and pinned reusable workflow.
+  Signing checks that the tagged commit is an ancestor of main. The release OIDC
+  role binds the caller workflow, tag, event and pinned reusable workflow.
 - Run the following from an administrator shell authenticated to OpenBao, with
   `bao`, `jq` and `gh` installed. Do not put private keys or tokens in Git.
 
@@ -80,17 +80,11 @@ jq -n --arg sha "$SIGNING_SHA" '{
   token_max_ttl: "15m"
 }' > /tmp/xila-openbao-role.json
 bao write auth/jwt/role/xila-app-release @/tmp/xila-openbao-role.json
-jq '.bound_claims.ref_type = "branch" |
-    .bound_claims.ref = "refs/heads/main" |
-    .bound_claims.sub = "repo:xila-project/applications:ref:refs/heads/main" |
-    .bound_claims.workflow_ref = "xila-project/applications/.github/workflows/ci.yml@refs/heads/main"' \
-    /tmp/xila-openbao-role.json > /tmp/xila-openbao-ci-role.json
-bao write auth/jwt/role/xila-app-ci @/tmp/xila-openbao-ci-role.json
-rm /tmp/xila-openbao-role.json /tmp/xila-openbao-ci-role.json
+rm /tmp/xila-openbao-role.json
 ```
 
-The OpenBao signing roles grant no key read, export, key creation or policy administration. The
-workflow requests version 1 explicitly, and must be updated together with the
+The release role grants no key read, export, key creation or policy administration.
+The workflow requests version 1 explicitly, and must be updated together with the
 pinned public key when the Transit key is rotated. The public key is **not**
 secret, but authenticate and preserve it independently of OpenBao: it is the
 trust anchor used to check what OpenBao signed.
