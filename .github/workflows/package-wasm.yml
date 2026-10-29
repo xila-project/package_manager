@@ -231,6 +231,37 @@ jobs:
           sudo netbird service install
           sudo netbird service start
           sudo --preserve-env=NB_SETUP_KEY,NB_MANAGEMENT_URL netbird up
+      # Diagnostic-only: never emit token values or NetBird peer inventory.
+      - name: "Diagnose | OpenBao connectivity"
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "::group::NetBird connection summary"
+          sudo netbird status -d | grep -E '^[[:space:]]*(Status|Management|Signal|Peers|DNS|Routes):' || true
+          echo "::endgroup::"
+          echo "::group::OpenBao DNS resolution"
+          getent ahosts vault.xila.dev || true
+          echo "::endgroup::"
+          echo "::group::OpenBao HTTPS reachability (IPv4)"
+          curl --ipv4 --silent --show-error --connect-timeout 5 --max-time 10 \
+            --output /dev/null \
+            --write-out 'HTTP %{http_code}; remote IP %{remote_ip}; TCP %{time_connect}s; TLS %{time_appconnect}s; total %{time_total}s\n' \
+            https://vault.xila.dev/v1/sys/health || true
+          echo "::endgroup::"
+          echo "::group::OpenBao HTTPS reachability (Python urllib)"
+          python3 - <<'PY'
+          import urllib.error
+          import urllib.request
+
+          try:
+              with urllib.request.urlopen("https://vault.xila.dev/v1/sys/health", timeout=10) as response:
+                  print(f"HTTP {response.status}")
+          except urllib.error.HTTPError as error:
+              print(f"HTTP {error.code} (reachable)")
+          except Exception as error:
+              print(f"{type(error).__name__}: {error}")
+          PY
+          echo "::endgroup::"
       - name: "Sign | Authenticate and verify package"
         id: sign
         shell: bash
