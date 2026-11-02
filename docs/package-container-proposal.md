@@ -26,7 +26,7 @@ If restricted USTAR is selected, the suggested order of entries is:
 calculator-1.0.0.xpk            (ordinary uncompressed TAR container)
   .xila/manifest.json          (first regular file, provisional Miniserde JSON)
   .xila/manifest.sig           (second regular file, raw 64-byte signature in prototype)
-  bin/calculator.wasm          (regular file, raw or independently LZ4-block encoded)
+  executables/calculator.wasm          (regular file, raw or independently LZ4-block encoded)
   share/icon.png               (regular file, raw)
 ```
 

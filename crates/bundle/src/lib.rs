@@ -189,7 +189,7 @@ mod tests {
             minimum_xila_abi: 1,
             capabilities: vec![],
             application: Some(Application {
-                entrypoint: "bin/app.wasm".to_string(),
+                entrypoint: "executables/app.wasm".to_string(),
                 display_name: "Example".to_string(),
                 icon: "resources/icon.png".to_string(),
                 show_in_launcher: true,
@@ -202,7 +202,7 @@ mod tests {
         let mut inventory = Inventory::new();
         for (path, bytes) in [
             ("resources/icon.png", &b"icon"[..]),
-            ("bin/app.wasm", &b"wasm"[..]),
+            ("executables/app.wasm", &b"wasm"[..]),
         ] {
             let mut hasher = FileHasher::new(path).unwrap();
             hasher.update(&bytes[..2]).unwrap();
@@ -214,7 +214,7 @@ mod tests {
         }
         let manifest = inventory.finish(authoring()).unwrap();
         assert_eq!(manifest.schema.as_deref(), Some(SCHEMA_URL));
-        assert_eq!(manifest.files[0].path, "bin/app.wasm");
+        assert_eq!(manifest.files[0].path, "executables/app.wasm");
         assert_eq!(manifest.files[1].path, "resources/icon.png");
         let bytes = manifest::encode(&manifest).unwrap();
         let signed = signing_message(bytes.as_bytes()).unwrap();
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(decode_sha256(&"A".repeat(64)), Err(Error::InvalidDigest));
         assert_eq!(decode_sha256("00"), Err(Error::InvalidDigest));
         let mut inventory = Inventory::new();
-        let mut hasher = FileHasher::new("bin/app.wasm").unwrap();
+        let mut hasher = FileHasher::new("executables/app.wasm").unwrap();
         hasher.update(b"abc").unwrap();
         let file = hasher.finish().unwrap();
         inventory.push(file.clone()).unwrap();

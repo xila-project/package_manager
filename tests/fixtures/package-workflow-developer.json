@@ -7,7 +7,7 @@
   "minimum_xila_abi": 1,
   "capabilities": [],
   "application": {
-    "entrypoint": "bin/example.wasm",
+    "entrypoint": "executables/example.wasm",
     "display_name": "Example",
     "icon": "",
     "show_in_launcher": true

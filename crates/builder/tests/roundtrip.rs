@@ -5,8 +5,8 @@ use tempfile::tempdir;
 fn command_generates_updates_and_packs() {
     let temp = tempdir().unwrap();
     let source = temp.path().join("application");
-    fs::create_dir_all(source.join("bin")).unwrap();
-    fs::write(source.join("bin/calculator.wasm"), b"abc").unwrap();
+    fs::create_dir_all(source.join("executables")).unwrap();
+    fs::write(source.join("executables/calculator.wasm"), b"abc").unwrap();
     let manifest = temp.path().join("manifest.json");
     let archive = temp.path().join("calculator.xpk");
     let binary = env!("CARGO_BIN_EXE_xila-package");
@@ -60,7 +60,7 @@ fn command_generates_updates_and_packs() {
                 "manifest",
                 "application",
                 manifest.to_str().unwrap(),
-                "bin/calculator.wasm",
+                "executables/calculator.wasm",
                 "Calculator",
             ])
             .status()
@@ -82,11 +82,11 @@ fn command_generates_updates_and_packs() {
     let bytes = fs::read(&archive).unwrap();
     let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
     let app = contents.application.as_ref().unwrap();
-    assert_eq!(app.entrypoint, "bin/calculator.wasm");
+    assert_eq!(app.entrypoint, "executables/calculator.wasm");
     assert_eq!(app.display_name, "Calculator");
     assert!(app.show_in_launcher);
     assert_eq!(contents.name, "xila.calculator");
-    assert_eq!(contents.files[0].path, "bin/calculator.wasm");
+    assert_eq!(contents.files[0].path, "executables/calculator.wasm");
     let mutated = temp.path().join("mutated");
     fs::create_dir(&mutated).unwrap();
     fs::write(mutated.join("calculator.wasm"), b"modified").unwrap();
@@ -137,8 +137,8 @@ fn external_signing_authenticates_manifest_and_payload() {
     use ed25519_dalek::{Signer, SigningKey};
     let temp = tempdir().unwrap();
     let source = temp.path().join("source");
-    fs::create_dir_all(source.join("bin")).unwrap();
-    fs::write(source.join("bin/app.wasm"), b"wasm payload").unwrap();
+    fs::create_dir_all(source.join("executables")).unwrap();
+    fs::write(source.join("executables/app.wasm"), b"wasm payload").unwrap();
     let manifest = temp.path().join("manifest.json");
     let payload = temp.path().join("payload.bin");
     let sig = temp.path().join("signature.bin");
@@ -217,8 +217,8 @@ fn externally_signed_developer_bundle_authenticates_shortcut() {
     use ed25519_dalek::{Signer, SigningKey};
     let temp = tempdir().unwrap();
     let source = temp.path().join("source");
-    fs::create_dir_all(source.join("bin")).unwrap();
-    fs::write(source.join("bin/example.wasm"), b"wasm payload").unwrap();
+    fs::create_dir_all(source.join("executables")).unwrap();
+    fs::write(source.join("executables/example.wasm"), b"wasm payload").unwrap();
     fs::write(
         source.join("xila-package.json"),
         include_bytes!("../../../tests/fixtures/package-workflow-developer.json"),
@@ -265,7 +265,7 @@ fn externally_signed_developer_bundle_authenticates_shortcut() {
         key.to_str().unwrap()
     ]));
     let mut tampered = fs::read(&archive).unwrap();
-    let needle = b"@bundle/bin/example.wasm";
+    let needle = b"@bundle/executables/example.wasm";
     let index = tampered
         .windows(needle.len())
         .position(|b| b == needle)

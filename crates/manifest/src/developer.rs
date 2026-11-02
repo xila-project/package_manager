@@ -157,7 +157,7 @@ mod tests {
             minimum_xila_abi: 1,
             capabilities: vec![],
             application: Some(Application {
-                entrypoint: "bin/weather.wasm".to_string(),
+                entrypoint: "executables/weather.wasm".to_string(),
                 display_name: "Weather".to_string(),
                 icon: "resources/icon.png".to_string(),
                 show_in_launcher: true,
@@ -183,7 +183,7 @@ mod tests {
         );
         let files = vec![
             ManifestFile {
-                path: "bin/weather.wasm".into(),
+                path: "executables/weather.wasm".into(),
                 size: 3,
                 sha256: "a".repeat(64),
             },

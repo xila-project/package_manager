@@ -68,7 +68,7 @@ not supported.
   "minimum_xila_abi": 1,
   "capabilities": [],
   "files": [{
-    "path": "bin/weather.wasm",
+    "path": "executables/weather.wasm",
     "size": 0,
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }]

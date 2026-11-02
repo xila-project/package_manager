@@ -3,7 +3,7 @@
   "name": "Example",
   "command": "/applications/executables/wasm",
   "arguments": [
-    "@bundle/bin/example.wasm"
+    "@bundle/executables/example.wasm"
   ],
   "terminal": false,
   "icon_string": "Ex",

@@ -15,11 +15,11 @@ class SigningInputTests(unittest.TestCase):
             root = Path(directory)
             source = root / "source.tar"
             with tarfile.open(source, "w") as tar:
-                for name, data in [("xila-package-manifest.json", b"{}"), ("xila-package-payload/bin/a.wasm", b"wasm")]:
+                for name, data in [("xila-package-manifest.json", b"{}"), ("xila-package-payload/executables/a.wasm", b"wasm")]:
                     member = tarfile.TarInfo(name); member.size = len(data); tar.addfile(member, io.BytesIO(data))
             output = root / "output"; output.mkdir()
             unpack.extract(source, output)
-            self.assertEqual((output / "xila-package-payload/bin/a.wasm").read_bytes(), b"wasm")
+            self.assertEqual((output / "xila-package-payload/executables/a.wasm").read_bytes(), b"wasm")
     def test_rejects_escape_and_links(self):
         for name, link in [("../escape", False), ("xila-package-payload/link", True)]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
