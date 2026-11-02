@@ -341,6 +341,7 @@ mod tests {
                 icon: "resources/icon.png".into(),
                 show_in_launcher: true,
             }),
+            metadata: None,
         };
         let private = SigningKey::from_bytes(&[7_u8; 32]);
         let public = PublicKey::from_bytes(&private.verifying_key().to_bytes()).unwrap();

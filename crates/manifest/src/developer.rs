@@ -6,8 +6,8 @@ use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
 use crate::{
-    Application, Error, FORMAT_VERSION, MAX_MANIFEST_BYTES, Manifest, ManifestFile, SCHEMA_URL,
-    validate, validate_path,
+    Application, Error, FORMAT_VERSION, MAX_MANIFEST_BYTES, Manifest, ManifestFile, Metadata,
+    SCHEMA_URL, validate, validate_path,
 };
 
 pub const DEVELOPER_MANIFEST_FILENAME: &str = "xila-package.json";
@@ -26,6 +26,8 @@ pub struct DeveloperManifest {
     pub minimum_xila_abi: u32,
     pub capabilities: Vec<String>,
     pub application: Option<Application>,
+    /// Descriptive catalog information, carried into the runtime manifest.
+    pub metadata: Option<Metadata>,
 }
 
 impl DeveloperManifest {
@@ -76,6 +78,9 @@ impl DeveloperManifest {
         {
             return Err(Error::InvalidFileList);
         }
+        if let Some(metadata) = &self.metadata {
+            metadata.validate()?;
+        }
         if let Some(application) = &self.application {
             if application.display_name.trim().is_empty() || application.display_name.len() > 128 {
                 return Err(Error::InvalidApplication);
@@ -115,6 +120,7 @@ impl DeveloperManifest {
             capabilities: self.capabilities,
             files,
             application: self.application,
+            metadata: self.metadata,
         };
         validate(&manifest)?;
         Ok(manifest)
@@ -162,6 +168,7 @@ mod tests {
                 icon: "resources/icon.png".to_string(),
                 show_in_launcher: true,
             }),
+            metadata: None,
         }
     }
 

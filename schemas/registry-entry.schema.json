@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json",
+  "title": "Xila package registry entry (experimental v1)",
+  "description": "One released package version: where its signed .xpk lives and which developer key published it. Generated from the archive by `xila-package registry entry`, never written by hand; identity fields must equal the archive's signed manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "name",
+    "version",
+    "target",
+    "minimum_xila_abi",
+    "capabilities",
+    "display_name",
+    "metadata",
+    "publisher",
+    "archive"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1,
+      "description": "Experimental v1 registry entry format."
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 96,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null."
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9.+-]+$"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "minimum_xila_abi": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "display_name": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      ],
+      "description": "Launcher name when the package is an application."
+    },
+    "metadata": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/metadata"
+        }
+      ]
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "description": "Developer key identifier: packages/keys/developers/<publisher>.json."
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^https://[^\\s]+$",
+          "description": "HTTPS download URL of the immutable .xpk."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hexadecimal SHA-256 of the whole archive."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact archive size in bytes."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "description": "Descriptive catalog information copied into registry entries. Never grants trust.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "license",
+        "source"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*\\S[^\\u0000-\\u001f\\u007f]*$",
+          "description": "One-line description shown in catalogs."
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9.+() -]*[A-Za-z0-9.+()-][A-Za-z0-9.+() -]*$",
+          "description": "SPDX license expression, e.g. MIT or Apache-2.0 OR MIT."
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^https://[^\\s]+$",
+          "description": "HTTPS URL of the source repository."
+        },
+        "homepage": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^https://[^\\s]+$",
+              "description": "Optional HTTPS project homepage."
+            }
+          ]
+        }
+      }
+    }
+  }
+}

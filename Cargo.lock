@@ -420,6 +420,7 @@ dependencies = [
  "getargs",
  "getargs-derive",
  "getrandom",
+ "sha2",
  "tempfile",
  "xila-package-bundle",
  "xila-package-manifest",

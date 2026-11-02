@@ -31,6 +31,24 @@ VALID_SOURCE = {
 
 
 class DeveloperManifestSchemaTests(unittest.TestCase):
+    def test_metadata_is_optional_and_validated(self):
+        with_metadata = copy.deepcopy(VALID_SOURCE)
+        with_metadata["metadata"] = {
+            "summary": "Shows the current weather",
+            "license": "Apache-2.0 OR MIT",
+            "source": "https://github.com/example/weather",
+            "homepage": None,
+        }
+        VALIDATOR.validate(with_metadata)
+        for key, value in [("summary", ""), ("license", "MIT; rm"), ("source", "http://insecure"), ("homepage", "ftp://x")]:
+            broken = copy.deepcopy(with_metadata)
+            broken["metadata"][key] = value
+            with self.subTest(key=key):
+                self.assertFalse(VALIDATOR.is_valid(broken))
+        missing = copy.deepcopy(with_metadata)
+        del missing["metadata"]["license"]
+        self.assertFalse(VALIDATOR.is_valid(missing))
+
     def test_accepts_editable_metadata_without_generated_hashes(self):
         Draft202012Validator.check_schema(SCHEMA)
         self.assertEqual(SCHEMA["$id"], VALID_SOURCE["$schema"])

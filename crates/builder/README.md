@@ -126,6 +126,36 @@ Verification **without** `--public-key` checks file integrity, not publisher
 identity. Only verification with a caller-trusted public key authenticates
 a signature. No trust policy or key-distribution service is implemented here.
 
+### 4. Describe the release for a registry
+
+Descriptive information lives in the developer manifest and travels in the
+signed runtime manifest, so it is written once:
+
+```json
+"metadata": {
+  "summary": "Shows the current weather",
+  "license": "Apache-2.0 OR MIT",
+  "source": "https://github.com/example/weather",
+  "homepage": null
+}
+```
+
+A registry entry (one released version, see
+[registry-entry.schema.json](../../schemas/registry-entry.schema.json)) is
+generated from the published archive, never written by hand:
+
+```sh
+xila-package registry entry ./Weather.xpk ./signing/public.key community "https://…/Weather.xpk" ./1.0.0.json
+xila-package registry verify ./1.0.0.json ./Weather.xpk ./signing/public.key
+```
+
+`entry` verifies the archive signature against the developer key, then records
+the archive URL, SHA-256 and size, the publishing key identifier, and copies
+identity, compatibility, capabilities, display name and metadata from the
+signed manifest. `verify` checks the archive's size and hash, its signature,
+and that every copied field still equals the signed manifest. Signing entries
+with the registry key is not implemented yet.
+
 ## Compatibility and scope
 
 The legacy `xila-package manifest generate/update/application` and

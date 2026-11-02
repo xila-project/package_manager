@@ -34,7 +34,7 @@ manifest bytes**, not an arbitrary reserialization.
 ## Example
 
 ```rust
-use xila_package_manifest::{Manifest, ManifestFile, Application, FORMAT_VERSION, encode, decode};
+use xila_package_manifest::{Manifest, ManifestFile, Application, Metadata, FORMAT_VERSION, encode, decode};
 
 let manifest = Manifest {
     schema: Some(xila_package_manifest::SCHEMA_URL.into()),
@@ -54,6 +54,12 @@ let manifest = Manifest {
         display_name: "Weather".into(),
         icon: "".into(),
         show_in_launcher: true,
+    }),
+    metadata: Some(Metadata {
+        summary: "Shows the current weather".into(),
+        license: "MIT".into(),
+        source: "https://github.com/example/weather".into(),
+        homepage: None,
     }),
 };
 let json = encode(&manifest).unwrap();
