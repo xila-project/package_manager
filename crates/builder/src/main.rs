@@ -341,7 +341,7 @@ enum RegistryOperation<'a> {
         archive: &'a str,
         /// Raw 32-byte public key of the publishing developer.
         public_key: &'a str,
-        /// Developer key identifier (packages/keys/developers/<id>.json).
+        /// Developer key identifier (`packages/keys/developers/<id>.json`).
         publisher: &'a str,
         /// HTTPS download URL of the archive.
         url: &'a str,
