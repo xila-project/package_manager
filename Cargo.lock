@@ -419,6 +419,7 @@ dependencies = [
  "ed25519-dalek",
  "getargs",
  "getargs-derive",
+ "getrandom",
  "tempfile",
  "xila-package-bundle",
  "xila-package-manifest",

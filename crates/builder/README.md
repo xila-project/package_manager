@@ -75,8 +75,21 @@ xila-package bundle archive ./Weather.app ./Weather.xpk
 
 The verifying key is a raw **32-byte Ed25519 public key**. The builder never
 generates a private identity silently, and never copies a private key into
-the bundle. The developer or release infrastructure manages key creation,
-storage, recovery and trust separately. Avoid checking private keys into git.
+the bundle. The developer or release infrastructure manages key storage,
+recovery and trust separately. Avoid checking private keys into git.
+
+To create a key pair explicitly:
+
+```sh
+xila-package key generate ./signing/private.seed ./signing/public.key
+xila-package key public ./signing/private.seed ./signing/public.key  # re-derive later
+```
+
+`key` commands are stateless: they only write the paths given, never
+overwrite an existing file, and create the seed owner-only (`0600`) on Unix.
+Use `base64 -w0 ./signing/public.key` for the `public_key` field of a
+`packages` developer-key file, and `base64 -w0 ./signing/private.seed | gh
+secret set …` to provide a CI signing seed.
 
 For a hardware signer, KMS or separate signing job, export the exact
 domain-separated signing message and attach the returned detached signature:
