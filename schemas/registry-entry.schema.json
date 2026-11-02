@@ -93,7 +93,7 @@
       "minLength": 1,
       "maxLength": 64,
       "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-      "description": "Developer key identifier: packages/keys/developers/<publisher>.json."
+      "description": "Developer key identifier: keys/developers/<publisher>.json in xila-project/registry."
     },
     "archive": {
       "type": "object",

@@ -39,7 +39,7 @@ pub struct RegistryEntry {
     /// Launcher name when the package is an application.
     pub display_name: Option<String>,
     pub metadata: Option<Metadata>,
-    /// Developer key identifier (`packages/keys/developers/<publisher>.json`).
+    /// Developer key identifier (`keys/developers/<publisher>.json` in xila-project/registry).
     pub publisher: String,
     pub archive: Archive,
 }
