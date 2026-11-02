@@ -42,12 +42,12 @@ on:
         type: boolean
         default: true
       sign-artifact:
-        description: "Sign main-branch development artifacts using the temporary XILA_DEV_SIGNING_SEED_B64 secret"
+        description: "Sign main-branch artifacts with the XILA_DEV_SIGNING_SEED_B64 secret"
         required: false
         type: boolean
         default: false
       publish-release:
-        description: "Attach the .xpk package and checksum to a tagged GitHub Release"
+        description: "Sign with XILA_DEV_SIGNING_SEED_B64 and attach the .xpk, checksum and public key to a GitHub Release"
         required: false
         type: boolean
         default: false
@@ -57,11 +57,8 @@ on:
         type: string
         default: ""
     secrets:
-      NETBIRD_SETUP_KEY:
-        description: "Ephemeral NetBird setup key for release signing"
-        required: false
       XILA_DEV_SIGNING_SEED_B64:
-        description: "Base64-encoded raw 32-byte Ed25519 seed for development signing on main"
+        description: "Base64-encoded raw 32-byte Ed25519 seed signing main-branch and release packages"
         required: false
     outputs:
       filename:
@@ -92,16 +89,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$SIGN_ARTIFACT" == true && "$PUBLISH_RELEASE" == true ]]; then
-            echo "::error::ephemeral CI signing and release signing must not be combined"
-            exit 1
-          fi
           if [[ "$SIGN_ARTIFACT" == true && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/heads/main ) ]]; then
             echo "::error::sign-artifact requires a push to main"
             exit 1
           fi
-          if [[ "$PUBLISH_RELEASE" == true && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/tags/v* ) ]]; then
-            echo "::error::publish-release requires a version tag push"
+          # release-plz tags releases from the main push itself (GITHUB_TOKEN
+          # tags trigger no workflow), so both main and tag pushes may publish.
+          if [[ "$PUBLISH_RELEASE" == true && ( "$GITHUB_EVENT_NAME" != push || ( "$GITHUB_REF" != refs/heads/main && "$GITHUB_REF" != refs/tags/* ) ) ]]; then
+            echo "::error::publish-release requires a push to main or a tag"
             exit 1
           fi
       - name: "Setup | Checkout caller manifest"
@@ -184,23 +179,13 @@ jobs:
   sign:
     name: Sign and verify application package
     needs: package
-    if: github.event_name == 'push' && ((inputs.publish-release && startsWith(github.ref, 'refs/tags/v')) || (inputs.sign-artifact && github.ref == 'refs/heads/main'))
+    if: github.event_name == 'push' && ((inputs.publish-release && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) || (inputs.sign-artifact && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     outputs:
       sha256: ${{ steps.sign.outputs.sha256 }}
     steps:
-      - name: "Validate | Signing builder revision"
-        if: inputs.publish-release
-        env:
-          BUILDER_REF: ${{ inputs.builder-ref }}
-          TRUSTED_BUILDER_REF: ${{ vars.XILA_SIGNING_BUILDER_SHA }}
-        run: |
-          set -euo pipefail
-          [[ "$TRUSTED_BUILDER_REF" =~ ^[0-9a-f]{40}$ ]]
-          test "$BUILDER_REF" = "$TRUSTED_BUILDER_REF"
       - name: "Setup | Checkout caller"
         uses: actions/checkout@v7
         with:
@@ -231,54 +216,6 @@ jobs:
           toolchain: "1.99.0"
       - name: "Build | Host package builder"
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
-      - name: "Setup | Connect ephemeral NetBird peer"
-        if: inputs.publish-release
-        env:
-          NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
-          NB_MANAGEMENT_URL: https://netbird.anneraud.fr
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$NB_SETUP_KEY"
-          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/netbird.tar.gz" https://github.com/netbirdio/netbird/releases/download/v0.82.0/netbird_0.82.0_linux_amd64.tar.gz
-          echo 'b569f65de303d21317bc716f3116002e2cf175ae22a9f6d2bed91200a2f5000b  '"$RUNNER_TEMP/netbird.tar.gz" | sha256sum --check --status
-          tar -xzf "$RUNNER_TEMP/netbird.tar.gz" -C "$RUNNER_TEMP" netbird
-          sudo install -m 0755 "$RUNNER_TEMP/netbird" /usr/local/bin/netbird
-          sudo netbird service install
-          sudo netbird service start
-          sudo --preserve-env=NB_SETUP_KEY,NB_MANAGEMENT_URL netbird up
-      # Diagnostic-only: never emit token values or NetBird peer inventory.
-      - name: "Diagnose | OpenBao connectivity"
-        if: inputs.publish-release
-        shell: bash
-        run: |
-          set -uo pipefail
-          echo "::group::NetBird connection summary"
-          sudo netbird status -d | grep -E '^[[:space:]]*(Status|Management|Signal|Peers|DNS|Routes):' || true
-          echo "::endgroup::"
-          echo "::group::OpenBao DNS resolution"
-          getent ahosts vault.xila.dev || true
-          echo "::endgroup::"
-          echo "::group::OpenBao HTTPS reachability (IPv4)"
-          curl --ipv4 --silent --show-error --connect-timeout 5 --max-time 10 \
-            --output /dev/null \
-            --write-out 'HTTP %{http_code}; remote IP %{remote_ip}; TCP %{time_connect}s; TLS %{time_appconnect}s; total %{time_total}s\n' \
-            https://vault.xila.dev/v1/sys/health || true
-          echo "::endgroup::"
-          echo "::group::OpenBao HTTPS reachability (Python urllib)"
-          python3 - <<'PY'
-          import urllib.error
-          import urllib.request
-
-          try:
-              with urllib.request.urlopen("https://vault.xila.dev/v1/sys/health", timeout=10) as response:
-                  print(f"HTTP {response.status}")
-          except urllib.error.HTTPError as error:
-              print(f"HTTP {error.code} (reachable)")
-          except Exception as error:
-              print(f"{type(error).__name__}: {error}")
-          PY
-          echo "::endgroup::"
       - name: "Prepare | Canonical manifest signing payload"
         shell: bash
         run: |
@@ -291,8 +228,7 @@ jobs:
             manifest signing-payload \
             "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
             "$RUNNER_TEMP/signing-work/signing-payload"
-      - name: "Sign | Use temporary development signing key"
-        if: inputs.sign-artifact && !inputs.publish-release
+      - name: "Sign | Development signing key"
         shell: bash
         env:
           XILA_DEV_SIGNING_SEED_B64: ${{ secrets.XILA_DEV_SIGNING_SEED_B64 }}
@@ -302,31 +238,11 @@ jobs:
             "$RUNNER_TEMP/signing-work/signing-payload" \
             "$RUNNER_TEMP/signing-work/signature" \
             "$RUNNER_TEMP/signing-work/public.key"
-      - name: "Sign | Authenticate with OpenBao"
-        if: inputs.publish-release
-        shell: bash
-        env:
-          OPENBAO_ADDR: https://vault.xila.dev
-          OPENBAO_JWT_MOUNT: jwt
-          OPENBAO_JWT_ROLE: xila-app-release
-          OPENBAO_TRANSIT_MOUNT: transit
-          OPENBAO_TRANSIT_KEY: xila-applications
-          OPENBAO_KEY_VERSION: ${{ vars.XILA_OPENBAO_KEY_VERSION }}
-          PUBLIC_KEY_B64: ${{ vars.XILA_SIGNING_PUBLIC_KEY_B64 }}
-        run: |
-          set -euo pipefail
-          test -n "$OPENBAO_KEY_VERSION" && test -n "$PUBLIC_KEY_B64"
-          printf '%s' "$PUBLIC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/signing-work/public.key"
-          test "$(wc -c < "$RUNNER_TEMP/signing-work/public.key")" -eq 32
-          python3 package-manager/tools/openbao_sign.py \
-            "$RUNNER_TEMP/signing-work/signing-payload" \
-            "$RUNNER_TEMP/signing-work/signature"
       - name: "Package | Assemble and verify signed archive"
         id: sign
         shell: bash
         env:
           PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
-          EPHEMERAL_SIGNING: ${{ inputs.sign-artifact }}
         run: |
           set -euo pipefail
           builder="$GITHUB_WORKSPACE/package-manager/target/release/xila-package"
@@ -340,11 +256,9 @@ jobs:
             "$RUNNER_TEMP/signing-work/public.key"
           cd "$RUNNER_TEMP/xila-signed-dist"
           sha256sum "$PACKAGE_FILENAME" > "$PACKAGE_FILENAME.sha256"
-          if [[ "$EPHEMERAL_SIGNING" == true ]]; then
-            # Raw 32-byte public key, accepted by 'xila-package verify'.
-            # It is intentionally not a trust anchor; the seed is never published.
-            cp "$RUNNER_TEMP/signing-work/public.key" "$PACKAGE_FILENAME.pub"
-          fi
+          # Raw 32-byte public key, accepted by 'xila-package verify'. It is
+          # not a trust anchor (see xila-project/packages); the seed is never published.
+          cp "$RUNNER_TEMP/signing-work/public.key" "$PACKAGE_FILENAME.pub"
           printf 'sha256=%s\n' "$(sha256sum "$PACKAGE_FILENAME" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: "Report | Upload signed package"
         uses: actions/upload-artifact@v7
@@ -353,14 +267,10 @@ jobs:
           path: ${{ runner.temp }}/xila-signed-dist/*
           if-no-files-found: error
           retention-days: 14
-      - name: "Cleanup | Disconnect NetBird"
-        if: always() && inputs.publish-release
-        run: sudo netbird down || true
-
   publish-release:
     name: Attach Xila archive to GitHub Release
     needs: [package, sign]
-    if: inputs.publish-release && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: inputs.publish-release && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     steps:
       - name: "Setup | Checkout caller release tag"
@@ -403,4 +313,5 @@ jobs:
           gh release upload "$RELEASE_TAG" \
             "$RUNNER_TEMP/xila-package-dist/$PACKAGE_FILENAME" \
             "$RUNNER_TEMP/xila-package-dist/$PACKAGE_FILENAME.sha256" \
+            "$RUNNER_TEMP/xila-package-dist/$PACKAGE_FILENAME.pub" \
             --repo "$GITHUB_REPOSITORY"
