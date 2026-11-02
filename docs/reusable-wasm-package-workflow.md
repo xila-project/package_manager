@@ -88,22 +88,26 @@ By default it uploads `<name>-<version>-<target>.xpk` and
 artifact. Set `upload-artifact: false` if the archive should not be
 retained unless used internally for release publication.
 
-Setting `publish-release: true` attaches both files to a GitHub Release
-in the **calling repository**, creating the release if necessary. The
-`release-tag` must already exist and reference the exact commit running
-the workflow. The called workflow refuses to publish for pull request
-events and does not create tags or overwrite release assets. The calling
+Setting `publish-release: true` signs the package (see below) and attaches
+the `.xpk`, `.sha256` and `.pub` files to a GitHub Release in the **calling
+repository**, creating the release if necessary. The `release-tag` must
+already exist and reference the exact commit running the workflow. Publishing
+is allowed on pushes to `main` (release-plz creates tags from the main push
+itself, and tags created with `GITHUB_TOKEN` trigger no workflow) and on tag
+pushes. The called workflow refuses to publish for pull request events and
+does not create tags or overwrite release assets. The calling
 job must explicitly grant `contents: write`; the package-building job
 itself only has read access.
 
 The output values `filename`, `sha256`, and `artifact-name` are
 available as `needs.package.outputs.filename`, etc. This packaging
-workflow is independent from release-plz: use your own release-plz
-process to create versioned tags, then attach your package artifacts
-using this workflow.
+workflow is independent from release-plz. With release-plz, a simpler option
+is to package with `sign-artifact: true` on `main`, run release-plz after the
+package jobs, and `gh release upload` the already signed artifacts for each
+entry of its `releases` output.
 
 **Security and format status:** By default, CI packages are unsigned.
-On trusted `main` pushes only, `sign-artifact: true` requires the caller
+On trusted `main` pushes, `sign-artifact: true` (and `publish-release: true`) requires the caller
 to pass the `XILA_DEV_SIGNING_SEED_B64` Actions secret (base64 of a 32-byte
 Ed25519 private seed). It signs the canonical manifest, verifies the package,
 and publishes the signed archive together with its SHA-256 checksum and
@@ -121,6 +125,7 @@ once with `openssl rand -base64 32 | gh secret set XILA_DEV_SIGNING_SEED_B64
 reusable workflow. Missing or malformed secrets fail the signing job.
 The public key is **not trusted** simply because it is shipped beside the archive.
 An installer must independently decide whether to allow unrecognized
-signers. Pull-request artifacts remain unsigned; tagged-release signing
-still uses OpenBao with a separately pinned release key.
+signers. Pull-request artifacts remain unsigned. Releases are signed with the
+same key; trust comes from the repository key in `xila-project/packages`, which
+authorizes developer keys, not from the key shipped beside an archive.
 

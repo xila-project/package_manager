@@ -20,28 +20,26 @@ class SigningRequestContextTests(unittest.TestCase):
         self.assertEqual(self.check_context(event='push', ref='refs/heads/main', sign=True, publish=False), 0)
         self.assertEqual(self.check_context(event='push', ref='refs/tags/v1.0.0', sign=False, publish=True), 0)
 
-    def test_development_signing_stays_separate_from_release_signing(self):
+    def test_release_publication_from_release_plz_main_push(self):
+        # release-plz tags from the main push itself; GITHUB_TOKEN tags start no workflow.
+        self.assertEqual(self.check_context(event='push', ref='refs/heads/main', sign=False, publish=True), 0)
+        self.assertEqual(self.check_context(event='push', ref='refs/heads/main', sign=True, publish=True), 0)
+
+    def test_single_secret_signer_without_external_vault(self):
         workflow = WORKFLOW.read_text()
-        self.assertIn('if: inputs.sign-artifact && !inputs.publish-release', workflow)
         self.assertIn('XILA_DEV_SIGNING_SEED_B64: ${{ secrets.XILA_DEV_SIGNING_SEED_B64 }}', workflow)
         self.assertIn('package-manager/tools/sign_with_seed.py', workflow)
-        for step in ('Validate | Signing builder revision',
-                     'Setup | Connect ephemeral NetBird peer',
-                     'Diagnose | OpenBao connectivity',
-                     'Sign | Authenticate with OpenBao'):
-            section = workflow.split('- name: "' + step + '"', 1)[1].split('\n      - name:', 1)[0]
-            self.assertIn('if: inputs.publish-release', section)
         self.assertIn('"$PACKAGE_FILENAME.pub"', workflow)
-        self.assertIn('"$RUNNER_TEMP/signing-work/public.key"', workflow)
         self.assertIn('"$builder" verify', workflow)
-        self.assertIn('ephemeral CI signing and release signing must not be combined', workflow)
+        for removed in ('OpenBao', 'NetBird', 'id-token'):
+            self.assertNotIn(removed, workflow)
 
     def test_pr_manual_and_wrong_ref_cannot_request_signing(self):
         for event, ref, sign, publish in [
             ('pull_request', 'refs/pull/1/merge', True, False),
             ('workflow_dispatch', 'refs/heads/main', True, False),
             ('push', 'refs/heads/other', True, False),
-            ('push', 'refs/heads/main', False, True),
+            ('push', 'refs/heads/other', False, True),
             ('workflow_dispatch', 'refs/tags/v1.0.0', False, True),
         ]:
             with self.subTest(event=event, ref=ref):
