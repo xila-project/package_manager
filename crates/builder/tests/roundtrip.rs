@@ -278,3 +278,30 @@ fn externally_signed_developer_bundle_authenticates_shortcut() {
         key.to_str().unwrap()
     ]));
 }
+
+#[test]
+fn key_commands_generate_and_derive_the_same_public_key() {
+    let temp = tempdir().unwrap();
+    let binary = env!("CARGO_BIN_EXE_xila-package");
+    let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
+    let run = |arguments: &[&str]| Command::new(binary).args(arguments).output().unwrap();
+
+    assert!(
+        run(&["key", "generate", &path("dev.seed"), &path("dev.pub")])
+            .status
+            .success()
+    );
+    assert!(
+        run(&["key", "public", &path("dev.seed"), &path("derived.pub")])
+            .status
+            .success()
+    );
+    assert_eq!(
+        fs::read(path("dev.pub")).unwrap(),
+        fs::read(path("derived.pub")).unwrap()
+    );
+
+    let refused = run(&["key", "generate", &path("dev.seed"), &path("other.pub")]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
+}
