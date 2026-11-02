@@ -44,7 +44,7 @@ pub struct RegistryEntry {
     pub archive: Archive,
 }
 
-fn valid_publisher(value: &str) -> bool {
+pub(crate) fn valid_publisher(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && !value.starts_with('-')

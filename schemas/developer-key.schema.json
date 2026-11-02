@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-key.schema.json",
+  "title": "Xila developer key (experimental v1)",
+  "description": "A developer (publisher) key file, keys/developers/<id>.json in xila-project/registry. The key signs package manifests; it is not a trust anchor and may only publish packages whose first identifier label is in namespaces.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "author",
+    "algorithm",
+    "public_key",
+    "namespaces"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-key.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "description": "Identifier referenced by registry entries (publisher); must equal the file name."
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Human-readable author name; informational only."
+    },
+    "algorithm": {
+      "const": "ed25519"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "description": "Raw 32-byte Ed25519 public key in canonical base64."
+    },
+    "openssh": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^ssh-ed25519 "
+        }
+      ],
+      "description": "The same key in OpenSSH form; informational only."
+    },
+    "namespaces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+      },
+      "description": "First labels of package identifiers this key may publish, e.g. xila for xila.clock."
+    }
+  }
+}

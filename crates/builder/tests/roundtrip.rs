@@ -419,3 +419,132 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         &path("insecure.json")
     ]));
 }
+
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::new();
+    for chunk in bytes.chunks(3) {
+        let value =
+            chunk.iter().fold(0u32, |acc, &b| (acc << 8) | u32::from(b)) << (8 * (3 - chunk.len()));
+        for index in 0..4 {
+            output.push(if index <= chunk.len() {
+                TABLE[((value >> (18 - 6 * index)) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    output
+}
+
+#[test]
+fn registry_check_validates_keys_placement_and_archives() {
+    let temp = tempdir().unwrap();
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
+    let run = |items: &[&str]| {
+        let output = Command::new(cli).args(items).output().unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let url = "https://example.com/releases/xila.clock-0.1.0-wasm32-wasip1.xpk";
+
+    assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
+    fs::create_dir_all(temp.path().join("src/executables")).unwrap();
+    fs::write(temp.path().join("src/executables/clock.wasm"), b"clock").unwrap();
+    fs::write(
+        temp.path().join("src/xila-package.json"),
+        r#"{"format_version":1,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+    )
+    .unwrap();
+    assert!(
+        run(&[
+            "bundle",
+            "build",
+            &path("src"),
+            &path("Clock.app"),
+            "--signing-key",
+            &path("dev.seed")
+        ])
+        .0
+    );
+    fs::create_dir(temp.path().join("archives")).unwrap();
+    let archive = path("archives/xila.clock-0.1.0-wasm32-wasip1.xpk");
+    assert!(run(&["bundle", "archive", &path("Clock.app"), &archive]).0);
+
+    let registry = temp.path().join("registry");
+    fs::create_dir_all(registry.join("keys/developers")).unwrap();
+    fs::create_dir_all(registry.join("packages/xila/clock")).unwrap();
+    let key = |namespaces: &str| {
+        format!(
+            r#"{{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":[{namespaces}]}}"#,
+            base64(&fs::read(path("dev.pub")).unwrap())
+        )
+    };
+    let key_file = registry.join("keys/developers/xila-project.json");
+    fs::write(&key_file, key(r#""xila""#)).unwrap();
+    let entry_file = registry.join("packages/xila/clock/0.1.0.json");
+    assert!(
+        run(&[
+            "registry",
+            "entry",
+            &archive,
+            &path("dev.pub"),
+            "xila-project",
+            url,
+            entry_file.to_str().unwrap()
+        ])
+        .0
+    );
+    let root = registry.to_str().unwrap();
+    let archives = path("archives");
+
+    assert!(run(&["registry", "check", root]).0);
+    assert!(run(&["registry", "check", root, "--archives", &archives]).0);
+
+    // A key that does not cover the namespace.
+    fs::write(&key_file, key(r#""community""#)).unwrap();
+    assert!(
+        run(&["registry", "check", root])
+            .1
+            .contains("may not publish xila.clock")
+    );
+    fs::write(&key_file, key(r#""xila""#)).unwrap();
+
+    // Misplaced, non-canonical and unknown-publisher entries.
+    let entry = fs::read_to_string(&entry_file).unwrap();
+    fs::create_dir_all(registry.join("packages/xila/other")).unwrap();
+    fs::rename(&entry_file, registry.join("packages/xila/other/0.1.0.json")).unwrap();
+    assert!(run(&["registry", "check", root]).1.contains("must be at"));
+    fs::remove_dir_all(registry.join("packages/xila/other")).unwrap();
+    fs::write(&entry_file, format!("{entry}\n")).unwrap();
+    assert!(
+        run(&["registry", "check", root])
+            .1
+            .contains("not canonical")
+    );
+    fs::write(
+        &entry_file,
+        entry.replace("\"xila-project\"", "\"someone\""),
+    )
+    .unwrap();
+    assert!(
+        run(&["registry", "check", root])
+            .1
+            .contains("unknown publisher someone")
+    );
+    fs::write(&entry_file, &entry).unwrap();
+
+    // A tampered archive.
+    let mut bytes = fs::read(&archive).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&archive, bytes).unwrap();
+    assert!(
+        run(&["registry", "check", root, "--archives", &archives])
+            .1
+            .contains("differs")
+    );
+}

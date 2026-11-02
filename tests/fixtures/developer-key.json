@@ -1,0 +1,8 @@
+{
+  "id": "xila-project",
+  "author": "Xila Project",
+  "algorithm": "ed25519",
+  "public_key": "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=",
+  "openssh": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOg9XL5RswgCE0K5pFoyYJ/ew1tbOqd87wzXvGvO6XG3 xila-project",
+  "namespaces": ["xila"]
+}

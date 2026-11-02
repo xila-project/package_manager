@@ -348,6 +348,15 @@ enum RegistryOperation<'a> {
         /// New registry entry JSON file.
         output: &'a str,
     },
+    /// Check a registry checkout: keys, entry placement, canonical form and
+    /// namespace authorization; with --archives, also every archive.
+    Check {
+        /// Registry root containing keys/developers and packages.
+        root: &'a str,
+        /// Directory of downloaded .xpk archives, named after their URLs.
+        #[arg(long)]
+        archives: Option<&'a str>,
+    },
     /// Check that a registry entry describes exactly a signed archive.
     Verify {
         /// Registry entry JSON file.
@@ -631,6 +640,9 @@ fn run() -> Result<()> {
                 archive,
                 public_key,
             } => registry::verify(Path::new(entry), Path::new(archive), Path::new(public_key)),
+            RegistryOperation::Check { root, archives } => {
+                registry::check(Path::new(root), archives.map(Path::new))
+            }
         },
         Command::Verify {
             archive,
