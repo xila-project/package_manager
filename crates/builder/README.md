@@ -156,6 +156,22 @@ signed manifest. `verify` checks the archive's size and hash, its signature,
 and that every copied field still equals the signed manifest. Signing entries
 with the registry key is not implemented yet.
 
+To check a whole registry checkout (as `xila-project/registry` CI does):
+
+```sh
+xila-package registry check ./registry                       # keys, entry placement, namespaces
+xila-package registry check ./registry --archives ./downloads  # also every archive and signature
+```
+
+Developer keys live in `keys/developers/<id>.json`
+([developer-key.schema.json](../../schemas/developer-key.schema.json)) and entries
+in `packages/<identifier with dots as />/<version>.json`, e.g.
+`packages/xila/pixel-painter/0.1.0.json`. `check` requires each entry to be
+canonical (exactly as `registry entry` writes it), to sit at its own path, and
+to name a publisher whose key lists the identifier's first label in
+`namespaces`. `--archives` takes the downloaded `.xpk` files, named after
+their URLs; the command itself never accesses the network.
+
 ## Compatibility and scope
 
 The legacy `xila-package manifest generate/update/application` and
