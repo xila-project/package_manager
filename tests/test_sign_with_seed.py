@@ -38,7 +38,7 @@ class DevSigningTests(unittest.TestCase):
 
             self.assertEqual(public_keys[0], public_keys[1])
             self.assertEqual(signatures[0], signatures[1])
-            self.assertEqual(list(root.glob("*.der")), sorted(root.glob("public-*.der")))
+            self.assertEqual(sorted(root.glob("*.der")), sorted(root.glob("public-*.der")))
             message.write_bytes(b"tampered")
             tampered = subprocess.run(
                 ["openssl", "pkeyutl", "-verify", "-rawin", "-pubin",
