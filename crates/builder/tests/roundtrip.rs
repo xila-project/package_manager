@@ -211,3 +211,70 @@ fn external_signing_authenticates_manifest_and_payload() {
         key.to_str().unwrap()
     ]));
 }
+
+#[test]
+fn externally_signed_developer_bundle_authenticates_shortcut() {
+    use ed25519_dalek::{Signer, SigningKey};
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("source");
+    fs::create_dir_all(source.join("bin")).unwrap();
+    fs::write(source.join("bin/example.wasm"), b"wasm payload").unwrap();
+    fs::write(
+        source.join("xila-package.json"),
+        include_bytes!("../../../tests/fixtures/package-workflow-developer.json"),
+    )
+    .unwrap();
+    fs::write(
+        source.join("shortcut.json"),
+        include_bytes!("../../../tests/fixtures/package-workflow-shortcut.json"),
+    )
+    .unwrap();
+    let bundle = temp.path().join("bundle.app");
+    let payload = temp.path().join("payload.bin");
+    let sig = temp.path().join("signature.bin");
+    let key = temp.path().join("public.key");
+    let archive = temp.path().join("app.xpk");
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let args = |items: &[&str]| Command::new(cli).args(items).status().unwrap().success();
+    assert!(args(&[
+        "bundle",
+        "build",
+        source.to_str().unwrap(),
+        bundle.to_str().unwrap()
+    ]));
+    let manifest = bundle.join(".xila/manifest.json");
+    assert!(args(&[
+        "manifest",
+        "signing-payload",
+        manifest.to_str().unwrap(),
+        payload.to_str().unwrap()
+    ]));
+    let signer = SigningKey::from_bytes(&[42; 32]);
+    fs::write(&sig, signer.sign(&fs::read(&payload).unwrap()).to_bytes()).unwrap();
+    fs::write(&key, signer.verifying_key().to_bytes()).unwrap();
+    assert!(args(&[
+        "pack",
+        source.to_str().unwrap(),
+        manifest.to_str().unwrap(),
+        archive.to_str().unwrap(),
+        sig.to_str().unwrap()
+    ]));
+    assert!(args(&[
+        "verify",
+        archive.to_str().unwrap(),
+        key.to_str().unwrap()
+    ]));
+    let mut tampered = fs::read(&archive).unwrap();
+    let needle = b"@bundle/bin/example.wasm";
+    let index = tampered
+        .windows(needle.len())
+        .position(|b| b == needle)
+        .unwrap();
+    tampered[index] ^= 1;
+    fs::write(&archive, tampered).unwrap();
+    assert!(!args(&[
+        "verify",
+        archive.to_str().unwrap(),
+        key.to_str().unwrap()
+    ]));
+}

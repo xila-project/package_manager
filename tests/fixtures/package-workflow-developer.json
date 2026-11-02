@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json",
+  "format_version": 1,
+  "name": "community.example",
+  "version": "0.1.0",
+  "target": "wasm32-wasip1",
+  "minimum_xila_abi": 1,
+  "capabilities": [],
+  "application": {
+    "entrypoint": "bin/example.wasm",
+    "display_name": "Example",
+    "icon": "",
+    "show_in_launcher": true
+  }
+}
