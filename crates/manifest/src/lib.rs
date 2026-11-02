@@ -5,12 +5,19 @@
 extern crate alloc;
 
 pub mod developer;
+pub mod metadata;
+pub mod registry;
 use alloc::{string::String, vec::Vec};
 pub use developer::{
     DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
     encode_developer,
 };
+pub use metadata::Metadata;
 use miniserde::{Deserialize, Serialize};
+pub use registry::{
+    Archive, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, RegistryEntry,
+    decode_registry_entry, encode_registry_entry,
+};
 
 /// Current experimental manifest format version.
 pub const FORMAT_VERSION: u32 = 1;
@@ -47,6 +54,10 @@ pub enum Error {
     InvalidFileList,
     InvalidApplication,
     InvalidSchema,
+    InvalidMetadata,
+    InvalidRegistryEntry,
+    /// A registry entry disagrees with the signed manifest of its archive.
+    RegistryMismatch,
 }
 
 /// A complete Xila archive manifest describing identity and every payload file.
@@ -65,6 +76,8 @@ pub struct Manifest {
     /// `None` means a standalone executable/data package, not an application.
     /// Encoded as JSON null for packages without an application.
     pub application: Option<Application>,
+    /// Descriptive catalog information copied from the developer manifest.
+    pub metadata: Option<Metadata>,
 }
 
 /// Application-specific metadata; identity/version/ABI/capabilities remain on
@@ -130,6 +143,34 @@ fn valid_identifier(value: &str) -> bool {
         && value.contains('.')
 }
 
+pub(crate) fn validate_identity(name: &str, version: &str, target: &str) -> Result<(), Error> {
+    if !valid_identifier(name)
+        || version.is_empty()
+        || version.len() > 64
+        || !version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b))
+    {
+        return Err(Error::InvalidIdentifier);
+    }
+    if target.is_empty()
+        || target.len() > 64
+        || !target
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+    {
+        return Err(Error::InvalidTarget);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_capabilities(capabilities: &[String]) -> Result<(), Error> {
+    if capabilities.len() > 32 || capabilities.iter().any(|c| c.is_empty() || c.len() > 64) {
+        return Err(Error::InvalidFileList);
+    }
+    Ok(())
+}
+
 /// Validate structural constraints; this does not authenticate publishers.
 pub fn validate(manifest: &Manifest) -> Result<(), Error> {
     if manifest
@@ -142,33 +183,13 @@ pub fn validate(manifest: &Manifest) -> Result<(), Error> {
     if manifest.format_version != FORMAT_VERSION {
         return Err(Error::UnsupportedVersion);
     }
-    if !valid_identifier(&manifest.name)
-        || manifest.version.is_empty()
-        || manifest.version.len() > 64
-        || !manifest
-            .version
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b))
-    {
-        return Err(Error::InvalidIdentifier);
-    }
-    if manifest.target.is_empty()
-        || manifest.target.len() > 64
-        || !manifest
-            .target
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
-    {
-        return Err(Error::InvalidTarget);
-    }
-    if manifest.files.len() > MAX_FILES
-        || manifest.capabilities.len() > 32
-        || manifest
-            .capabilities
-            .iter()
-            .any(|c| c.is_empty() || c.len() > 64)
-    {
+    validate_identity(&manifest.name, &manifest.version, &manifest.target)?;
+    validate_capabilities(&manifest.capabilities)?;
+    if manifest.files.len() > MAX_FILES {
         return Err(Error::InvalidFileList);
+    }
+    if let Some(metadata) = &manifest.metadata {
+        metadata.validate()?;
     }
     let mut total = 0_u64;
     for (i, entry) in manifest.files.iter().enumerate() {
@@ -304,6 +325,7 @@ mod tests {
                 icon: String::new(),
                 show_in_launcher: true,
             }),
+            metadata: None,
         }
     }
     #[test]

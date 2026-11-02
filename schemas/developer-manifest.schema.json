@@ -71,6 +71,17 @@
           "$ref": "#/$defs/application"
         }
       ]
+    },
+    "metadata": {
+      "description": "Optional descriptive information (summary, license, source, homepage).",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/metadata"
+        }
+      ]
     }
   },
   "$defs": {
@@ -127,6 +138,51 @@
         "show_in_launcher": {
           "type": "boolean",
           "description": "Launcher discovery only; does not automatically pin to Dock."
+        }
+      }
+    },
+    "metadata": {
+      "description": "Descriptive catalog information copied into registry entries. Never grants trust.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "license",
+        "source"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*\\S[^\\u0000-\\u001f\\u007f]*$",
+          "description": "One-line description shown in catalogs."
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9.+() -]*[A-Za-z0-9.+()-][A-Za-z0-9.+() -]*$",
+          "description": "SPDX license expression, e.g. MIT or Apache-2.0 OR MIT."
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^https://[^\\s]+$",
+          "description": "HTTPS URL of the source repository."
+        },
+        "homepage": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^https://[^\\s]+$",
+              "description": "Optional HTTPS project homepage."
+            }
+          ]
         }
       }
     }

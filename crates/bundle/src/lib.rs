@@ -194,6 +194,7 @@ mod tests {
                 icon: "resources/icon.png".to_string(),
                 show_in_launcher: true,
             }),
+            metadata: None,
         }
     }
 

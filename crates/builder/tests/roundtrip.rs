@@ -305,3 +305,117 @@ fn key_commands_generate_and_derive_the_same_public_key() {
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
 }
+
+#[test]
+fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
+    let temp = tempdir().unwrap();
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
+    let run = |items: &[&str]| Command::new(cli).args(items).status().unwrap().success();
+    let url = "https://github.com/xila-project/applications/releases/download/xila.clock-v0.1.0/xila.clock-0.1.0-wasm32-wasip1.xpk";
+
+    assert!(run(&[
+        "key",
+        "generate",
+        &path("dev.seed"),
+        &path("dev.pub")
+    ]));
+    assert!(run(&[
+        "key",
+        "generate",
+        &path("other.seed"),
+        &path("other.pub")
+    ]));
+    for (source, payload) in [("source", &b"clock"[..]), ("changed", &b"clock v2"[..])] {
+        fs::create_dir_all(temp.path().join(source).join("executables")).unwrap();
+        fs::write(
+            temp.path().join(source).join("executables/clock.wasm"),
+            payload,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join(source).join("xila-package.json"),
+            r#"{"format_version":1,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
+        )
+        .unwrap();
+        let bundle = path(&format!("{source}.app"));
+        assert!(run(&[
+            "bundle",
+            "build",
+            &path(source),
+            &bundle,
+            "--signing-key",
+            &path("dev.seed")
+        ]));
+        assert!(run(&[
+            "bundle",
+            "archive",
+            &bundle,
+            &path(&format!("{source}.xpk"))
+        ]));
+    }
+
+    assert!(run(&[
+        "registry",
+        "entry",
+        &path("source.xpk"),
+        &path("dev.pub"),
+        "xila-project",
+        url,
+        &path("entry.json")
+    ]));
+    let entry = fs::read_to_string(path("entry.json")).unwrap();
+    assert!(entry.contains(r#""publisher":"xila-project""#), "{entry}");
+    assert!(entry.contains(r#""summary":"Shows the time""#), "{entry}");
+    assert!(entry.contains(r#""display_name":"Clock""#), "{entry}");
+    assert!(run(&[
+        "registry",
+        "verify",
+        &path("entry.json"),
+        &path("source.xpk"),
+        &path("dev.pub")
+    ]));
+
+    // A different archive, a different signer, or overwriting must all fail.
+    assert!(!run(&[
+        "registry",
+        "verify",
+        &path("entry.json"),
+        &path("changed.xpk"),
+        &path("dev.pub")
+    ]));
+    assert!(!run(&[
+        "registry",
+        "verify",
+        &path("entry.json"),
+        &path("source.xpk"),
+        &path("other.pub")
+    ]));
+    assert!(!run(&[
+        "registry",
+        "entry",
+        &path("source.xpk"),
+        &path("other.pub"),
+        "xila-project",
+        url,
+        &path("other.json")
+    ]));
+    assert!(!run(&[
+        "registry",
+        "entry",
+        &path("source.xpk"),
+        &path("dev.pub"),
+        "xila-project",
+        url,
+        &path("entry.json")
+    ]));
+    assert!(!run(&[
+        "registry",
+        "entry",
+        &path("source.xpk"),
+        &path("dev.pub"),
+        "xila-project",
+        "http://insecure",
+        &path("insecure.json")
+    ]));
+}

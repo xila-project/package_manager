@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 mod bundle;
 mod key;
+mod registry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InventoryMode {
@@ -141,6 +142,7 @@ fn generate(
         capabilities: vec![],
         files,
         application: None,
+        metadata: None,
     };
     write_manifest(output, &manifest)
 }
@@ -305,6 +307,8 @@ enum Command<'a> {
     Bundle(BundleCommand<'a>),
     /// Generate or inspect raw Ed25519 signing keys (stateless, explicit paths).
     Key(KeyCommand<'a>),
+    /// Generate or check registry entries for released, signed archives.
+    Registry(RegistryCommand<'a>),
     /// Verify a signed archive against an externally trusted raw public key.
     Verify {
         archive: &'a str,
@@ -320,6 +324,38 @@ enum Command<'a> {
         output: &'a str,
         /// Optional 64-byte Ed25519 signature prepared outside this tool.
         signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct RegistryCommand<'a> {
+    #[command(subcommand)]
+    command: RegistryOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryOperation<'a> {
+    /// Write the registry entry of a signed archive; never overwrites.
+    Entry {
+        /// Signed .xpk archive.
+        archive: &'a str,
+        /// Raw 32-byte public key of the publishing developer.
+        public_key: &'a str,
+        /// Developer key identifier (packages/keys/developers/<id>.json).
+        publisher: &'a str,
+        /// HTTPS download URL of the archive.
+        url: &'a str,
+        /// New registry entry JSON file.
+        output: &'a str,
+    },
+    /// Check that a registry entry describes exactly a signed archive.
+    Verify {
+        /// Registry entry JSON file.
+        entry: &'a str,
+        /// Signed .xpk archive.
+        archive: &'a str,
+        /// Raw 32-byte public key of the publishing developer.
+        public_key: &'a str,
     },
 }
 
@@ -575,6 +611,26 @@ fn run() -> Result<()> {
             KeyOperation::Public { seed, public_key } => {
                 key::public(Path::new(seed), Path::new(public_key))
             }
+        },
+        Command::Registry(RegistryCommand { command }) => match command {
+            RegistryOperation::Entry {
+                archive,
+                public_key,
+                publisher,
+                url,
+                output,
+            } => registry::entry(
+                Path::new(archive),
+                Path::new(public_key),
+                publisher,
+                url,
+                Path::new(output),
+            ),
+            RegistryOperation::Verify {
+                entry,
+                archive,
+                public_key,
+            } => registry::verify(Path::new(entry), Path::new(archive), Path::new(public_key)),
         },
         Command::Verify {
             archive,

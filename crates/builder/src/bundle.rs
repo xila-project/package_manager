@@ -135,6 +135,7 @@ pub fn init(options: InitOptions<'_>) -> Result<()> {
                 show_in_launcher: true,
             })
         },
+        metadata: None,
     };
     let text = encode_developer(&config).map_err(|_| invalid("invalid authoring metadata"))?;
     fs::create_dir(directory)?;
