@@ -10,12 +10,12 @@ just a directory: no VFS installation, activation database, or install hook.
 
 ```sh
 xila-package bundle init ./weather community.weather 1.0.0 wasm32-wasip1 1 \
-  --entrypoint bin/weather.wasm \
+  --entrypoint executables/weather.wasm \
   --display-name Weather \
   --icon resources/icon.png
 ```
 
-`init` creates `weather/xila-package.json` plus `bin/` and `resources/`.
+`init` creates `weather/xila-package.json` plus `executables/` and `resources/`.
 The developer manifest includes identity, version, ABI, capability requests
 and application metadata, **but no generated hashes or signatures**. Edit it
 directly and place the compiled executable and any resources in the source tree:
@@ -23,7 +23,7 @@ directly and place the compiled executable and any resources in the source tree:
 ```text
 weather/
   xila-package.json             # developer configuration (editable)
-  bin/weather.wasm               # compiled binary
+  executables/weather.wasm               # compiled binary
   resources/icon.png
   resources/translations/en.json
   resources/fonts/font.bin
@@ -47,7 +47,7 @@ The resulting bundle is independent from the source:
 Weather.app/
   .xila/manifest.json          # generated runtime manifest and full inventory
   .xila/manifest.sig           # present only when signed
-  bin/weather.wasm
+  executables/weather.wasm
   resources/icon.png
   resources/translations/en.json
   resources/fonts/font.bin
@@ -60,6 +60,15 @@ publishing the bundle directory. It rejects unexpected metadata, symlinks,
 invalid entrypoints/icons and unsafe paths. The optional `.xpk` is a
 deterministic USTAR distribution archive of the same tree, not an installation
 transaction.
+
+**A bundle is its archive, extracted.** Like a macOS `.app`, the directory is
+self-contained and runnable as is: extracting a `.xpk` yields exactly this
+tree, which the installer moves to `/applications/bundles/<package-id>/`.
+`executables/` mirrors Xila's `/applications/executables`, and bundle-local
+paths such as `@bundle/executables/weather.wasm` in `shortcut.json` resolve
+against the bundle directory. Use `bundle archive` rather than a plain `tar`:
+`.xila/manifest.json` must be the first entry (followed by `.xila/manifest.sig`
+when signed) so devices can verify the archive while streaming it.
 
 ### 3. Sign the complete bundle (optional for local development)
 

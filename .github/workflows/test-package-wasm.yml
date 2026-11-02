@@ -83,14 +83,14 @@ jobs:
           with tarfile.open(fileobj=__import__("io").BytesIO(data), mode="r:") as tar:
               manifest = json.load(tar.extractfile(".xila/manifest.json"))
               assert manifest["name"] == "community.example"
-              wasm = tar.extractfile("bin/example.wasm").read()
+              wasm = tar.extractfile("executables/example.wasm").read()
               assert wasm == b"\x00asm\x01\x00\x00\x00"
               entry = manifest["files"][0]
               assert entry["sha256"] == hashlib.sha256(wasm).hexdigest()
               assert entry["size"] == len(wasm)
               shortcut_bytes = tar.extractfile("shortcut.json").read()
               shortcut = json.loads(shortcut_bytes)
-              assert shortcut["arguments"] == ["@bundle/bin/example.wasm"]
+              assert shortcut["arguments"] == ["@bundle/executables/example.wasm"]
               hashes = {file["path"]: file for file in manifest["files"]}
               assert "shortcut.json" in hashes
               assert hashes["shortcut.json"]["sha256"] == hashlib.sha256(shortcut_bytes).hexdigest()

@@ -25,6 +25,10 @@ pub const MAX_FILES: usize = 128;
 pub const MANIFEST_PATH: &str = ".xila/manifest.json";
 /// Optional detached 64-byte Ed25519 signature archive entry.
 pub const SIGNATURE_PATH: &str = ".xila/manifest.sig";
+/// Bundle directory holding executables, mirroring Xila's
+/// `/applications/executables`. A bundle is the extracted archive itself:
+/// `.xila/` metadata, `executables/`, resources and `shortcut.json`.
+pub const EXECUTABLES_DIRECTORY: &str = "executables";
 /// Domain separator proposed for signing exact manifest bytes.
 pub const SIGNED_DOMAIN: &[u8] = b"XILA-PACKAGE-MANIFEST-V1\0";
 
@@ -88,6 +92,16 @@ pub struct ManifestFile {
 }
 
 /// Reject unsafe relative paths, reserved metadata names, and traversal.
+/// Whether `path` is a safe bundle-relative file directly inside
+/// [`EXECUTABLES_DIRECTORY`], e.g. `executables/clock.wasm`.
+pub fn is_bundle_executable(path: &str) -> bool {
+    validate_path(path).is_ok()
+        && path
+            .strip_prefix(EXECUTABLES_DIRECTORY)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+}
+
 pub fn validate_path(path: &str) -> Result<(), Error> {
     if path.is_empty()
         || path.len() > 200
@@ -250,6 +264,23 @@ pub fn signed_message_into<'a>(bytes: &[u8], output: &'a mut [u8]) -> Result<&'a
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bundle_executables_live_directly_in_executables_directory() {
+        use super::is_bundle_executable;
+        assert!(is_bundle_executable("executables/clock.wasm"));
+        for path in [
+            "bin/clock.wasm",
+            "executables/",
+            "executables",
+            "executables/nested/clock.wasm",
+            "executables/../clock.wasm",
+            "/executables/clock.wasm",
+            "executablesx/clock.wasm",
+        ] {
+            assert!(!is_bundle_executable(path), "{path}");
+        }
+    }
+
     use super::*;
     use alloc::{string::ToString, vec};
 
@@ -263,12 +294,12 @@ mod tests {
             minimum_xila_abi: 1,
             capabilities: vec![],
             files: vec![ManifestFile {
-                path: "bin/calculator.wasm".to_string(),
+                path: "executables/calculator.wasm".to_string(),
                 size: 3,
                 sha256: "a".repeat(64),
             }],
             application: Some(Application {
-                entrypoint: "bin/calculator.wasm".to_string(),
+                entrypoint: "executables/calculator.wasm".to_string(),
                 display_name: "Calculator".to_string(),
                 icon: String::new(),
                 show_in_launcher: true,
@@ -306,7 +337,7 @@ mod tests {
         let mut m = example();
         m.application.as_mut().unwrap().entrypoint = "../escape".to_string();
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
-        m.application.as_mut().unwrap().entrypoint = "bin/absent.wasm".to_string();
+        m.application.as_mut().unwrap().entrypoint = "executables/absent.wasm".to_string();
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
         m.application.as_mut().unwrap().entrypoint = "/system/executables/clock".to_string();
         assert_eq!(validate(&m), Ok(()));

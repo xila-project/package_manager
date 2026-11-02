@@ -8,7 +8,7 @@
   "capabilities": [],
   "files": [
     {
-      "path": "bin/example.wasm",
+      "path": "executables/example.wasm",
       "size": 0,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }

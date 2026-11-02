@@ -39,7 +39,7 @@ class ManifestSchemaTests(unittest.TestCase):
             "sha256": "a" * 64,
         })
         bundle["application"] = {
-            "entrypoint": "bin/example.wasm",
+            "entrypoint": "executables/example.wasm",
             "display_name": "Example",
             "icon": "resources/icon.png",
             "show_in_launcher": True,
@@ -87,7 +87,7 @@ class ManifestSchemaTests(unittest.TestCase):
 
     def test_rejects_application_invalid_paths_and_properties(self):
         app = {
-            "entrypoint": "bin/example.wasm",
+            "entrypoint": "executables/example.wasm",
             "display_name": "Example",
             "icon": "",
             "show_in_launcher": True,

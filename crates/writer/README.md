@@ -20,7 +20,7 @@ let manifest = Manifest {
     minimum_xila_abi: 1,
     capabilities: vec![],
     files: vec![ManifestFile {
-        path: "bin/example.wasm".into(),
+        path: "executables/example.wasm".into(),
         size: 3,
         sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
     }],
@@ -30,7 +30,7 @@ let mut archive = Vec::new();
 write_package(
     &mut archive,
     &manifest,
-    &[SourceFile { path: "bin/example.wasm", bytes: b"abc" }],
+    &[SourceFile { path: "executables/example.wasm", bytes: b"abc" }],
     None,
 ).unwrap();
 assert!(!archive.is_empty());

@@ -57,8 +57,8 @@ def pack(
     if not isinstance(application, dict):
         raise ValueError("the WASI workflow requires an application entrypoint")
     entrypoint = application.get("entrypoint")
-    if not isinstance(entrypoint, str) or not entrypoint.startswith("bin/") or not entrypoint.endswith(".wasm"):
-        raise ValueError("expected bundle-relative bin/<app>.wasm entrypoint")
+    if not isinstance(entrypoint, str) or not entrypoint.startswith("executables/") or not entrypoint.endswith(".wasm"):
+        raise ValueError("expected bundle-relative executables/<app>.wasm entrypoint")
     if len(entrypoint) > 99 or any(part in ("", ".", "..") for part in entrypoint.split("/")):
         raise ValueError("unsafe WASI entrypoint")
     for key in ("name", "version", "target"):

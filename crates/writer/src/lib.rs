@@ -86,7 +86,7 @@ mod tests {
             minimum_xila_abi: 1,
             capabilities: vec![],
             files: vec![ManifestFile {
-                path: "bin/calculator.wasm".into(),
+                path: "executables/calculator.wasm".into(),
                 size: 3,
                 sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
             }],
@@ -98,7 +98,7 @@ mod tests {
     fn round_trip_between_writer_and_reader() {
         let mut output = vec![];
         let file = SourceFile {
-            path: "bin/calculator.wasm",
+            path: "executables/calculator.wasm",
             bytes: b"abc",
         };
         write_package(&mut output, &fixture(), &[file], None).unwrap();
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn reproducible_and_rejects_corruption() {
         let file = SourceFile {
-            path: "bin/calculator.wasm",
+            path: "executables/calculator.wasm",
             bytes: b"abc",
         };
         let mut first = vec![];
@@ -131,7 +131,7 @@ mod tests {
                 vec![],
                 &fixture(),
                 &[SourceFile {
-                    path: "bin/calculator.wasm",
+                    path: "executables/calculator.wasm",
                     bytes: b"abd"
                 }],
                 None

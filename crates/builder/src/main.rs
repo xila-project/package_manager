@@ -367,7 +367,7 @@ enum BundleOperation<'a> {
         target: &'a str,
         /// Minimum supported Xila ABI.
         minimum_xila_abi: u32,
-        /// Bundle-relative executable path (default bin/main.wasm).
+        /// Bundle-relative executable path (default executables/main.wasm).
         #[arg(long)]
         entrypoint: Option<&'a str>,
         /// Fallback launcher name (default package identifier).

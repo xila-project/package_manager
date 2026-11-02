@@ -22,7 +22,7 @@ VALID_SOURCE = {
     "minimum_xila_abi": 1,
     "capabilities": [],
     "application": {
-        "entrypoint": "bin/weather.wasm",
+        "entrypoint": "executables/weather.wasm",
         "display_name": "Weather",
         "icon": "resources/icon.png",
         "show_in_launcher": True,

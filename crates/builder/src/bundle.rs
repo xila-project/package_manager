@@ -129,7 +129,7 @@ pub fn init(options: InitOptions<'_>) -> Result<()> {
             None
         } else {
             Some(Application {
-                entrypoint: entrypoint.unwrap_or("bin/main.wasm").into(),
+                entrypoint: entrypoint.unwrap_or("executables/main.wasm").into(),
                 display_name: display_name.unwrap_or(name).into(),
                 icon: icon.unwrap_or_default().into(),
                 show_in_launcher: true,
@@ -139,7 +139,7 @@ pub fn init(options: InitOptions<'_>) -> Result<()> {
     let text = encode_developer(&config).map_err(|_| invalid("invalid authoring metadata"))?;
     fs::create_dir(directory)?;
     let result = (|| -> Result<()> {
-        fs::create_dir(directory.join("bin"))?;
+        fs::create_dir(directory.join(xila_package_manifest::EXECUTABLES_DIRECTORY))?;
         fs::create_dir(directory.join("resources"))?;
         fs::write(directory.join(DEVELOPER_MANIFEST_FILENAME), text)?;
         Ok(())
@@ -377,13 +377,13 @@ mod tests {
             version: "1.0.0",
             target: "wasm32-wasip1",
             minimum_xila_abi: 1,
-            entrypoint: Some("bin/weather.wasm"),
+            entrypoint: Some("executables/weather.wasm"),
             display_name: Some("Weather"),
             icon: Some("resources/icon.png"),
             standalone: false,
         })
         .unwrap();
-        fs::write(source.join("bin/weather.wasm"), b"wasm executable").unwrap();
+        fs::write(source.join("executables/weather.wasm"), b"wasm executable").unwrap();
         fs::create_dir_all(source.join("resources/translations")).unwrap();
         fs::write(source.join("resources/icon.png"), b"icon bytes").unwrap();
         fs::write(
@@ -413,7 +413,10 @@ mod tests {
                 .iter()
                 .any(|f| f.path == "resources/translations/en.json")
         );
-        assert_eq!(runtime.application.unwrap().entrypoint, "bin/weather.wasm");
+        assert_eq!(
+            runtime.application.unwrap().entrypoint,
+            "executables/weather.wasm"
+        );
         assert_eq!(
             fs::read(bundle.join("resources/icon.png")).unwrap(),
             b"icon bytes"
@@ -508,10 +511,10 @@ mod tests {
     fn reject_unexpected_files_and_invalid_entrypoint() {
         let temp = tempdir().unwrap();
         let (source, bundle) = setup(temp.path());
-        fs::remove_file(source.join("bin/weather.wasm")).unwrap();
+        fs::remove_file(source.join("executables/weather.wasm")).unwrap();
         assert!(build(&source, &bundle, None).is_err());
         assert!(!bundle.exists());
-        fs::write(source.join("bin/weather.wasm"), b"restored").unwrap();
+        fs::write(source.join("executables/weather.wasm"), b"restored").unwrap();
         fs::create_dir(source.join(".xila")).unwrap();
         assert!(build(&source, &bundle, None).is_err());
     }
@@ -534,7 +537,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let (source, bundle) = setup(temp.path());
         symlink(
-            source.join("bin/weather.wasm"),
+            source.join("executables/weather.wasm"),
             source.join("shortcut.wasm"),
         )
         .unwrap();
@@ -558,7 +561,7 @@ mod tests {
             standalone: true,
         })
         .unwrap();
-        fs::write(source.join("bin/tool.wasm"), b"standalone wasm").unwrap();
+        fs::write(source.join("executables/tool.wasm"), b"standalone wasm").unwrap();
         let bundle = temp.path().join("Tool.app");
         build(&source, &bundle, None).unwrap();
         let manifest = verify(&bundle, None).unwrap();

@@ -332,11 +332,11 @@ mod tests {
             minimum_xila_abi: 1,
             capabilities: vec![],
             files: vec![
-                hashed_file("bin/main.wasm", &wasm),
+                hashed_file("executables/main.wasm", &wasm),
                 hashed_file("resources/icon.png", &icon),
             ],
             application: Some(Application {
-                entrypoint: "bin/main.wasm".into(),
+                entrypoint: "executables/main.wasm".into(),
                 display_name: "Example".into(),
                 icon: "resources/icon.png".into(),
                 show_in_launcher: true,
@@ -354,7 +354,7 @@ mod tests {
             &manifest,
             &[
                 SourceFile {
-                    path: "bin/main.wasm",
+                    path: "executables/main.wasm",
                     bytes: &wasm,
                 },
                 SourceFile {
