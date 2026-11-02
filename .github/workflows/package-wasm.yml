@@ -112,13 +112,13 @@ jobs:
           persist-credentials: false
           path: package-manager
       - name: "Setup | Fetch caller WASI artifact"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.wasm-artifact }}
           path: ${{ runner.temp }}/xila-wasm-input
       - name: "Setup | Fetch generated manifest"
         if: inputs.manifest-artifact != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.manifest-artifact }}
           path: ${{ runner.temp }}/xila-manifest-input
@@ -206,7 +206,7 @@ jobs:
           path: package-manager
           persist-credentials: false
       - name: "Setup | Download package inputs"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}-signing-input
           path: ${{ runner.temp }}/xila-signing-download
@@ -279,7 +279,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: "Setup | Download package archive"
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/xila-package-dist
