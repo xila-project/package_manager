@@ -37,7 +37,7 @@ on:
         type: boolean
         default: true
       sign-artifact:
-        description: "Sign artifacts from trusted main-branch pushes"
+        description: "Sign main-branch development artifacts using the temporary XILA_DEV_SIGNING_SEED_B64 secret"
         required: false
         type: boolean
         default: false
@@ -53,7 +53,10 @@ on:
         default: ""
     secrets:
       NETBIRD_SETUP_KEY:
-        description: "Ephemeral NetBird setup key for the signing peer"
+        description: "Ephemeral NetBird setup key for release signing"
+        required: false
+      XILA_DEV_SIGNING_SEED_B64:
+        description: "Base64-encoded raw 32-byte Ed25519 seed for development signing on main"
         required: false
     outputs:
       filename:
@@ -84,6 +87,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$SIGN_ARTIFACT" == true && "$PUBLISH_RELEASE" == true ]]; then
+            echo "::error::ephemeral CI signing and release signing must not be combined"
+            exit 1
+          fi
           if [[ "$SIGN_ARTIFACT" == true && ( "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/heads/main ) ]]; then
             echo "::error::sign-artifact requires a push to main"
             exit 1
@@ -179,6 +186,7 @@ jobs:
       sha256: ${{ steps.sign.outputs.sha256 }}
     steps:
       - name: "Validate | Signing builder revision"
+        if: inputs.publish-release
         env:
           BUILDER_REF: ${{ inputs.builder-ref }}
           TRUSTED_BUILDER_REF: ${{ vars.XILA_SIGNING_BUILDER_SHA }}
@@ -217,6 +225,7 @@ jobs:
       - name: "Build | Host package builder"
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
       - name: "Setup | Connect ephemeral NetBird peer"
+        if: inputs.publish-release
         env:
           NB_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
           NB_MANAGEMENT_URL: https://netbird.anneraud.fr
@@ -233,6 +242,7 @@ jobs:
           sudo --preserve-env=NB_SETUP_KEY,NB_MANAGEMENT_URL netbird up
       # Diagnostic-only: never emit token values or NetBird peer inventory.
       - name: "Diagnose | OpenBao connectivity"
+        if: inputs.publish-release
         shell: bash
         run: |
           set -uo pipefail
@@ -262,32 +272,72 @@ jobs:
               print(f"{type(error).__name__}: {error}")
           PY
           echo "::endgroup::"
-      - name: "Sign | Authenticate and verify package"
-        id: sign
+      - name: "Prepare | Canonical manifest signing payload"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/signing-work" "$RUNNER_TEMP/xila-signed-dist"
+          python3 package-manager/tools/unpack_signing_input.py \
+            "$RUNNER_TEMP/xila-signing-download/xila-signing-input.tar" \
+            "$RUNNER_TEMP/signing-work"
+          "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
+            manifest signing-payload \
+            "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
+            "$RUNNER_TEMP/signing-work/signing-payload"
+      - name: "Sign | Use temporary development signing key"
+        if: inputs.sign-artifact && !inputs.publish-release
+        shell: bash
+        env:
+          XILA_DEV_SIGNING_SEED_B64: ${{ secrets.XILA_DEV_SIGNING_SEED_B64 }}
+        run: |
+          set -euo pipefail
+          python3 package-manager/tools/sign_with_seed.py \
+            "$RUNNER_TEMP/signing-work/signing-payload" \
+            "$RUNNER_TEMP/signing-work/signature" \
+            "$RUNNER_TEMP/signing-work/public.key"
+      - name: "Sign | Authenticate with OpenBao"
+        if: inputs.publish-release
         shell: bash
         env:
           OPENBAO_ADDR: https://vault.xila.dev
           OPENBAO_JWT_MOUNT: jwt
-          OPENBAO_JWT_ROLE: ${{ inputs.publish-release && 'xila-app-release' || 'xila-app-ci' }}
+          OPENBAO_JWT_ROLE: xila-app-release
           OPENBAO_TRANSIT_MOUNT: transit
           OPENBAO_TRANSIT_KEY: xila-applications
           OPENBAO_KEY_VERSION: ${{ vars.XILA_OPENBAO_KEY_VERSION }}
           PUBLIC_KEY_B64: ${{ vars.XILA_SIGNING_PUBLIC_KEY_B64 }}
-          PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
         run: |
           set -euo pipefail
           test -n "$OPENBAO_KEY_VERSION" && test -n "$PUBLIC_KEY_B64"
-          mkdir -p "$RUNNER_TEMP/signing-work" "$RUNNER_TEMP/xila-signed-dist"
-          python3 package-manager/tools/unpack_signing_input.py "$RUNNER_TEMP/xila-signing-download/xila-signing-input.tar" "$RUNNER_TEMP/signing-work"
           printf '%s' "$PUBLIC_KEY_B64" | base64 --decode > "$RUNNER_TEMP/signing-work/public.key"
           test "$(wc -c < "$RUNNER_TEMP/signing-work/public.key")" -eq 32
+          python3 package-manager/tools/openbao_sign.py \
+            "$RUNNER_TEMP/signing-work/signing-payload" \
+            "$RUNNER_TEMP/signing-work/signature"
+      - name: "Package | Assemble and verify signed archive"
+        id: sign
+        shell: bash
+        env:
+          PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
+          EPHEMERAL_SIGNING: ${{ inputs.sign-artifact }}
+        run: |
+          set -euo pipefail
           builder="$GITHUB_WORKSPACE/package-manager/target/release/xila-package"
-          "$builder" manifest signing-payload "$RUNNER_TEMP/signing-work/xila-package-manifest.json" "$RUNNER_TEMP/signing-work/signing-payload"
-          python3 package-manager/tools/openbao_sign.py "$RUNNER_TEMP/signing-work/signing-payload" "$RUNNER_TEMP/signing-work/signature"
-          "$builder" pack "$RUNNER_TEMP/signing-work/xila-package-payload" "$RUNNER_TEMP/signing-work/xila-package-manifest.json" "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" "$RUNNER_TEMP/signing-work/signature"
-          "$builder" verify "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" "$RUNNER_TEMP/signing-work/public.key"
+          "$builder" pack \
+            "$RUNNER_TEMP/signing-work/xila-package-payload" \
+            "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
+            "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" \
+            "$RUNNER_TEMP/signing-work/signature"
+          "$builder" verify \
+            "$RUNNER_TEMP/xila-signed-dist/$PACKAGE_FILENAME" \
+            "$RUNNER_TEMP/signing-work/public.key"
           cd "$RUNNER_TEMP/xila-signed-dist"
           sha256sum "$PACKAGE_FILENAME" > "$PACKAGE_FILENAME.sha256"
+          if [[ "$EPHEMERAL_SIGNING" == true ]]; then
+            # Raw 32-byte public key, accepted by 'xila-package verify'.
+            # It is intentionally not a trust anchor; the seed is never published.
+            cp "$RUNNER_TEMP/signing-work/public.key" "$PACKAGE_FILENAME.pub"
+          fi
           printf 'sha256=%s\n' "$(sha256sum "$PACKAGE_FILENAME" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: "Report | Upload signed package"
         uses: actions/upload-artifact@v7
@@ -297,7 +347,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: "Cleanup | Disconnect NetBird"
-        if: always()
+        if: always() && inputs.publish-release
         run: sudo netbird down || true
 
   publish-release:

@@ -7,6 +7,8 @@ on:
       - ".github/workflows/test-package-wasm.yml"
       - "tools/package_wasm.py"
       - "tools/openbao_sign.py"
+      - "tools/sign_with_seed.py"
+      - "tests/test_sign_with_seed.py"
       - "tools/unpack_signing_input.py"
       - "tests/test_openbao_sign.py"
       - "tests/test_signing_workflow.py"
