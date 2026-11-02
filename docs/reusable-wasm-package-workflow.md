@@ -3,7 +3,7 @@
 Call the published reusable workflow from another GitHub repository to produce a
 validated Xila package from an existing **Wasm Actions artifact** and a
 **versioned Xila archive manifest**. It does not compile your Wasm, run the
-application or publish the package to `xila-project/packages`.
+application or publish the package to `xila-project/registry`.
 
 ## Caller example
 
@@ -126,6 +126,6 @@ reusable workflow. Missing or malformed secrets fail the signing job.
 The public key is **not trusted** simply because it is shipped beside the archive.
 An installer must independently decide whether to allow unrecognized
 signers. Pull-request artifacts remain unsigned. Releases are signed with the
-same key; trust comes from the repository key in `xila-project/packages`, which
+same key; trust comes from the repository key in `xila-project/registry`, which
 authorizes developer keys, not from the key shipped beside an archive.
 

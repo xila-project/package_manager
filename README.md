@@ -2,7 +2,7 @@
 
 [![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager)
 
-Shared Rust workspace for building, signing and validating Xila application bundles; installation and VFS integration are deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [community registry](https://github.com/xila-project/packages), without depending on either consumer.
+Shared Rust workspace for building, signing and validating Xila application bundles; installation and VFS integration are deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [package registry](https://github.com/xila-project/registry), without depending on either consumer.
 
 ## Workspace
 

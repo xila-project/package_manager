@@ -97,7 +97,7 @@ xila-package key public ./signing/private.seed ./signing/public.key  # re-derive
 `key` commands are stateless: they only write the paths given, never
 overwrite an existing file, and create the seed owner-only (`0600`) on Unix.
 Use `base64 -w0 ./signing/public.key` for the `public_key` field of a
-`packages` developer-key file, and `base64 -w0 ./signing/private.seed | gh
+`registry` developer-key file, and `base64 -w0 ./signing/private.seed | gh
 secret set …` to provide a CI signing seed.
 
 For a hardware signer, KMS or separate signing job, export the exact

@@ -257,7 +257,7 @@ jobs:
           cd "$RUNNER_TEMP/xila-signed-dist"
           sha256sum "$PACKAGE_FILENAME" > "$PACKAGE_FILENAME.sha256"
           # Raw 32-byte public key, accepted by 'xila-package verify'. It is
-          # not a trust anchor (see xila-project/packages); the seed is never published.
+          # not a trust anchor (see xila-project/registry); the seed is never published.
           cp "$RUNNER_TEMP/signing-work/public.key" "$PACKAGE_FILENAME.pub"
           printf 'sha256=%s\n' "$(sha256sum "$PACKAGE_FILENAME" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - name: "Report | Upload signed package"
