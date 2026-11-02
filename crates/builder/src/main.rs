@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 mod bundle;
+mod key;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InventoryMode {
@@ -302,6 +303,8 @@ enum Command<'a> {
     Manifest(ManifestCommand<'a>),
     /// Build an unpacked, self-contained application bundle or archive it.
     Bundle(BundleCommand<'a>),
+    /// Generate or inspect raw Ed25519 signing keys (stateless, explicit paths).
+    Key(KeyCommand<'a>),
     /// Verify a signed archive against an externally trusted raw public key.
     Verify {
         archive: &'a str,
@@ -317,6 +320,30 @@ enum Command<'a> {
         output: &'a str,
         /// Optional 64-byte Ed25519 signature prepared outside this tool.
         signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+struct KeyCommand<'a> {
+    #[command(subcommand)]
+    command: KeyOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+enum KeyOperation<'a> {
+    /// Generate a new key pair; never overwrites existing files.
+    Generate {
+        /// New raw 32-byte private seed file (created owner-only).
+        seed: &'a str,
+        /// New raw 32-byte public key file.
+        public_key: &'a str,
+    },
+    /// Derive the raw public key of an existing private seed.
+    Public {
+        /// Existing raw 32-byte private seed file.
+        seed: &'a str,
+        /// New raw 32-byte public key file.
+        public_key: &'a str,
     },
 }
 
@@ -539,6 +566,14 @@ fn run() -> Result<()> {
             }
             BundleOperation::Archive { directory, output } => {
                 bundle::archive(Path::new(directory), Path::new(output))
+            }
+        },
+        Command::Key(KeyCommand { command }) => match command {
+            KeyOperation::Generate { seed, public_key } => {
+                key::generate(Path::new(seed), Path::new(public_key))
+            }
+            KeyOperation::Public { seed, public_key } => {
+                key::public(Path::new(seed), Path::new(public_key))
             }
         },
         Command::Verify {

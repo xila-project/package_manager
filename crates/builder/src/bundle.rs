@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::Signer;
 use xila_package_bundle::{Inventory, verify_signature};
 use xila_package_manifest::{
     Application, DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest,
@@ -168,11 +168,7 @@ fn checked_public_key(path: &Path) -> Result<PublicKey> {
 /// Sign the complete runtime file inventory with explicitly supplied key
 /// material. The private 32-byte seed is never copied to the bundle.
 fn sign_manifest(raw_manifest: &[u8], key_path: &Path) -> Result<[u8; 64]> {
-    check_regular_file(key_path)?;
-    let seed: [u8; 32] = fs::read(key_path)?
-        .try_into()
-        .map_err(|_| invalid("signing key must be a raw 32-byte Ed25519 seed"))?;
-    let signer = SigningKey::from_bytes(&seed);
+    let signer = crate::key::read_seed(key_path)?;
     let message = signing_message(raw_manifest)?;
     let signature = signer.sign(&message).to_bytes();
     let public = PublicKey::from_bytes(&signer.verifying_key().to_bytes())
@@ -369,6 +365,7 @@ pub fn archive(bundle: &Path, output: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
     use tempfile::tempdir;
     use xila_package_manifest::{decode, decode_developer};
 
