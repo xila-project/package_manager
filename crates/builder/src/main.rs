@@ -400,6 +400,12 @@ enum RegistryOperation<'a> {
         #[arg(long)]
         expires_in_days: Option<&'a str>,
     },
+    /// Print the fingerprint of a raw public key, as devices show it before
+    /// trusting a repository's root key.
+    Fingerprint {
+        /// Raw 32-byte public key file.
+        public_key: &'a str,
+    },
     /// Verify a signed registry from the pinned root key, as a device would.
     VerifySigned {
         /// Signed registry directory (output of `registry sign`).
@@ -729,6 +735,9 @@ fn run() -> Result<()> {
                     parse_number(expires_in_days, "expires-in-days")?.unwrap_or(30),
                 )
             })(),
+            RegistryOperation::Fingerprint { public_key } => {
+                registry::fingerprint(Path::new(public_key))
+            }
             RegistryOperation::VerifySigned {
                 site,
                 root_public_key,

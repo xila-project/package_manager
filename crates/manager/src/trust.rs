@@ -116,6 +116,25 @@ impl TrustedRoot {
         Self::from_root(root)
     }
 
+    /// Accept a repository's `root.json` on first use, before any key is
+    /// pinned: it must be signed by one of its **own** root keys. This only
+    /// proves consistency, not identity: show [`fingerprint`] of the returned
+    /// key to the user and pin it only once they confirm it matches a value
+    /// obtained another way (the transport may not authenticate the server).
+    pub fn first_use(bytes: &[u8], sig: &[u8]) -> Result<(Self, [u8; 32])> {
+        let root = decode_root(bytes)?;
+        let trusted = Self::from_root(root)?;
+        let signature = signature(sig)?;
+        let message = signed_message(ROOT_DOMAIN, bytes)?;
+        let signer = trusted
+            .root_keys
+            .iter()
+            .position(|key| key.verify(&message, &signature).is_ok())
+            .ok_or(Error::InvalidSignature)?;
+        let key = trusted.root.root_keys[signer].public_key_bytes()?;
+        Ok((trusted, key))
+    }
+
     /// Move to the next `root.json`: it must have a higher version and be
     /// signed by a root key of **this** root. Apply each version in turn.
     pub fn update(&self, bytes: &[u8], sig: &[u8]) -> Result<Self> {
@@ -207,6 +226,47 @@ pub fn publisher_key(entry: &RegistryEntry, key: &DeveloperKey) -> Result<Public
         return Err(Error::Unauthorized);
     }
     PublicKey::from_bytes(&key.public_key_bytes()?).map_err(|_| Error::Unauthorized)
+}
+
+/// Human-comparable fingerprint of a public key: the first 16 bytes of its
+/// SHA-256 as eight groups of four hexadecimal digits.
+pub fn fingerprint(public_key: &[u8; 32]) -> String {
+    let mut hasher = Sha256Verifier::new();
+    // A 32-byte input cannot exceed SHA-256's length limit.
+    let _ = hasher.update(public_key);
+    let digest = hasher.finalize().unwrap_or([0; 32]);
+    let mut output = String::with_capacity(39);
+    for (index, pair) in digest[..16].chunks(2).enumerate() {
+        if index > 0 {
+            output.push(' ');
+        }
+        output.push_str(&format!("{:02x}{:02x}", pair[0], pair[1]));
+    }
+    output
+}
+
+/// Whether an entry can be installed on a device running `target` with
+/// Xila ABI `abi`.
+pub fn compatible(entry: &RegistryEntry, target: &str, abi: u32) -> bool {
+    entry.target == target && entry.minimum_xila_abi <= abi
+}
+
+/// Registry-relative paths of the entries to try for `name`: the exact
+/// `version` if given (it must be listed), otherwise every listed semantic
+/// version newest first (prereleases excluded). Fetch them in order and keep
+/// the first [`compatible`] one.
+pub fn candidates(index: &Index, name: &str, version: Option<&str>) -> Result<Vec<String>> {
+    match version {
+        Some(version) => {
+            let path = entry_path(name, version);
+            index.file(&path).ok_or(Error::NotListed)?;
+            Ok(alloc::vec![path])
+        }
+        None => Ok(manifest::index_versions(index, name, false)
+            .into_iter()
+            .map(|version| entry_path(name, version))
+            .collect()),
+    }
 }
 
 /// Registry-relative path of the entry for `name` at `version`.
@@ -467,6 +527,71 @@ mod tests {
             check_listed(&accepted, &developer_key_path("other"), entry.as_bytes()).err(),
             Some(Error::NotListed)
         );
+    }
+
+    #[test]
+    fn first_use_requires_a_self_consistent_root_and_reports_its_key() {
+        let root = root_json(1, &key(1), &key(2));
+        let (trusted, signer) = TrustedRoot::first_use(
+            root.as_bytes(),
+            &sign(&key(1), ROOT_DOMAIN, root.as_bytes()),
+        )
+        .unwrap();
+        assert_eq!(signer, key(1).verifying_key().to_bytes());
+        assert_eq!(trusted.version(), 1);
+        // Signed by its repository key (or anyone else): refused.
+        assert_eq!(
+            TrustedRoot::first_use(
+                root.as_bytes(),
+                &sign(&key(2), ROOT_DOMAIN, root.as_bytes())
+            )
+            .err(),
+            Some(Error::InvalidSignature)
+        );
+        let print = fingerprint(&signer);
+        assert_eq!(print.len(), 39);
+        assert_eq!(print.split(' ').count(), 8);
+        assert_ne!(print, fingerprint(&key(2).verifying_key().to_bytes()));
+    }
+
+    #[test]
+    fn candidates_and_compatibility() {
+        let file = |path: &str| IndexFile {
+            path: path.into(),
+            sha256: "a".repeat(64),
+            size: 1,
+        };
+        let index = Index {
+            schema: Some(INDEX_SCHEMA_URL.into()),
+            format_version: TRUST_FORMAT_VERSION,
+            version: 1,
+            expires: 2,
+            files: vec![
+                file("packages/xila/clock/0.1.0.json"),
+                file("packages/xila/clock/0.2.0.json"),
+                file("packages/xila/clock/nightly.json"),
+            ],
+        };
+        assert_eq!(
+            candidates(&index, "xila.clock", None).unwrap(),
+            [
+                "packages/xila/clock/0.2.0.json",
+                "packages/xila/clock/0.1.0.json"
+            ]
+        );
+        assert_eq!(
+            candidates(&index, "xila.clock", Some("nightly")).unwrap(),
+            ["packages/xila/clock/nightly.json"]
+        );
+        assert_eq!(
+            candidates(&index, "xila.clock", Some("9.9.9")).err(),
+            Some(Error::NotListed)
+        );
+        let entry = entry();
+        assert!(compatible(&entry, "wasm32-wasip1", 1));
+        assert!(compatible(&entry, "wasm32-wasip1", 2));
+        assert!(!compatible(&entry, "wasm32-wasip1", 0));
+        assert!(!compatible(&entry, "thumbv7em-none-eabi", 1));
     }
 
     #[test]

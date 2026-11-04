@@ -16,7 +16,11 @@ def load(name):
 
 ROOT_VALIDATOR = Draft202012Validator(load("schemas/registry-root.schema.json"))
 INDEX_VALIDATOR = Draft202012Validator(load("schemas/registry-index.schema.json"))
+REPOSITORY_VALIDATOR = Draft202012Validator(load("schemas/repository.schema.json"))
+ORIGIN_VALIDATOR = Draft202012Validator(load("schemas/package-origin.schema.json"))
 ROOT_FIXTURE = load("tests/fixtures/registry-root.json")
+REPOSITORY_FIXTURE = load("tests/fixtures/repository.json")
+ORIGIN_FIXTURE = load("tests/fixtures/package-origin.json")
 INDEX_FIXTURE = load("tests/fixtures/registry-index.json")
 
 
@@ -50,6 +54,23 @@ class RegistryTrustSchemaTests(unittest.TestCase):
             broken = copy.deepcopy(INDEX_FIXTURE)
             change(broken)
             self.assertFalse(INDEX_VALIDATOR.is_valid(broken), broken)
+
+    def test_repository_and_origin(self):
+        for validator in (REPOSITORY_VALIDATOR, ORIGIN_VALIDATOR):
+            Draft202012Validator.check_schema(validator.schema)
+        REPOSITORY_VALIDATOR.validate(REPOSITORY_FIXTURE)
+        ORIGIN_VALIDATOR.validate(ORIGIN_FIXTURE)
+        ORIGIN_VALIDATOR.validate(dict(ORIGIN_FIXTURE, repository=None))
+        for key, value in [
+            ("name", "Xila"),
+            ("url", "http://registry.xila.dev"),
+            ("url", "https://registry.xila.dev/"),
+            ("root_key", "AAAA"),
+            ("index_version", -1),
+        ]:
+            with self.subTest(key=key, value=value):
+                self.assertFalse(REPOSITORY_VALIDATOR.is_valid(dict(REPOSITORY_FIXTURE, **{key: value})))
+        self.assertFalse(ORIGIN_VALIDATOR.is_valid(dict(ORIGIN_FIXTURE, archive_sha256="x")))
 
 
 if __name__ == "__main__":

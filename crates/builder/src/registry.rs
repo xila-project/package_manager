@@ -411,6 +411,12 @@ fn collect_site(root: &Path, directory: &Path, output: &mut Vec<String>) -> Resu
     Ok(())
 }
 
+/// Print `trust::fingerprint` of a raw public key file.
+pub fn fingerprint(public_key: &Path) -> Result<()> {
+    println!("{}", trust::fingerprint(&read_raw_public_key(public_key)?));
+    Ok(())
+}
+
 /// Verify a signed registry the way a device would, from the pinned
 /// `root_public_key`: root, index (and its expiry at `now`, if given), every
 /// listed file and its own signature, and each entry's publisher. Rejects
@@ -485,8 +491,9 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
         entries += 1;
     }
     println!(
-        "Verified signed registry: root v{}, index v{} (expires {}), {} developer key(s), {} entr{}",
+        "Verified signed registry: root v{} (root key {}), index v{} (expires {}), {} developer key(s), {} entr{}",
         trusted.version(),
+        trust::fingerprint(&pinned[0]),
         index.version,
         index.expires,
         developers.len(),

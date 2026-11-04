@@ -75,6 +75,28 @@ Schemas: [registry-root](../schemas/registry-root.schema.json),
 A device too small to hold the index may skip step 2 and the `check_listed`
 part of step 3: the per-file signatures still prove origin, but not freshness.
 
+## Several repositories
+
+A device can use several registries. Each configured repository
+([repository.schema.json](../schemas/repository.schema.json)) has a local
+`name`, an HTTPS `url`, the `root_key` trusted for it and the highest
+`root_version` and `index_version` accepted.
+
+- **Adding a repository** pins its root key. Pass the key obtained out of band,
+  or accept it on first use: `TrustedRoot::first_use` checks that `root.json` is
+  signed by one of its own root keys and returns that key; the device shows its
+  `fingerprint` and pins it only after the user confirms. The transport does
+  not authenticate the server, so the fingerprint is what must be compared.
+  `xila-package registry fingerprint root.pub` prints the expected value.
+- **Resolving** a package: `candidates` lists the entry paths to try (an exact
+  version, or every listed semantic version newest first), and `compatible`
+  keeps the first entry matching the device's target and ABI. A name found in
+  several repositories is ambiguous: the user must choose the repository.
+- **Origin**: each installed package records its repository and archive hash
+  ([package-origin.schema.json](../schemas/package-origin.schema.json)). Updates
+  are only taken from that repository, so adding a repository cannot replace an
+  installed package.
+
 ## Limits and follow-ups
 
 - Root rotation needs every intermediate `root.json` version; the registry

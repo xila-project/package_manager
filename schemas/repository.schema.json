@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/repository.schema.json",
+  "title": "Xila repository configuration (experimental v1)",
+  "description": "A registry configured on a device, with the root key the user trusts for it and the highest metadata versions accepted (rollback protection).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "name",
+    "url",
+    "root_key",
+    "root_version",
+    "index_version"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/repository.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "description": "Local repository name; also the configuration file name."
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^https://[^/?#]+(/[^?#]*[^/?#])?$",
+      "description": "HTTPS base URL without a trailing slash."
+    },
+    "root_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "description": "Trusted root key, canonical base64."
+    },
+    "root_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "index_version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
