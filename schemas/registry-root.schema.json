@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-root.schema.json",
+  "title": "Xila registry root (experimental v1)",
+  "description": "root.json in xila-project/registry, signed offline (root.json.sig) by a root key: the pinned key for the first version, then a root key of the previous version. Names the keys allowed to sign the next root and the repository keys that sign the index, entries and developer keys. A key may not hold both roles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "version",
+    "root_keys",
+    "repository_keys"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-root.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Strictly increasing; devices refuse a lower or equal version."
+    },
+    "root_keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "public_key"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+            "description": "Raw 32-byte Ed25519 public key in canonical base64."
+          }
+        }
+      },
+      "description": "Keys allowed to sign the next root version."
+    },
+    "repository_keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "public_key"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+            "description": "Raw 32-byte Ed25519 public key in canonical base64."
+          }
+        }
+      },
+      "description": "Online keys that sign index.json, entries and developer keys."
+    }
+  }
+}

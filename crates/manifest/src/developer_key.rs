@@ -41,7 +41,7 @@ fn base64_value(byte: u8) -> Option<u8> {
 }
 
 /// Decode the canonical 44-character base64 form of 32 bytes.
-fn decode_key(encoded: &str) -> Option<[u8; 32]> {
+pub(crate) fn decode_key(encoded: &str) -> Option<[u8; 32]> {
     let bytes = encoded.as_bytes();
     if bytes.len() != 44 || bytes[43] != b'=' {
         return None;

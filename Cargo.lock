@@ -423,6 +423,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "xila-package-bundle",
+ "xila-package-manager",
  "xila-package-manifest",
  "xila-package-reader",
  "xila-package-verification",
@@ -440,6 +441,11 @@ dependencies = [
 [[package]]
 name = "xila-package-manager"
 version = "0.3.0"
+dependencies = [
+ "ed25519-dalek",
+ "xila-package-manifest",
+ "xila-package-verification",
+]
 
 [[package]]
 name = "xila-package-manifest"
