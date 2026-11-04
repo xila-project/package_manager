@@ -8,6 +8,7 @@ pub mod developer;
 pub mod developer_key;
 pub mod metadata;
 pub mod registry;
+pub mod trust;
 use alloc::{string::String, vec::Vec};
 pub use developer::{
     DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
@@ -19,6 +20,12 @@ use miniserde::{Deserialize, Serialize};
 pub use registry::{
     Archive, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, RegistryEntry,
     decode_registry_entry, encode_registry_entry,
+};
+pub use trust::{
+    DEVELOPER_KEY_DOMAIN, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH, INDEX_SCHEMA_URL, Index,
+    IndexFile, MAX_INDEX_BYTES, NamedKey, ROOT_DOMAIN, ROOT_PATH, ROOT_SCHEMA_URL, Root,
+    SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_index, decode_root, encode_index, encode_root,
+    signed_message,
 };
 
 /// Current experimental manifest format version.
@@ -61,6 +68,10 @@ pub enum Error {
     /// A registry entry disagrees with the signed manifest of its archive.
     RegistryMismatch,
     InvalidDeveloperKey,
+    /// `root.json` is malformed (version, keys or role separation).
+    InvalidRoot,
+    /// `index.json` is malformed (version, expiry or file list).
+    InvalidIndex,
 }
 
 /// A complete Xila archive manifest describing identity and every payload file.

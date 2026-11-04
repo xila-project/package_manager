@@ -366,6 +366,60 @@ enum RegistryOperation<'a> {
         /// Raw 32-byte public key of the publishing developer.
         public_key: &'a str,
     },
+    /// Write a root-signed root.json (and root.json.sig) naming the root and
+    /// repository keys. Run offline with the root key; never overwrites.
+    Root {
+        /// Raw 32-byte private seed of the root key.
+        root_seed: &'a str,
+        /// Identifier of the root key, e.g. root-2026.
+        root_id: &'a str,
+        /// Raw 32-byte public key of the repository key.
+        repository_public_key: &'a str,
+        /// Identifier of the repository key, e.g. repository-2026.
+        repository_id: &'a str,
+        /// Root version; must increase with every new root.
+        version: u64,
+        /// New root.json file (the signature is written next to it).
+        output: &'a str,
+    },
+    /// Check a registry, then write it signed by the repository key into a
+    /// new directory: every key and entry with its .sig, and a signed index.
+    Sign {
+        /// Registry root containing root.json, keys/developers and packages.
+        registry: &'a str,
+        /// Raw 32-byte public key of the root key (as pinned on devices).
+        root_public_key: &'a str,
+        /// Raw 32-byte private seed of a repository key listed in root.json.
+        repository_seed: &'a str,
+        /// New output directory.
+        output: &'a str,
+        /// Index version (default: current Unix time).
+        #[arg(long)]
+        version: Option<&'a str>,
+        /// Days until the index expires (default 30).
+        #[arg(long)]
+        expires_in_days: Option<&'a str>,
+    },
+    /// Verify a signed registry from the pinned root key, as a device would.
+    VerifySigned {
+        /// Signed registry directory (output of `registry sign`).
+        site: &'a str,
+        /// Raw 32-byte public key of the root key.
+        root_public_key: &'a str,
+        /// Reject an index expired at this Unix time (default: now; 0 skips).
+        #[arg(long)]
+        now: Option<&'a str>,
+    },
+}
+
+fn parse_number(value: Option<&str>, name: &str) -> Result<Option<u64>> {
+    value
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| invalid(&format!("--{name} must be a non-negative integer")).into())
+        })
+        .transpose()
 }
 
 #[derive(Debug, GetArgs)]
@@ -643,6 +697,55 @@ fn run() -> Result<()> {
             RegistryOperation::Check { root, archives } => {
                 registry::check(Path::new(root), archives.map(Path::new))
             }
+            RegistryOperation::Root {
+                root_seed,
+                root_id,
+                repository_public_key,
+                repository_id,
+                version,
+                output,
+            } => registry::root(
+                Path::new(root_seed),
+                root_id,
+                Path::new(repository_public_key),
+                repository_id,
+                version,
+                Path::new(output),
+            ),
+            RegistryOperation::Sign {
+                registry: directory,
+                root_public_key,
+                repository_seed,
+                output,
+                version,
+                expires_in_days,
+            } => (|| {
+                registry::sign(
+                    Path::new(directory),
+                    Path::new(root_public_key),
+                    Path::new(repository_seed),
+                    Path::new(output),
+                    parse_number(version, "version")?,
+                    parse_number(expires_in_days, "expires-in-days")?.unwrap_or(30),
+                )
+            })(),
+            RegistryOperation::VerifySigned {
+                site,
+                root_public_key,
+                now,
+            } => (|| {
+                let now = match parse_number(now, "now")? {
+                    Some(0) => None,
+                    Some(now) => Some(now),
+                    None => Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_err(|_| invalid("system clock is before 1970"))?
+                            .as_secs(),
+                    ),
+                };
+                registry::verify_signed(Path::new(site), Path::new(root_public_key), now)
+            })(),
         },
         Command::Verify {
             archive,

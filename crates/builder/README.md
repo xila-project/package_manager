@@ -153,8 +153,8 @@ xila-package registry verify ./1.0.0.json ./Weather.xpk ./signing/public.key
 the archive URL, SHA-256 and size, the publishing key identifier, and copies
 identity, compatibility, capabilities, display name and metadata from the
 signed manifest. `verify` checks the archive's size and hash, its signature,
-and that every copied field still equals the signed manifest. Signing entries
-with the registry key is not implemented yet.
+and that every copied field still equals the signed manifest. The registry
+then signs entries with its repository key (section 5).
 
 To check a whole registry checkout (as `xila-project/registry` CI does):
 
@@ -171,6 +171,31 @@ canonical (exactly as `registry entry` writes it), to sit at its own path, and
 to name a publisher whose key lists the identifier's first label in
 `namespaces`. `--archives` takes the downloaded `.xpk` files, named after
 their URLs; the command itself never accesses the network.
+
+### 5. Sign the registry (registry maintainers)
+
+Devices pin a **root** key and trust nothing else; see
+[registry-trust.md](../../docs/registry-trust.md) for the model and file formats.
+
+```sh
+# Offline, with the root key: name the online repository key (version must increase).
+xila-package key generate ./root.seed ./root.pub
+xila-package key generate ./repository.seed ./repository.pub
+xila-package registry root ./root.seed root-2026 ./repository.pub repository-2026 1 ./registry/root.json
+
+# On publication, with the repository key: check, then sign into a new directory.
+xila-package registry sign ./registry ./root.pub ./repository.seed ./_site --expires-in-days 30
+xila-package registry verify-signed ./_site ./root.pub
+```
+
+`registry root` writes `root.json` and `root.json.sig`. `registry sign` first
+runs `registry check`, then copies `root.json`, writes every developer key and
+entry with its own `.sig`, and a signed `index.json` (version = signing time,
+unless `--version`). It ends with `verify-signed`, which checks everything from
+the pinned root key as a device would: root, index signature and expiry
+(`--now`, default the current time; `--now 0` skips it), every listed file's
+hash and signature, publisher authorization, and that no unlisted file is
+present.
 
 ## Compatibility and scope
 

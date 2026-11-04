@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-index.schema.json",
+  "title": "Xila registry index (experimental v1)",
+  "description": "index.json in the published registry, signed (index.json.sig) by a repository key: a snapshot of every developer key and entry with its SHA-256 and size. Devices keep the highest version seen and refuse an expired index when they have a trustworthy clock. Files must be sorted by path without duplicates (checked by xila-package, not by this schema).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "version",
+    "expires",
+    "files"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-index.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Strictly increasing between publications (signing time in Unix seconds)."
+    },
+    "expires": {
+      "type": "integer",
+      "minimum": 2,
+      "description": "Expiry in Unix seconds (UTC); greater than version."
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^(keys/developers|packages)(/[A-Za-z0-9._+-]+)+\\.json$",
+            "not": {
+              "pattern": "(^|/)\\.\\.?(/|$)"
+            }
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65536
+          }
+        }
+      }
+    }
+  }
+}

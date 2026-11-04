@@ -18,6 +18,7 @@ path = "src/main.rs"
 getargs-derive = { version = "=0.1.0", default-features = false }
 getargs = { version = "0.5", default-features = false }
 xila-package-manifest = { path = "../manifest" }
+xila-package-manager = { path = "../manager" }
 xila-package-bundle = { path = "../bundle" }
 xila-package-writer = { path = "../writer" }
 xila-package-reader = { path = "../reader" }
