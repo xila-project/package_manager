@@ -62,3 +62,15 @@ jobs:
         run: python -m pip install jsonschema==4.25.1
       - name: "Validate | Package manifest samples"
         run: python -m unittest discover -s tests -p 'test_*schema.py'
+
+  required:
+    if: always()
+    needs: [cargo, manifest-schema]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "Gate | Verify mandatory checks"
+        env:
+          CARGO: ${{ needs.cargo.result }}
+          MANIFEST_SCHEMA: ${{ needs.manifest-schema.result }}
+        run: test "$CARGO" = success && test "$MANIFEST_SCHEMA" = success
