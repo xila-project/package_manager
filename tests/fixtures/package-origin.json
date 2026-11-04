@@ -1,0 +1,1 @@
+{"$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-origin.schema.json", "format_version": 1, "repository": "xila", "name": "xila.clock", "version": "0.1.0", "archive_sha256": "6976f8d118066b7294ac051160505b2c410fa9213cffa6a7c889946cf6fdbfcd"}

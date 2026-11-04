@@ -8,6 +8,7 @@ pub mod developer;
 pub mod developer_key;
 pub mod metadata;
 pub mod registry;
+pub mod repository;
 pub mod trust;
 use alloc::{string::String, vec::Vec};
 pub use developer::{
@@ -20,6 +21,11 @@ use miniserde::{Deserialize, Serialize};
 pub use registry::{
     Archive, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, RegistryEntry,
     decode_registry_entry, encode_registry_entry,
+};
+pub use repository::{
+    ORIGIN_SCHEMA_URL, Origin, REPOSITORY_FORMAT_VERSION, REPOSITORY_SCHEMA_URL, Repository,
+    SemanticVersion, decode_origin, decode_repository, encode_origin, encode_repository,
+    index_versions,
 };
 pub use trust::{
     DEVELOPER_KEY_DOMAIN, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH, INDEX_SCHEMA_URL, Index,
@@ -72,6 +78,8 @@ pub enum Error {
     InvalidRoot,
     /// `index.json` is malformed (version, expiry or file list).
     InvalidIndex,
+    /// A repository configuration or installed-package origin is malformed.
+    InvalidRepository,
 }
 
 /// A complete Xila archive manifest describing identity and every payload file.
