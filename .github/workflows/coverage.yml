@@ -24,7 +24,7 @@ jobs:
         with:
           persist-credentials: false
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.4
+        uses: jdx/mise-action@v5.2.7
       - name: "Test | Generate LLVM coverage"
         run: mise run coverage:lcov
       - name: "Report | Upload LCOV artifact"
