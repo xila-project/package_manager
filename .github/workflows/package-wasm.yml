@@ -125,7 +125,7 @@ jobs:
       - name: "Setup | Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.100.0"
       - name: "Build | Host package builder"
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
       - name: "Package | Stage Wasm and validate archive"
@@ -213,7 +213,7 @@ jobs:
       - name: "Setup | Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.100.0"
       - name: "Build | Host package builder"
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
       - name: "Prepare | Canonical manifest signing payload"

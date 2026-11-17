@@ -104,7 +104,7 @@ mise run test
 mise run format:check
 ```
 
-The workspace uses Rust 1.99.0 and [mr-boxington](https://mr-boxington.jdx.dev/) for compilation caching. The `mr_boxington = true` configuration avoids requiring a global Cargo wrapper. Use `mise exec -- cargo …` when the shell is not activated.
+The workspace uses Rust 1.100.0 and [mr-boxington](https://mr-boxington.jdx.dev/) for compilation caching. The `mr_boxington = true` configuration avoids requiring a global Cargo wrapper. Use `mise exec -- cargo …` when the shell is not activated.
 
 GitHub Actions runs formatting, compilation, Clippy, and tests for pull requests and main-branch pushes. The cache stores the Cargo target directory in target mode. Host-only dependencies must not be introduced into the microcontroller-facing crates.
 
