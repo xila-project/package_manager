@@ -35,7 +35,7 @@ jobs:
       - name: "Setup | Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.100.0"
       - name: "Publish | Prepare version pull request"
         uses: release-plz/action@v0.5
         with:
@@ -61,7 +61,7 @@ jobs:
       - name: "Setup | Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.100.0"
       - name: "Setup | Release configuration"
         id: release-config
         shell: bash
@@ -141,7 +141,7 @@ jobs:
       - name: "Setup | Rust toolchain"
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.100.0"
           targets: ${{ matrix.target }}
       - name: "Build | Native executable"
         run: cargo build --locked --release --target ${{ matrix.target }} --package xila-package-builder

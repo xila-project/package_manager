@@ -1,5 +1,5 @@
 [vars]
-rust_version = "1.99.0"
+rust_version = "1.100.0"
 
 [tools]
 # Keep the compiler aligned with Xila core. Native mise integration makes Cargo
