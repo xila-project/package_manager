@@ -9,7 +9,7 @@
 [Try Xila](https://platforms.xila.dev/) ·
 [Community](https://matrix.to/#/#xila:anneraud.fr)
 
-[![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager)
+[![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager) [![vulnerabilities](https://vulnerabilities.xila.dev/badges/5923a3a90dc8e7923e4941652aec7295.svg)](https://vulnerabilities.xila.dev/public/7ed98e8bb26a0399ff4974fa6da0743e)
 
 Shared Rust workspace for building, signing and validating Xila application bundles; installation and VFS integration are deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [package registry](https://github.com/xila-project/registry), without depending on either consumer.
 
