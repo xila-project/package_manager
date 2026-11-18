@@ -22,7 +22,7 @@ Shared Rust workspace for building, signing and validating Xila application bund
 | `xila-package-bundle` | `no_std + alloc` streaming hashes, file inventory and signing helpers, reusable with Xila VFS |
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
-| `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them |
+| `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them; also a library, reused by the `xila package` subcommand of [`tools`](https://github.com/xila-project/tools) |
 | `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
 The **experimental v1 runtime JSON Schema** is maintained in

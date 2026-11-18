@@ -1,0 +1,831 @@
+#![doc = include_str!("../README.md")]
+//!
+//! # Library
+//!
+//! The `xila-package` command line is also a library, so that other host
+//! tools (such as the `xila package` subcommand of `xila-project/tools`) run
+//! exactly the same code: [`CommandLine`] is the parsed command line,
+//! [`execute`] runs it and [`run`] parses and runs raw arguments.
+mod bundle;
+mod key;
+mod registry;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InventoryMode {
+    Legacy,
+    Developer,
+    Bundle,
+}
+use getargs_derive::{GetArgs, Subcommand};
+use std::{
+    fs::{self, File},
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+};
+use xila_package_bundle::FileHasher;
+use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
+use xila_package_writer::SourceFile;
+
+/// Result of a command: any failure is reported as a boxed error.
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+fn invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+fn hash_file(path: &Path, relative: &str) -> Result<(u64, String)> {
+    let mut file = File::open(path)?;
+    let mut hasher =
+        FileHasher::new(relative).map_err(|_| invalid("invalid file path for hashing"))?;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher
+            .update(&buffer[..read])
+            .map_err(|_| invalid("file hashing failed"))?;
+    }
+    let metadata = hasher
+        .finish()
+        .map_err(|_| invalid("file hashing failed"))?;
+    Ok((metadata.size, metadata.sha256))
+}
+
+fn collect_files(
+    root: &Path,
+    current: &Path,
+    output: &mut Vec<ManifestFile>,
+    mode: InventoryMode,
+) -> Result<()> {
+    let mut paths = fs::read_dir(current)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<io::Result<Vec<_>>>()?;
+    paths.sort();
+    for path in paths {
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("symbolic links are not allowed").into());
+        }
+        if current == root {
+            if path.file_name().is_some_and(|name| name == ".xila") {
+                if mode == InventoryMode::Bundle && metadata.is_dir() {
+                    continue;
+                }
+                return Err(invalid(".xila is reserved for bundle metadata").into());
+            }
+            if mode == InventoryMode::Developer
+                && path
+                    .file_name()
+                    .is_some_and(|name| name == xila_package_manifest::DEVELOPER_MANIFEST_FILENAME)
+            {
+                if !metadata.is_file() {
+                    return Err(invalid("developer manifest is not a regular file").into());
+                }
+                continue;
+            }
+        }
+        if metadata.is_dir() {
+            collect_files(root, &path, output, mode)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(invalid("special files are not allowed").into());
+        }
+        let relative = path.strip_prefix(root)?;
+        let mut components = Vec::new();
+        for component in relative.iter() {
+            components.push(component.to_str().ok_or_else(|| invalid("non-UTF8 path"))?);
+        }
+        let name = components.join("/");
+        xila_package_manifest::validate_path(&name).map_err(|_| invalid("unsafe file path"))?;
+        let (size, sha256) = hash_file(&path, &name)?;
+        output.push(ManifestFile {
+            path: name,
+            size,
+            sha256,
+        });
+        if output.len() > xila_package_manifest::MAX_FILES {
+            return Err(invalid("too many files").into());
+        }
+    }
+    Ok(())
+}
+
+fn write_manifest(output: &Path, manifest: &Manifest) -> Result<()> {
+    let text = xila_package_manifest::encode(manifest)
+        .map_err(|_| invalid("manifest failed validation"))?;
+    fs::write(output, text)?;
+    Ok(())
+}
+
+fn generate(
+    source: &Path,
+    output: &Path,
+    name: &str,
+    version: &str,
+    target: &str,
+    minimum_xila_abi: u32,
+) -> Result<()> {
+    let root = source.canonicalize()?;
+    let parent = output
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    if parent.canonicalize()?.starts_with(&root) {
+        return Err(invalid("output manifest must reside outside the source directory").into());
+    }
+    let mut files = Vec::new();
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    let manifest = Manifest {
+        schema: Some(xila_package_manifest::SCHEMA_URL.into()),
+        format_version: FORMAT_VERSION,
+        name: name.into(),
+        version: version.into(),
+        target: target.into(),
+        minimum_xila_abi,
+        capabilities: vec![],
+        files,
+        application: None,
+        metadata: None,
+    };
+    write_manifest(output, &manifest)
+}
+
+fn update(source: &Path, manifest_path: &Path) -> Result<()> {
+    let bytes = fs::read(manifest_path)?;
+    let mut manifest =
+        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+    let root = source.canonicalize()?;
+    if manifest_path.canonicalize()?.starts_with(&root) {
+        return Err(invalid("manifest must reside outside the source directory").into());
+    }
+    let mut files = Vec::new();
+    collect_files(&root, &root, &mut files, InventoryMode::Legacy)?;
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    manifest.files = files;
+    write_manifest(manifest_path, &manifest)
+}
+
+/// Mark an existing package as an application without duplicating its
+/// identity/version/ABI and without executing its code.
+fn set_application(
+    manifest_path: &Path,
+    entrypoint: &str,
+    display_name: &str,
+    icon: Option<&str>,
+    hidden: bool,
+) -> Result<()> {
+    let bytes = fs::read(manifest_path)?;
+    let mut manifest =
+        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+    // Adding application metadata changes the exact bytes. Any detached
+    // signature must be produced *after* this operation.
+    manifest.application = Some(Application {
+        entrypoint: entrypoint.into(),
+        display_name: display_name.into(),
+        icon: icon.unwrap_or_default().into(),
+        show_in_launcher: !hidden,
+    });
+    write_manifest(manifest_path, &manifest)
+}
+
+fn safe_file(root: &Path, path: &str) -> Result<PathBuf> {
+    xila_package_manifest::validate_path(path).map_err(|_| invalid("unsafe file path"))?;
+    let mut current = root.to_path_buf();
+    for part in path.split('/') {
+        current.push(part);
+        let metadata = fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("symlink in source path").into());
+        }
+    }
+    if !fs::symlink_metadata(&current)?.is_file() {
+        return Err(invalid("expected regular file").into());
+    }
+    Ok(current)
+}
+
+fn pack(
+    source: &Path,
+    manifest_path: &Path,
+    output: &Path,
+    signature: Option<&Path>,
+) -> Result<()> {
+    let root = source.canonicalize()?;
+    let raw_manifest = fs::read(manifest_path)?;
+    let manifest =
+        xila_package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
+    if signature.is_some() {
+        let canonical =
+            xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
+        if canonical.as_bytes() != raw_manifest {
+            return Err(invalid("cannot attach a signature to a noncanonical manifest").into());
+        }
+    }
+    let mut bytes = Vec::new();
+    for declared in &manifest.files {
+        bytes.push(fs::read(safe_file(&root, &declared.path)?)?);
+    }
+    let sources: Vec<_> = manifest
+        .files
+        .iter()
+        .zip(bytes.iter())
+        .map(|(declared, bytes)| SourceFile {
+            path: &declared.path,
+            bytes,
+        })
+        .collect();
+
+    let signature = if let Some(path) = signature {
+        let signature = fs::read(path)?;
+        let signature: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| invalid("signature must be exactly 64 bytes"))?;
+        Some(signature)
+    } else {
+        None
+    };
+
+    // Write to a sibling temporary file first; do not leave a partial archive.
+    let temporary = output.with_extension("xpk.tmp");
+    let operation = (|| -> Result<()> {
+        let file = File::create(&temporary)?;
+        xila_package_writer::write_package(file, &manifest, &sources, signature.as_ref())?;
+        // The reader is a second implementation of framing/inventory checks.
+        let archive = fs::read(&temporary)?;
+        xila_package_reader::inspect_unsigned(&archive)
+            .map_err(|_| invalid("archive verification failed"))?;
+        fs::rename(&temporary, output)?;
+        Ok(())
+    })();
+    if operation.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    operation
+}
+
+/// Export the exact canonical manifest message for an external Ed25519 signer.
+fn manifest_signing_payload(manifest: &Path, output: &Path) -> Result<()> {
+    let raw = fs::read(manifest)?;
+    let decoded = xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid manifest"))?;
+    let canonical =
+        xila_package_manifest::encode(&decoded).map_err(|_| invalid("invalid manifest"))?;
+    if canonical.as_bytes() != raw {
+        return Err(invalid("cannot sign a noncanonical manifest").into());
+    }
+    let message = xila_package_bundle::signing_message(&raw)
+        .map_err(|_| invalid("invalid signing message"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    file.write_all(&message)?;
+    Ok(())
+}
+
+/// Verify a signed archive against a caller-selected raw Ed25519 public key.
+fn verify_archive(archive: &Path, public_key: &Path) -> Result<()> {
+    let raw: [u8; 32] = fs::read(public_key)?
+        .try_into()
+        .map_err(|_| invalid("public key must be exactly 32 raw bytes"))?;
+    let key = xila_package_verification::PublicKey::from_bytes(&raw)
+        .map_err(|_| invalid("invalid Ed25519 public key"))?;
+    xila_package_reader::verify_signed(&fs::read(archive)?, &key)
+        .map_err(|_| invalid("signed package verification failed"))?;
+    Ok(())
+}
+
+/// Build and inspect packages for Xila.
+#[derive(Debug, GetArgs)]
+#[command(name = "xila-package", version)]
+pub struct CommandLine<'a> {
+    #[command(subcommand)]
+    command: Command<'a>,
+}
+
+/// Subcommands of [`CommandLine`].
+#[derive(Debug, Subcommand)]
+pub enum Command<'a> {
+    /// Generate or update a package manifest.
+    Manifest(ManifestCommand<'a>),
+    /// Build an unpacked, self-contained application bundle or archive it.
+    Bundle(BundleCommand<'a>),
+    /// Generate or inspect raw Ed25519 signing keys (stateless, explicit paths).
+    Key(KeyCommand<'a>),
+    /// Generate or check registry entries for released, signed archives.
+    Registry(RegistryCommand<'a>),
+    /// Verify a signed archive against an externally trusted raw public key.
+    Verify {
+        archive: &'a str,
+        public_key: &'a str,
+    },
+    /// Create an archive from the validated manifest and source files.
+    Pack {
+        /// Directory containing the application payload files.
+        directory: &'a str,
+        /// Path to the manifest JSON file.
+        manifest: &'a str,
+        /// Destination archive path.
+        output: &'a str,
+        /// Optional 64-byte Ed25519 signature prepared outside this tool.
+        signature: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+pub struct RegistryCommand<'a> {
+    #[command(subcommand)]
+    command: RegistryOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RegistryOperation<'a> {
+    /// Write the registry entry of a signed archive; never overwrites.
+    Entry {
+        /// Signed .xpk archive.
+        archive: &'a str,
+        /// Raw 32-byte public key of the publishing developer.
+        public_key: &'a str,
+        /// Developer key identifier (`keys/developers/<id>.json` in xila-project/registry).
+        publisher: &'a str,
+        /// HTTPS download URL of the archive.
+        url: &'a str,
+        /// New registry entry JSON file.
+        output: &'a str,
+    },
+    /// Check a registry checkout: keys, entry placement, canonical form and
+    /// namespace authorization; with --archives, also every archive.
+    Check {
+        /// Registry root containing keys/developers and packages.
+        root: &'a str,
+        /// Directory of downloaded .xpk archives, named after their URLs.
+        #[arg(long)]
+        archives: Option<&'a str>,
+    },
+    /// Check that a registry entry describes exactly a signed archive.
+    Verify {
+        /// Registry entry JSON file.
+        entry: &'a str,
+        /// Signed .xpk archive.
+        archive: &'a str,
+        /// Raw 32-byte public key of the publishing developer.
+        public_key: &'a str,
+    },
+    /// Write a root-signed root.json (and root.json.sig) naming the root and
+    /// repository keys. Run offline with the root key; never overwrites.
+    Root {
+        /// Raw 32-byte private seed of the root key.
+        root_seed: &'a str,
+        /// Identifier of the root key, e.g. root-2026.
+        root_id: &'a str,
+        /// Raw 32-byte public key of the repository key.
+        repository_public_key: &'a str,
+        /// Identifier of the repository key, e.g. repository-2026.
+        repository_id: &'a str,
+        /// Root version; must increase with every new root.
+        version: u64,
+        /// New root.json file (the signature is written next to it).
+        output: &'a str,
+    },
+    /// Check a registry, then write it signed by the repository key into a
+    /// new directory: every key and entry with its .sig, and a signed index.
+    Sign {
+        /// Registry root containing root.json, keys/developers and packages.
+        registry: &'a str,
+        /// Raw 32-byte public key of the root key (as pinned on devices).
+        root_public_key: &'a str,
+        /// Raw 32-byte private seed of a repository key listed in root.json.
+        repository_seed: &'a str,
+        /// New output directory.
+        output: &'a str,
+        /// Index version (default: current Unix time).
+        #[arg(long)]
+        version: Option<&'a str>,
+        /// Days until the index expires (default 30).
+        #[arg(long)]
+        expires_in_days: Option<&'a str>,
+    },
+    /// Print the fingerprint of a raw public key, as devices show it before
+    /// trusting a repository's root key.
+    Fingerprint {
+        /// Raw 32-byte public key file.
+        public_key: &'a str,
+    },
+    /// Verify a signed registry from the pinned root key, as a device would.
+    VerifySigned {
+        /// Signed registry directory (output of `registry sign`).
+        site: &'a str,
+        /// Raw 32-byte public key of the root key.
+        root_public_key: &'a str,
+        /// Reject an index expired at this Unix time (default: now; 0 skips).
+        #[arg(long)]
+        now: Option<&'a str>,
+    },
+}
+
+fn parse_number(value: Option<&str>, name: &str) -> Result<Option<u64>> {
+    value
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| invalid(&format!("--{name} must be a non-negative integer")).into())
+        })
+        .transpose()
+}
+
+#[derive(Debug, GetArgs)]
+pub struct KeyCommand<'a> {
+    #[command(subcommand)]
+    command: KeyOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum KeyOperation<'a> {
+    /// Generate a new key pair; never overwrites existing files.
+    Generate {
+        /// New raw 32-byte private seed file (created owner-only).
+        seed: &'a str,
+        /// New raw 32-byte public key file.
+        public_key: &'a str,
+    },
+    /// Derive the raw public key of an existing private seed.
+    Public {
+        /// Existing raw 32-byte private seed file.
+        seed: &'a str,
+        /// New raw 32-byte public key file.
+        public_key: &'a str,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+pub struct BundleCommand<'a> {
+    #[command(subcommand)]
+    command: BundleOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BundleOperation<'a> {
+    /// Create the developer source layout and editable xila-package.json.
+    Init {
+        /// New directory to create (must not exist).
+        directory: &'a str,
+        /// Reverse-DNS application/package identifier, e.g. community.weather.
+        name: &'a str,
+        /// Version string.
+        version: &'a str,
+        /// Target architecture (e.g. wasm32-wasip1).
+        target: &'a str,
+        /// Minimum supported Xila ABI.
+        minimum_xila_abi: u32,
+        /// Bundle-relative executable path (default executables/main.wasm).
+        #[arg(long)]
+        entrypoint: Option<&'a str>,
+        /// Fallback launcher name (default package identifier).
+        #[arg(long)]
+        display_name: Option<&'a str>,
+        /// Bundle-relative application icon path.
+        #[arg(long)]
+        icon: Option<&'a str>,
+        /// Initialize a standalone executable package without an application.
+        #[arg(long)]
+        standalone: bool,
+    },
+    /// Generate the final hashed .xila manifest and unpacked bundle directory.
+    Build {
+        /// Directory containing editable xila-package.json and all payload files.
+        directory: &'a str,
+        /// New output bundle directory (must not exist).
+        output: &'a str,
+        /// Optional raw 32-byte Ed25519 private seed file outside source.
+        #[arg(long)]
+        signing_key: Option<&'a str>,
+    },
+    /// Export domain-separated manifest bytes for external signing/HSM/CI.
+    SigningPayload {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// File to create containing the exact message to sign.
+        output: &'a str,
+    },
+    /// Verify and attach an externally produced signature to a built bundle.
+    AttachSignature {
+        /// Previously built, unsigned bundle.
+        directory: &'a str,
+        /// Raw 64-byte Ed25519 signature.
+        signature: &'a str,
+        /// Raw 32-byte Ed25519 public key for signature verification.
+        public_key: &'a str,
+    },
+    /// Verify every payload hash and optionally the publisher's signature.
+    Verify {
+        /// Previously built bundle directory.
+        directory: &'a str,
+        /// Trusted public key (required for authentication, not just integrity).
+        #[arg(long)]
+        public_key: Option<&'a str>,
+    },
+    /// Create a deterministic .xpk archive from a completed bundle directory.
+    Archive {
+        /// Path to the self-contained bundle directory.
+        directory: &'a str,
+        /// Destination .xpk archive.
+        output: &'a str,
+    },
+}
+
+#[derive(Debug, GetArgs)]
+pub struct ManifestCommand<'a> {
+    #[command(subcommand)]
+    command: ManifestOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ManifestOperation<'a> {
+    /// Generate a manifest for an application directory.
+    Generate {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Output path for the manifest JSON file.
+        manifest: &'a str,
+        /// Package identifier, for example xila.calculator.
+        name: &'a str,
+        /// Package version.
+        version: &'a str,
+        /// Target architecture.
+        target: &'a str,
+        /// Minimum Xila runtime application binary interface version.
+        minimum_xila_abi: u32,
+    },
+    /// Add application metadata to an existing manifest without code execution.
+    Application {
+        /// Manifest JSON file (upgraded to v2).
+        manifest: &'a str,
+        /// Bundle-relative executable, or trusted preinstalled system path.
+        entrypoint: &'a str,
+        /// Fallback application name shown to users.
+        display_name: &'a str,
+        /// Bundle-relative icon from the manifest file inventory.
+        #[arg(long)]
+        icon: Option<&'a str>,
+        /// Hide from the launcher without making it unlaunchable.
+        #[arg(long)]
+        hidden: bool,
+    },
+    /// Export the exact canonical manifest signing payload.
+    SigningPayload { manifest: &'a str, output: &'a str },
+    /// Refresh file sizes and hashes in an existing manifest.
+    Update {
+        /// Directory containing payload files.
+        directory: &'a str,
+        /// Path of the manifest to update.
+        manifest: &'a str,
+    },
+}
+
+/// Parse `arguments` (without the program name) and run the command.
+///
+/// Help and version requests are printed to the standard output.
+pub fn run<'a>(arguments: impl Iterator<Item = &'a str>) -> Result<()> {
+    let command_line = match CommandLine::from_args(arguments) {
+        Ok(command_line) => command_line,
+        Err(error) if error.is_help() || error.is_version() => {
+            println!("{error}");
+            return Ok(());
+        }
+        Err(error) => return Err(invalid(&error.to_string()).into()),
+    };
+    execute(command_line)
+}
+
+/// Run an already parsed command line.
+pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
+    match command_line.command {
+        Command::Manifest(ManifestCommand { command }) => match command {
+            ManifestOperation::Generate {
+                directory,
+                manifest,
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+            } => generate(
+                Path::new(directory),
+                Path::new(manifest),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+            ),
+            ManifestOperation::SigningPayload { manifest, output } => {
+                manifest_signing_payload(Path::new(manifest), Path::new(output))
+            }
+            ManifestOperation::Update {
+                directory,
+                manifest,
+            } => update(Path::new(directory), Path::new(manifest)),
+            ManifestOperation::Application {
+                manifest,
+                entrypoint,
+                display_name,
+                icon,
+                hidden,
+            } => set_application(Path::new(manifest), entrypoint, display_name, icon, hidden),
+        },
+        Command::Bundle(BundleCommand { command }) => match command {
+            BundleOperation::Init {
+                directory,
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            } => bundle::init(bundle::InitOptions {
+                directory: Path::new(directory),
+                name,
+                version,
+                target,
+                minimum_xila_abi,
+                entrypoint,
+                display_name,
+                icon,
+                standalone,
+            }),
+            BundleOperation::Build {
+                directory,
+                output,
+                signing_key,
+            } => bundle::build(
+                Path::new(directory),
+                Path::new(output),
+                signing_key.map(Path::new),
+            ),
+            BundleOperation::SigningPayload { directory, output } => {
+                bundle::export_signing_payload(Path::new(directory), Path::new(output))
+            }
+            BundleOperation::AttachSignature {
+                directory,
+                signature,
+                public_key,
+            } => bundle::attach_signature(
+                Path::new(directory),
+                Path::new(signature),
+                Path::new(public_key),
+            ),
+            BundleOperation::Verify {
+                directory,
+                public_key,
+            } => {
+                bundle::verify(Path::new(directory), public_key.map(Path::new))?;
+                Ok(())
+            }
+            BundleOperation::Archive { directory, output } => {
+                bundle::archive(Path::new(directory), Path::new(output))
+            }
+        },
+        Command::Key(KeyCommand { command }) => match command {
+            KeyOperation::Generate { seed, public_key } => {
+                key::generate(Path::new(seed), Path::new(public_key))
+            }
+            KeyOperation::Public { seed, public_key } => {
+                key::public(Path::new(seed), Path::new(public_key))
+            }
+        },
+        Command::Registry(RegistryCommand { command }) => match command {
+            RegistryOperation::Entry {
+                archive,
+                public_key,
+                publisher,
+                url,
+                output,
+            } => registry::entry(
+                Path::new(archive),
+                Path::new(public_key),
+                publisher,
+                url,
+                Path::new(output),
+            ),
+            RegistryOperation::Verify {
+                entry,
+                archive,
+                public_key,
+            } => registry::verify(Path::new(entry), Path::new(archive), Path::new(public_key)),
+            RegistryOperation::Check { root, archives } => {
+                registry::check(Path::new(root), archives.map(Path::new))
+            }
+            RegistryOperation::Root {
+                root_seed,
+                root_id,
+                repository_public_key,
+                repository_id,
+                version,
+                output,
+            } => registry::root(
+                Path::new(root_seed),
+                root_id,
+                Path::new(repository_public_key),
+                repository_id,
+                version,
+                Path::new(output),
+            ),
+            RegistryOperation::Sign {
+                registry: directory,
+                root_public_key,
+                repository_seed,
+                output,
+                version,
+                expires_in_days,
+            } => (|| {
+                registry::sign(
+                    Path::new(directory),
+                    Path::new(root_public_key),
+                    Path::new(repository_seed),
+                    Path::new(output),
+                    parse_number(version, "version")?,
+                    parse_number(expires_in_days, "expires-in-days")?.unwrap_or(30),
+                )
+            })(),
+            RegistryOperation::Fingerprint { public_key } => {
+                registry::fingerprint(Path::new(public_key))
+            }
+            RegistryOperation::VerifySigned {
+                site,
+                root_public_key,
+                now,
+            } => (|| {
+                let now = match parse_number(now, "now")? {
+                    Some(0) => None,
+                    Some(now) => Some(now),
+                    None => Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_err(|_| invalid("system clock is before 1970"))?
+                            .as_secs(),
+                    ),
+                };
+                registry::verify_signed(Path::new(site), Path::new(root_public_key), now)
+            })(),
+        },
+        Command::Verify {
+            archive,
+            public_key,
+        } => verify_archive(Path::new(archive), Path::new(public_key)),
+        Command::Pack {
+            directory,
+            manifest,
+            output,
+            signature,
+        } => pack(
+            Path::new(directory),
+            Path::new(manifest),
+            Path::new(output),
+            signature.map(Path::new),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_prints_help_and_version_without_error() {
+        assert!(run(["--help"].into_iter()).is_ok());
+        assert!(run(["--version"].into_iter()).is_ok());
+        assert!(run(["bundle", "--help"].into_iter()).is_ok());
+    }
+
+    #[test]
+    fn run_rejects_unknown_subcommands() {
+        let error = run(["unknown"].into_iter()).unwrap_err();
+        assert!(error.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn parsed_command_lines_can_be_executed_separately() {
+        let command_line = CommandLine::from_args(["key", "public"].into_iter());
+        assert!(command_line.is_err(), "missing arguments are reported");
+        let directory = std::env::temp_dir().join(format!(
+            "xila-package-builder-library-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+        let seed = directory.join("seed");
+        let public_key = directory.join("public");
+        let arguments = [
+            "key",
+            "generate",
+            seed.to_str().unwrap(),
+            public_key.to_str().unwrap(),
+        ];
+        execute(CommandLine::from_args(arguments.into_iter()).unwrap()).unwrap();
+        assert_eq!(fs::read(&public_key).unwrap().len(), 32);
+        fs::remove_dir_all(directory).unwrap();
+    }
+}

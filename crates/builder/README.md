@@ -4,6 +4,12 @@ The native `xila-package` command creates **self-contained Xila application
 bundles** from a developer-managed source directory. An application bundle is
 just a directory: no VFS installation, activation database, or install hook.
 
+The crate is also a library: `CommandLine` is the parsed command line,
+`execute` runs it and `run` parses and runs raw arguments. Other host tools,
+such as the `xila package` subcommand of
+[`xila-project/tools`](https://github.com/xila-project/tools), embed it so that
+they run exactly the same code as `xila-package`.
+
 ## Recommended workflow
 
 ### 1. Initialize the developer source directory
