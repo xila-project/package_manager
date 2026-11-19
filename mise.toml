@@ -32,6 +32,10 @@ run = "cargo test --workspace --all-features --locked"
 description = "Build the workspace"
 run = "cargo build --workspace --all-features --locked"
 
+[tasks."build:linux-arm64"]
+description = "Build the native Linux aarch64 xila-package executable in release mode"
+run = "cargo build --locked --release --target aarch64-unknown-linux-gnu --package xila-package-builder"
+
 [tasks."coverage"]
 description = "Run Rust workspace tests with LLVM coverage instrumentation"
 run = "cargo llvm-cov --workspace --all-features"
