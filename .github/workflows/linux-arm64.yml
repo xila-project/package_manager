@@ -6,6 +6,17 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "mise.toml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/linux-arm64.yml"
+  # Only pushes to main save the build cache; pull requests restore it.
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "mise.toml"
       - ".github/workflows/release.yml"
       - ".github/workflows/linux-arm64.yml"
   workflow_dispatch:
