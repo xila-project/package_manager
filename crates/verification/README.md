@@ -57,9 +57,8 @@ application's dependency profile: audit **that application's** graph, not just
 this crate. Host proc-macro/build dependencies using std do not imply runtime std.
 
 The lockfiles record independently tested sha2 0.11.1 (Rust 1.88), Dalek 3.0.0
-and curve25519-dalek 5.0.0 (Rust 1.85). The library minimum is Rust 1.90; a standalone
-probe compiles with that compiler. The main workspace currently fails to parse
-on Cargo 1.90 due to an unrelated `wasm` workspace-default-feature override.
+and curve25519-dalek 5.0.0 (Rust 1.85). This crate shares the workspace MSRV of
+Rust 1.97.
 Dalek/curve25519-dalek are BSD-3-Clause, sha2/digest MIT OR Apache-2.0,
 subtle BSD-3-Clause. Mature dependencies do not constitute an independent audit
 of this wrapper or every dependency version.

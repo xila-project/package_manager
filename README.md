@@ -104,7 +104,14 @@ mise run test
 mise run format:check
 ```
 
-The workspace uses Rust 1.100.0 and [mr-boxington](https://mr-boxington.jdx.dev/) for compilation caching. The `mr_boxington = true` configuration avoids requiring a global Cargo wrapper. Use `mise exec -- cargo …` when the shell is not activated.
+**Rust version.** Development and CI pin Rust 1.97.0 and Cargo declares 1.97 as
+the MSRV (`rust-version`), following the esp-rs Xtensa toolchain base. Use only
+language features and `std` or `core` APIs available in Rust 1.97. Raise the
+version only when esp-rs publishes a new base, and update every Xila repository
+together. Rust native executables that use `build-std` use a separate nightly
+toolchain ([xila-project/core#687](https://github.com/xila-project/core/issues/687)).
+
+The workspace uses [mr-boxington](https://mr-boxington.jdx.dev/) for compilation caching. The `mr_boxington = true` configuration avoids requiring a global Cargo wrapper. Use `mise exec -- cargo …` when the shell is not activated.
 
 GitHub Actions runs formatting, compilation, Clippy, and tests for pull requests and main-branch pushes. The cache stores the Cargo target directory in target mode. Host-only dependencies must not be introduced into the microcontroller-facing crates.
 
