@@ -5,18 +5,14 @@
 //! File contents are authenticated incrementally with ContentVerifier.
 
 use alloc::vec::Vec;
-use tar_no_std::{StreamEvent, TarStreamParser};
-
-// USTAR's fixed 512-byte block size; tar-no-std deliberately keeps its
-// internal BLOCKSIZE constant private.
-const BLOCKSIZE: usize = 512;
+use tar_no_std::{BLOCKSIZE, StreamEvent, TarStreamParser};
 use xila_package_bundle::decode_sha256;
 use xila_package_manifest::{
     MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
 };
 use xila_package_verification::{ContentVerifier, PublicKey};
 
-use crate::Error;
+use crate::{Error, require_ordinary_file};
 
 /// Reader/source errors are separate from invalid or untrusted packages.
 #[derive(Debug, PartialEq, Eq)]
@@ -102,12 +98,16 @@ impl<'a> StreamingVerifier<'a> {
             .map_err(|_| Error::InvalidArchive)?;
 
         match event {
-            Some(StreamEvent::Entry(entry)) => {
-                let filename = entry.filename();
+            Some(StreamEvent::Entry {
+                filename,
+                posix_header,
+                size,
+            }) => {
+                require_ordinary_file(posix_header)?;
                 let path = filename.as_str().map_err(|_| Error::InvalidArchive)?;
-                self.on_entry(path, entry.payload_size())
+                self.on_entry(path, size)
             }
-            Some(StreamEvent::Data { bytes, remaining }) => self.on_data(bytes, remaining),
+            Some(StreamEvent::Data { data, remaining }) => self.on_data(data, remaining),
             Some(StreamEvent::End) => self.on_end(),
             None => {
                 // None also denotes skipped special TAR headers in the
@@ -457,10 +457,7 @@ mod tests {
         let offset = 512 + manifest_len.div_ceil(512) * 512;
         let block = &mut archive[offset..offset + 512];
         block[156] = b'5';
-        block[148..156].fill(b' ');
-        let checksum: u32 = block.iter().map(|&byte| u32::from(byte)).sum();
-        let octal = format!("{checksum:06o}\0 ");
-        block[148..156].copy_from_slice(octal.as_bytes());
+        update_checksum(block);
         assert_eq!(
             from_bytes::<core::convert::Infallible>(&archive, None),
             Err(StreamError::Package(Error::UnexpectedEntry))
@@ -474,6 +471,82 @@ mod tests {
         );
         // The trusted-key requirement is checked before the first payload.
         let _ = public;
+    }
+
+    #[test]
+    fn signed_verifiers_reject_extension_and_nonordinary_type_flags() {
+        let (archive, public, icon) = fixture(true);
+        let header_offset = archive
+            .windows(icon.len())
+            .position(|bytes| bytes == icon)
+            .unwrap()
+            - BLOCKSIZE;
+
+        // Contiguous, sparse and unknown flags, plus GNU long-name ('L', 'K') and global PAX
+        // ('g') headers: both readers must reject each one with the same error.
+        for (flag, expected) in [
+            (b'7', Some(Error::UnexpectedEntry)),
+            (b'S', Some(Error::InvalidArchive)),
+            (b'?', Some(Error::InvalidArchive)),
+            (b'L', None),
+            (b'K', None),
+            (b'g', None),
+        ] {
+            let mut modified = archive.clone();
+            let header = &mut modified[header_offset..header_offset + BLOCKSIZE];
+            header[156] = flag;
+            update_checksum(header);
+            let streaming = from_bytes::<core::convert::Infallible>(&modified, Some(&public));
+            let in_memory = crate::verify_signed(&modified, &public);
+            let Err(StreamError::Package(streaming_error)) = streaming else {
+                panic!("streaming reader accepted type flag {:?}", flag as char);
+            };
+            if let Some(expected) = &expected {
+                assert_eq!(&streaming_error, expected, "type flag {:?}", flag as char);
+            }
+            assert_eq!(
+                in_memory.map(|_| ()),
+                Err(streaming_error),
+                "readers disagree on type flag {:?}",
+                flag as char
+            );
+        }
+
+        // Insert a local PAX path that resolves to the signed path. Even a
+        // matching path override must not be accepted by either verifier.
+        let mut pax = [0; 2 * BLOCKSIZE];
+        pax[..BLOCKSIZE].copy_from_slice(&archive[header_offset..header_offset + BLOCKSIZE]);
+        let records = b"27 path=resources/icon.png\n";
+        pax[124..136].copy_from_slice(format!("{:011o}\0", records.len()).as_bytes());
+        pax[156] = b'x';
+        update_checksum(&mut pax[..BLOCKSIZE]);
+        pax[BLOCKSIZE..BLOCKSIZE + records.len()].copy_from_slice(records);
+        let mut modified = archive.clone();
+        modified.splice(header_offset..header_offset, pax);
+        assert_eq!(
+            crate::verify_signed(&modified, &public),
+            Err(Error::UnexpectedEntry)
+        );
+        assert_eq!(
+            from_bytes::<core::convert::Infallible>(&modified, Some(&public)),
+            Err(StreamError::Package(Error::UnexpectedEntry))
+        );
+    }
+
+    #[test]
+    fn in_memory_verifier_rejects_nonzero_padding() {
+        let (mut archive, public, _) = fixture(true);
+        archive.extend_from_slice(&[0xff; BLOCKSIZE]);
+        assert_eq!(
+            crate::verify_signed(&archive, &public),
+            Err(Error::UnexpectedEntry)
+        );
+    }
+
+    fn update_checksum(header: &mut [u8]) {
+        header[148..156].fill(b' ');
+        let checksum: u32 = header.iter().map(|&byte| u32::from(byte)).sum();
+        header[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
     }
 
     #[test]

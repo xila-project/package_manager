@@ -6,7 +6,7 @@ extern crate alloc;
 mod stream;
 pub use stream::{StreamError, StreamingVerifier, inspect_streaming};
 
-use tar_no_std::TarArchiveRef;
+use tar_no_std::{BLOCKSIZE, PosixHeader, TarArchiveRef, TypeFlag};
 use xila_package_bundle::{verify_bytes, verify_signature};
 use xila_package_manifest::{MANIFEST_PATH, Manifest, SIGNATURE_PATH};
 use xila_package_verification::PublicKey;
@@ -22,11 +22,35 @@ pub enum Error {
     InvalidDigest,
 }
 
+// Xila packages allow only ordinary files. In particular, contiguous files
+// and headers that can override a following file's path are outside the format.
+fn require_ordinary_file(header: &PosixHeader) -> Result<(), Error> {
+    match header.typeflag.try_to_type_flag() {
+        Ok(TypeFlag::REGTYPE | TypeFlag::AREGTYPE) => Ok(()),
+        Ok(_) => Err(Error::UnexpectedEntry),
+        Err(_) => Err(Error::InvalidArchive),
+    }
+}
+
 fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifest, Error> {
     let tar = TarArchiveRef::new(bytes).map_err(|_| Error::InvalidArchive)?;
-    // The regular-file iterator silently ignores special entries. Every header
-    // must therefore correspond to one ordinary entry under our strict profile.
-    if tar.headers().count() != tar.entries().count() {
+    let mut end_of_entries = 0;
+    for (index, header) in tar.headers() {
+        require_ordinary_file(header)?;
+        // Upstream skips old-style directory names even on regular headers.
+        if header.filename().as_bytes().ends_with(b"/") {
+            return Err(Error::UnexpectedEntry);
+        }
+        let payload_blocks = header
+            .payload_block_count()
+            .map_err(|_| Error::InvalidArchive)?;
+        end_of_entries = (index + 1 + payload_blocks) * BLOCKSIZE;
+    }
+    if end_of_entries == 0 {
+        return Err(Error::InvalidArchive);
+    }
+    // The TAR parser stops at the terminator. Permit only zero padding after it.
+    if bytes[end_of_entries..].iter().any(|&byte| byte != 0) {
         return Err(Error::UnexpectedEntry);
     }
     let mut entries = tar.entries();
