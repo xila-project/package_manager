@@ -354,8 +354,9 @@ dependencies = [
 
 [[package]]
 name = "tar-no-std"
-version = "0.5.0"
-source = "git+https://github.com/AlixANNERAUD/tar-no-std?rev=ecdd39990ae4143d36b7f2adcf3eff2f971fea11#ecdd39990ae4143d36b7f2adcf3eff2f971fea11"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c282541bcce537197b72bfdd8528af1069b1eb9edc35c46f76cd5399b5cf5e5"
 dependencies = [
  "bitflags",
  "log",

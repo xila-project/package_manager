@@ -7,8 +7,7 @@ The archive reader has two APIs:
   entire archive in RAM. They remain for backwards compatibility.
 - **Incremental API:** `inspect_streaming(read_block, trusted_key)` or the
   push-oriented `StreamingVerifier::push(&[u8; 512])` / `finish()` use
-  `TarStreamParser` from
-  [tar-no-std PR #73](https://github.com/phip1611/tar-no-std/pull/73).
+  `TarStreamParser` from [tar-no-std](https://crates.io/crates/tar-no-std).
 
 ## Streaming an authenticated package
 
@@ -58,7 +57,3 @@ signature and reach EOF before atomically publishing the bundle. This PR
 implements only the reader/verifier and no Xila VFS or installer integration.
 The caller must separately enforce publisher trust, deployment policy and
 atomic activation. Successful unsigned verification is only an integrity check.
-
-The reader currently pins the head of the upstream
-`tar-no-std` streaming PR by Git SHA; replace that with an upstream crate
-release after the PR is merged.
