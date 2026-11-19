@@ -482,20 +482,34 @@ mod tests {
             .unwrap()
             - BLOCKSIZE;
 
+        // Contiguous, sparse and unknown flags, plus GNU long-name ('L', 'K') and global PAX
+        // ('g') headers: both readers must reject each one with the same error.
         for (flag, expected) in [
-            (b'7', Error::UnexpectedEntry),
-            (b'S', Error::InvalidArchive),
-            (b'?', Error::InvalidArchive),
+            (b'7', Some(Error::UnexpectedEntry)),
+            (b'S', Some(Error::InvalidArchive)),
+            (b'?', Some(Error::InvalidArchive)),
+            (b'L', None),
+            (b'K', None),
+            (b'g', None),
         ] {
             let mut modified = archive.clone();
             let header = &mut modified[header_offset..header_offset + BLOCKSIZE];
             header[156] = flag;
             update_checksum(header);
+            let streaming = from_bytes::<core::convert::Infallible>(&modified, Some(&public));
+            let in_memory = crate::verify_signed(&modified, &public);
+            let Err(StreamError::Package(streaming_error)) = streaming else {
+                panic!("streaming reader accepted type flag {:?}", flag as char);
+            };
+            if let Some(expected) = &expected {
+                assert_eq!(&streaming_error, expected, "type flag {:?}", flag as char);
+            }
             assert_eq!(
-                from_bytes::<core::convert::Infallible>(&modified, Some(&public)),
-                Err(StreamError::Package(expected))
+                in_memory.map(|_| ()),
+                Err(streaming_error),
+                "readers disagree on type flag {:?}",
+                flag as char
             );
-            assert!(crate::verify_signed(&modified, &public).is_err());
         }
 
         // Insert a local PAX path that resolves to the signed path. Even a

@@ -11,7 +11,6 @@ repository.workspace = true
 xila-package-manifest = { path = "../manifest" }
 xila-package-bundle = { path = "../bundle" }
 xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
-# Temporary pinned commit from upstream PR #73; switch to crates.io after merge.
 tar-no-std = { version = "0.6.0", default-features = false }
 
 [dev-dependencies]
