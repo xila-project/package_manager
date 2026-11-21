@@ -54,7 +54,10 @@ both `package` and `sign` download that release archive, verify its SHA-256
 digest, check that `xila-package --version` matches the release tag, and skip
 compiling from source. When omitted, the workflow compiles
 `xila-package-builder` from `builder-ref`. Keep `builder-ref` pinned so the
-Python staging and signing helper scripts come from a reviewed commit.
+Python staging and signing helper scripts come from a reviewed commit. The
+release must be compatible with those scripts: pin `builder-ref` to the commit
+that `builder-release` points to, otherwise an older release that lacks a
+command the scripts call would only fail in `sign`, on `main`.
 
 ```yaml
     with:

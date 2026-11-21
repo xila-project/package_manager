@@ -17,7 +17,6 @@ on:
       - "tests/fixtures/package-workflow-developer.json"
       - "tests/fixtures/package-workflow-shortcut.json"
       - "tests/test_package_wasm.py"
-  workflow_dispatch:
 
 permissions:
   contents: read

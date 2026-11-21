@@ -151,6 +151,22 @@ class DownloadBuilderTests(unittest.TestCase):
                     output_path,
                 )
 
+            for entry_type, link_name in ((tarfile.LNKTYPE, "other"), (tarfile.CHRTYPE, "")):
+                special_archive = root / f"special-{entry_type!r}.tar.gz"
+                with tarfile.open(special_archive, mode="w:gz") as archive:
+                    member = tarfile.TarInfo(name="xila-package")
+                    member.type = entry_type
+                    member.linkname = link_name
+                    archive.addfile(member)
+                special_digest = hashlib.sha256(special_archive.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(ValueError, "unsupported archive entry type"):
+                    helper.install_verified_archive(
+                        special_archive,
+                        "xila-package-builder-v0.4.0",
+                        special_digest,
+                        output_path,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

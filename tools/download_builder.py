@@ -12,6 +12,8 @@ import subprocess
 import tarfile
 import tempfile
 
+# Upper bound for `xila-package --version`, which should answer immediately.
+VERSION_CHECK_TIMEOUT_SECONDS = 30
 ARCHIVE_NAME = "xila-package-x86_64-unknown-linux-gnu.tar.gz"
 BINARY_NAME = "xila-package"
 DEFAULT_REPOSITORY = "xila-project/package_manager"
@@ -136,13 +138,17 @@ def verify_binary_version(executable_path: Path, expected_version: str) -> str:
     """Execute xila-package --version and assert it matches the release version."""
     expected_line = f"{BINARY_NAME} {expected_version}"
     try:
+        # Run the binary with a minimal environment, so it never sees the
+        # workflow token, and with a time limit.
         completed_process = subprocess.run(
             [str(executable_path), "--version"],
             check=True,
             capture_output=True,
             text=True,
+            env={"PATH": os.environ.get("PATH", "")},
+            timeout=VERSION_CHECK_TIMEOUT_SECONDS,
         )
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         executable_path.unlink(missing_ok=True)
         raise ValueError(f"failed to execute {executable_path} --version") from error
     actual_line = completed_process.stdout.strip()
