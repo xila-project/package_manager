@@ -23,7 +23,7 @@ use xila_package_manifest::{
 };
 use xila_package_verification::PublicKey;
 
-use crate::{Result, invalid};
+use crate::{Result, invalid, manifest_error, package_verification_error};
 
 fn read_public_key(path: &Path) -> Result<PublicKey> {
     let raw: [u8; 32] = fs::read(path)?
@@ -44,7 +44,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 fn verified_manifest(archive: &[u8], public_key: &Path) -> Result<Manifest> {
     Ok(
         xila_package_reader::verify_signed(archive, &read_public_key(public_key)?)
-            .map_err(|_| invalid("signed package verification failed"))?,
+            .map_err(package_verification_error)?,
     )
 }
 
@@ -78,8 +78,8 @@ fn verify_archive(entry: &RegistryEntry, bytes: &[u8], key: &PublicKey) -> Resul
     if bytes.len() as u64 != entry.archive.size || sha256_hex(bytes) != entry.archive.sha256 {
         return Err(invalid("archive size or SHA-256 differs from the registry entry").into());
     }
-    let manifest = xila_package_reader::verify_signed(bytes, key)
-        .map_err(|_| invalid("signed package verification failed"))?;
+    let manifest =
+        xila_package_reader::verify_signed(bytes, key).map_err(package_verification_error)?;
     entry
         .check_manifest(&manifest)
         .map_err(|_| invalid("registry entry differs from the signed package manifest"))?;
@@ -88,8 +88,8 @@ fn verify_archive(entry: &RegistryEntry, bytes: &[u8], key: &PublicKey) -> Resul
 
 /// Check that `entry` describes exactly `archive`, signed by `public_key`.
 pub fn verify(entry: &Path, archive: &Path, public_key: &Path) -> Result<()> {
-    let entry =
-        decode_registry_entry(&fs::read(entry)?).map_err(|_| invalid("invalid registry entry"))?;
+    let entry = decode_registry_entry(&fs::read(entry)?)
+        .map_err(|error| manifest_error("invalid registry entry", error))?;
     verify_archive(&entry, &fs::read(archive)?, &read_public_key(public_key)?)
 }
 
@@ -144,8 +144,12 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
     collect_json(&packages, &mut files)?;
     for path in &files {
         let bytes = fs::read(path)?;
-        let entry =
-            decode_registry_entry(&bytes).map_err(|_| failure(path, "invalid registry entry"))?;
+        let entry = decode_registry_entry(&bytes).map_err(|error| {
+            failure(
+                path,
+                &manifest_error("invalid registry entry", error).to_string(),
+            )
+        })?;
         let canonical =
             encode_registry_entry(&entry).map_err(|_| failure(path, "invalid registry entry"))?;
         if canonical.as_bytes() != bytes {
@@ -517,11 +521,11 @@ mod tests {
         .unwrap();
         let entry = RegistryEntry {
             schema: Some(xila_package_manifest::REGISTRY_ENTRY_SCHEMA_URL.into()),
-            format_version: 1,
+            format_version: xila_package_manifest::FORMAT_VERSION,
             name: "xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
-            minimum_xila_abi: 1,
+            xila_version: xila_package_manifest::XilaVersion::new(0, 1),
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,

@@ -15,11 +15,11 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 VALID_SOURCE = {
     "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json",
-    "format_version": 1,
+    "format_version": 2,
     "name": "community.weather",
     "version": "1.0.0",
     "target": "wasm32-wasip1",
-    "minimum_xila_abi": 1,
+    "xila_version": "0.1",
     "capabilities": [],
     "application": {
         "entrypoint": "executables/weather.wasm",
@@ -65,7 +65,8 @@ class DeveloperManifestSchemaTests(unittest.TestCase):
             {"$schema": "https://example.org/untrusted-schema"},
             {"name": "../escape"},
             {"application": {"entrypoint": "../escape"}},
-            {"format_version": 2},
+            {"format_version": 1},
+            {"xila_version": "1.2.3"},
         ]:
             candidate = copy.deepcopy(VALID_SOURCE)
             candidate.update(changes)

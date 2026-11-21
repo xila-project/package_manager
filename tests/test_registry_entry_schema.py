@@ -25,6 +25,8 @@ class RegistryEntrySchemaTests(unittest.TestCase):
 
     def test_rejects_unpinned_or_insecure_archives_and_bad_publishers(self):
         for path, value in [
+            (("format_version",), 1),
+            (("xila_version",), "65536.0"),
             (("archive", "url"), "http://example.com/a.xpk"),
             (("archive", "sha256"), "A" * 64),
             (("archive", "size"), 0),

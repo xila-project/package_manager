@@ -1,4 +1,4 @@
-# Xila self-contained application bundles (experimental v1 draft)
+# Xila self-contained application bundles (experimental format version 2)
 
 > This is an incremental schema/contract proposal, **not** a working device
 > installer. It must be reconciled with the streaming container decision in
@@ -8,7 +8,7 @@
 ## Separate three concepts
 
 - **Package**: a versioned, integrity-checked distribution container; the
-  package manifest is authoritative for package identity, version, ABI,
+  package manifest is authoritative for package identity, package version, minimum Xila version,
   capabilities and declared file hashes.
 - **Application**: optional metadata in the same manifest. Its stable
   identity is the package `name` and it resolves an entrypoint, a fallback
@@ -48,11 +48,11 @@ An example of the manifest's application metadata:
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
-  "format_version": 1,
+  "format_version": 2,
   "name": "xila.calculator",
   "version": "1.0.0",
   "target": "wasm32-wasip1",
-  "minimum_xila_abi": 1,
+  "xila_version": "0.1",
   "capabilities": [],
   "files": [
     {
@@ -98,7 +98,7 @@ path is not a capability or security exemption.
 Versions remain separate. During installation:
 
 1. Resolve trust **outside** the untrusted archive and authenticate the
-   metadata according to installation policy. Reject incompatible ABI/target.
+   metadata according to installation policy. Reject incompatible Xila versions or targets.
 2. Stream entries into staging on the **same filesystem** as the final bundle.
    Enforce bounded sizes/counts and validate every declared file digest.
 3. Close/sync written content. Persist manifest/signature without
@@ -137,11 +137,10 @@ Never infer authority merely from a cryptographic signature.
 - Remove guest `__install` and the `wasm --install` mode **only after**
   platform seeding and launcher migrations pass their integration tests.
 
-## Experimental v1 schema, JSON Schema and signatures
+## Format version 2, JSON Schema and signatures
 
-- This is a **breaking update of experimental v1**, not a new version.
-  There is deliberately no legacy reader, format migration or secondary
-  signature domain. Rebuild development packages and re-sign signed bytes.
+- Format version 2 requires a `xila_version` string such as `"0.1"`.
+  Rebuild development packages and re-sign signed bytes.
 - JSON Schema lives at
   [schemas/package-manifest.schema.json](../schemas/package-manifest.schema.json).
   The optional `$schema` property points to the canonical raw GitHub URL for

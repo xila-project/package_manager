@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage a WASI application and emit a verified Xila v1 application bundle.
+"""Stage a WASI application and emit a verified Xila application bundle.
 
 The source manifest is developer-owned (no hashes/sizes). The native Rust
 xila-package builder creates the signed-format runtime manifest and archive.
@@ -64,8 +64,10 @@ def pack(
     for key in ("name", "version", "target"):
         if not isinstance(metadata.get(key), str) or not SAFE_FILENAME.fullmatch(metadata[key]):
             raise ValueError(f"unsafe {key}")
-    if metadata.get("format_version") != 1 or metadata["target"] != "wasm32-wasip1":
-        raise ValueError("unsupported package format or target")
+    if metadata.get("format_version") != 2:
+        raise ValueError("unsupported developer manifest format (expected format_version 2)")
+    if metadata["target"] != "wasm32-wasip1":
+        raise ValueError("expected the wasm32-wasip1 package target")
     if staging.exists():
         raise ValueError("staging directory already exists")
     if wasm_path:
@@ -164,7 +166,7 @@ def main() -> None:
         builder=args.builder,
         shortcut_path=args.shortcut_path,
     )
-    print(f"Generated v1 bundle: {filename} (sha256: {digest})")
+    print(f"Generated Xila bundle: {filename} (sha256: {digest})")
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write(f"filename={filename}\nsha256={digest}\n")

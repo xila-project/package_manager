@@ -92,7 +92,7 @@ evidence favors it. Zero allocations alone do not establish a small stack.
   package is not trusted by parsing or verifying it. Signatures do not authorize
   device access or capabilities; rollback, freshness and key lifecycle are policy.
 - #402 owns the single canonical signed representation. It must bind identity,
-  version, paths/types, expanded sizes/hashes, target/ABI and security-relevant
+  version, paths/types, expanded sizes/hashes, target, Xila version and security-relevant
   permissions/capabilities. This crate does not parse or validate those semantics.
 - Feed the specified logical bytes, normally decompressed content. The parser
   bounds decompression and framing; the installer writes only quarantined staged

@@ -7,7 +7,7 @@ use miniserde::{Deserialize, Serialize};
 
 use crate::{
     Application, Error, FORMAT_VERSION, MAX_MANIFEST_BYTES, Manifest, ManifestFile, Metadata,
-    SCHEMA_URL, validate, validate_path,
+    SCHEMA_URL, XilaVersion, decode_versioned, validate, validate_path,
 };
 
 pub const DEVELOPER_MANIFEST_FILENAME: &str = "xila-package.json";
@@ -23,7 +23,8 @@ pub struct DeveloperManifest {
     pub name: String,
     pub version: String,
     pub target: String,
-    pub minimum_xila_abi: u32,
+    /// Minimum compatible Xila release.
+    pub xila_version: XilaVersion,
     pub capabilities: Vec<String>,
     pub application: Option<Application>,
     /// Descriptive catalog information, carried into the runtime manifest.
@@ -116,7 +117,7 @@ impl DeveloperManifest {
             name: self.name,
             version: self.version,
             target: self.target,
-            minimum_xila_abi: self.minimum_xila_abi,
+            xila_version: self.xila_version,
             capabilities: self.capabilities,
             files,
             application: self.application,
@@ -129,12 +130,7 @@ impl DeveloperManifest {
 
 /// Decode the source configuration. The input is never read at runtime.
 pub fn decode_developer(bytes: &[u8]) -> Result<DeveloperManifest, Error> {
-    if bytes.len() > MAX_MANIFEST_BYTES {
-        return Err(Error::TooLarge);
-    }
-    let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let manifest: DeveloperManifest =
-        miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
+    let manifest: DeveloperManifest = decode_versioned(bytes, FORMAT_VERSION)?;
     manifest.validate()?;
     Ok(manifest)
 }
@@ -160,7 +156,7 @@ mod tests {
             name: "community.weather".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             application: Some(Application {
                 entrypoint: "executables/weather.wasm".to_string(),
@@ -176,6 +172,7 @@ mod tests {
     fn developer_manifest_round_trip_without_hashes() {
         let source = example();
         let encoded = encode_developer(&source).unwrap();
+        assert!(encoded.contains(r#""xila_version":"0.1""#));
         assert!(!encoded.contains("sha256"));
         assert!(!encoded.contains("files"));
         assert_eq!(decode_developer(encoded.as_bytes()), Ok(source));
@@ -201,6 +198,7 @@ mod tests {
             },
         ];
         let manifest = source.into_bundle_manifest(files).unwrap();
+        assert_eq!(manifest.xila_version, XilaVersion::new(0, 1));
         assert_eq!(manifest.files.len(), 2);
         assert!(manifest.application.is_some());
     }

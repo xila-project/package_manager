@@ -184,7 +184,7 @@ impl<'a> StreamingVerifier<'a> {
                 if next == size {
                     let start = SIGNED_DOMAIN.len() + 4;
                     let decoded = xila_package_manifest::decode(&self.signed_message[start..])
-                        .map_err(|_| Error::InvalidManifest)?;
+                        .map_err(Error::from_manifest)?;
                     self.manifest = Some(decoded);
                     self.state = State::AfterManifest;
                 } else {
@@ -309,7 +309,9 @@ mod tests {
     use alloc::{format, string::ToString, vec};
     use ed25519_dalek::{Signer, SigningKey};
     use xila_package_bundle::{FileHasher, signing_message};
-    use xila_package_manifest::{Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL};
+    use xila_package_manifest::{
+        Application, FORMAT_VERSION, ManifestFile, SCHEMA_URL, XilaVersion,
+    };
     use xila_package_writer::{SourceFile, write_package};
 
     fn hashed_file(path: &str, contents: &[u8]) -> ManifestFile {
@@ -329,7 +331,7 @@ mod tests {
             name: "community.example".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             files: vec![
                 hashed_file("executables/main.wasm", &wasm),
@@ -395,6 +397,25 @@ mod tests {
         assert_eq!(actual.files.len(), 2);
         assert_eq!(actual.files[0].size, 8 * 1024 + 17);
         assert_eq!(crate::verify_signed(&archive, &public).unwrap(), actual);
+    }
+
+    #[test]
+    fn rejects_unsupported_manifest_versions_in_both_readers() {
+        let (mut archive, _, _) = fixture(false);
+        let format = br#""format_version":2"#;
+        let offset = archive
+            .windows(format.len())
+            .position(|bytes| bytes == format)
+            .unwrap();
+        archive[offset + format.len() - 1] = b'1';
+        assert_eq!(
+            crate::inspect_unsigned(&archive),
+            Err(Error::UnsupportedManifestVersion)
+        );
+        assert_eq!(
+            from_bytes::<core::convert::Infallible>(&archive, None),
+            Err(StreamError::Package(Error::UnsupportedManifestVersion))
+        );
     }
 
     #[test]

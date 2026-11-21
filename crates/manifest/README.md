@@ -1,20 +1,23 @@
 # xila-package-manifest
 
 The shared archive manifest schema, portable to `no_std + alloc`. It contains
-package identity, target/ABI requirements, declared capabilities and the
+package identity, target and Xila version requirements, declared capabilities and the
 inventory of files embedded in a Xila archive.
 
-The experimental **v1** schema now carries an optional `application` descriptor,
-**without adding a second identity, version, signature or capability manifest**.
+The manifest carries an optional `application` descriptor.
 A package with `application: null` carries standalone executables/resources;
 an application descriptor enables launcher discovery. Its `entrypoint`
 references a bundle-relative, inventory-verified executable or a preinstalled
 system executable. This metadata does not grant permissions or authorization.
 
-This is an intentional breaking change **within experimental v1**. There is
-no compatibility decoder, schema migration or second signature domain for
-the earlier v1 draft. Regenerate/repackage unsigned development artifacts
-with the revised schema; re-sign any signed manifests after regeneration.
+Format version 2 requires `xila_version` as a `"major.minor"` string in the
+developer manifest, runtime manifest and registry entry. Both components
+are decimal integers from 0 through 65535 without leading zeros. Use
+`compatible(declared, running)` to apply the Xila version rule. Before 1.0, the
+major and minor versions must match. Starting at 1.0, the major versions must
+match and the running minor must be at least the declared minor. Patch versions
+are ignored. Regenerate format version 1 development artifacts and re-sign
+any signed manifests after regeneration.
 
 The JSON Schema is maintained in
 [schemas/package-manifest.schema.json](../../schemas/package-manifest.schema.json).
@@ -34,7 +37,7 @@ manifest bytes**, not an arbitrary reserialization.
 ## Example
 
 ```rust
-use xila_package_manifest::{Manifest, ManifestFile, Application, Metadata, FORMAT_VERSION, encode, decode};
+use xila_package_manifest::{Manifest, ManifestFile, Application, Metadata, FORMAT_VERSION, XilaVersion, encode, decode};
 
 let manifest = Manifest {
     schema: Some(xila_package_manifest::SCHEMA_URL.into()),
@@ -42,7 +45,7 @@ let manifest = Manifest {
     name: "community.weather".into(),
     version: "1.0.0".into(),
     target: "wasm32-wasip1".into(),
-    minimum_xila_abi: 1,
+    xila_version: XilaVersion::new(0, 1),
     capabilities: vec![],
     files: vec![ManifestFile {
         path: "executables/weather.wasm".into(),

@@ -17,9 +17,19 @@ pub enum Error {
     InvalidArchive,
     UnexpectedEntry,
     InvalidManifest,
+    UnsupportedManifestVersion,
     MissingSignature,
     InvalidSignature,
     InvalidDigest,
+}
+
+impl Error {
+    fn from_manifest(error: xila_package_manifest::Error) -> Self {
+        match error {
+            xila_package_manifest::Error::UnsupportedVersion => Self::UnsupportedManifestVersion,
+            _ => Self::InvalidManifest,
+        }
+    }
 }
 
 // Xila packages allow only ordinary files. In particular, contiguous files
@@ -64,8 +74,7 @@ fn inspect_internal(bytes: &[u8], trusted: Option<&PublicKey>) -> Result<Manifes
         return Err(Error::InvalidManifest);
     }
     let raw_manifest = first.data();
-    let manifest =
-        xila_package_manifest::decode(raw_manifest).map_err(|_| Error::InvalidManifest)?;
+    let manifest = xila_package_manifest::decode(raw_manifest).map_err(Error::from_manifest)?;
 
     let mut entry = entries.next();
     let mut signature = None;
