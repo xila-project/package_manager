@@ -245,8 +245,8 @@ pub fn fingerprint(public_key: &[u8; 32]) -> String {
     output
 }
 
-/// Whether an entry can be installed on a device running `target` with
-/// running Xila release.
+/// Whether an entry can be installed on a device whose target is `target`
+/// and whose Xila release is `running`.
 pub fn compatible(entry: &RegistryEntry, target: &str, running: XilaVersion) -> bool {
     entry.target == target && manifest::compatible(entry.xila_version, running)
 }

@@ -148,6 +148,9 @@ mod tests {
             ("1.3", "1.9", true),
             ("1.3", "2.0", false),
             ("0.9", "1.0", false),
+            ("0.0", "0.0", true),
+            ("0.0", "0.1", false),
+            ("0.1", "0.0", false),
         ] {
             assert_eq!(
                 compatible(declared.parse().unwrap(), running.parse().unwrap()),
