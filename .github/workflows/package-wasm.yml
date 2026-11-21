@@ -31,6 +31,16 @@ on:
         required: false
         type: string
         default: "main"
+      builder-release:
+        description: "Optional xila-package-builder release tag (for example xila-package-builder-v0.4.0) used to download a published Linux x86_64 executable instead of compiling from source; requires builder-sha256"
+        required: false
+        type: string
+        default: ""
+      builder-sha256:
+        description: "Expected lowercase hexadecimal SHA-256 digest of xila-package-x86_64-unknown-linux-gnu.tar.gz for builder-release"
+        required: false
+        type: string
+        default: ""
       artifact-name:
         description: "Output Actions artifact name (must be unique when invoked multiple times)"
         required: false
@@ -75,6 +85,7 @@ jobs:
   package:
     name: Build and validate Xila package
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
@@ -123,11 +134,25 @@ jobs:
           name: ${{ inputs.manifest-artifact }}
           path: ${{ runner.temp }}/xila-manifest-input
       - name: "Setup | Rust toolchain"
+        if: inputs.builder-release == '' && inputs.builder-sha256 == ''
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.0"
       - name: "Build | Host package builder"
+        if: inputs.builder-release == '' && inputs.builder-sha256 == ''
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
+      - name: "Setup | Download published package builder"
+        if: inputs.builder-release != '' || inputs.builder-sha256 != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILDER_RELEASE: ${{ inputs.builder-release }}
+          BUILDER_SHA256: ${{ inputs.builder-sha256 }}
+        run: |
+          python3 package-manager/tools/download_builder.py \
+            --release "$BUILDER_RELEASE" \
+            --sha256 "$BUILDER_SHA256" \
+            --output "$RUNNER_TEMP/xila-package-builder/xila-package"
       - name: "Package | Stage Wasm and validate archive"
         id: pack
         shell: bash
@@ -136,6 +161,7 @@ jobs:
           INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
           INPUT_SHORTCUT_PATH: ${{ inputs.shortcut-path }}
           INPUT_MANIFEST_ARTIFACT: ${{ inputs.manifest-artifact }}
+          BUILDER_BINARY: ${{ inputs.builder-release != '' && format('{0}/xila-package-builder/xila-package', runner.temp) || format('{0}/package-manager/target/release/xila-package', github.workspace) }}
         run: |
           set -euo pipefail
           manifest_root="$GITHUB_WORKSPACE/caller"
@@ -151,7 +177,7 @@ jobs:
             --staging "$RUNNER_TEMP/xila-package-payload" \
             --manifest-output "$RUNNER_TEMP/xila-package-manifest.json" \
             --output "$RUNNER_TEMP/xila-package-dist" \
-            --builder "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
+            --builder "$BUILDER_BINARY" \
             --github-output "$GITHUB_OUTPUT"
       - name: "Prepare | Save verified package inputs for signing"
         if: inputs.publish-release || inputs.sign-artifact
@@ -181,6 +207,7 @@ jobs:
     needs: package
     if: github.event_name == 'push' && ((inputs.publish-release && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) || (inputs.sign-artifact && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     outputs:
@@ -211,20 +238,36 @@ jobs:
           name: ${{ inputs.artifact-name }}-signing-input
           path: ${{ runner.temp }}/xila-signing-download
       - name: "Setup | Rust toolchain"
+        if: inputs.builder-release == '' && inputs.builder-sha256 == ''
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.0"
       - name: "Build | Host package builder"
+        if: inputs.builder-release == '' && inputs.builder-sha256 == ''
         run: cargo build --locked --release --manifest-path package-manager/Cargo.toml -p xila-package-builder
+      - name: "Setup | Download published package builder"
+        if: inputs.builder-release != '' || inputs.builder-sha256 != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILDER_RELEASE: ${{ inputs.builder-release }}
+          BUILDER_SHA256: ${{ inputs.builder-sha256 }}
+        run: |
+          python3 package-manager/tools/download_builder.py \
+            --release "$BUILDER_RELEASE" \
+            --sha256 "$BUILDER_SHA256" \
+            --output "$RUNNER_TEMP/xila-package-builder/xila-package"
       - name: "Prepare | Canonical manifest signing payload"
         shell: bash
+        env:
+          BUILDER_BINARY: ${{ inputs.builder-release != '' && format('{0}/xila-package-builder/xila-package', runner.temp) || format('{0}/package-manager/target/release/xila-package', github.workspace) }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/signing-work" "$RUNNER_TEMP/xila-signed-dist"
           python3 package-manager/tools/unpack_signing_input.py \
             "$RUNNER_TEMP/xila-signing-download/xila-signing-input.tar" \
             "$RUNNER_TEMP/signing-work"
-          "$GITHUB_WORKSPACE/package-manager/target/release/xila-package" \
+          "$BUILDER_BINARY" \
             manifest signing-payload \
             "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
             "$RUNNER_TEMP/signing-work/signing-payload"
@@ -243,9 +286,10 @@ jobs:
         shell: bash
         env:
           PACKAGE_FILENAME: ${{ needs.package.outputs.filename }}
+          BUILDER_BINARY: ${{ inputs.builder-release != '' && format('{0}/xila-package-builder/xila-package', runner.temp) || format('{0}/package-manager/target/release/xila-package', github.workspace) }}
         run: |
           set -euo pipefail
-          builder="$GITHUB_WORKSPACE/package-manager/target/release/xila-package"
+          builder="$BUILDER_BINARY"
           "$builder" pack \
             "$RUNNER_TEMP/signing-work/xila-package-payload" \
             "$RUNNER_TEMP/signing-work/xila-package-manifest.json" \
@@ -272,6 +316,7 @@ jobs:
     needs: [package, sign]
     if: inputs.publish-release && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: "Setup | Checkout caller release tag"
         uses: actions/checkout@v7

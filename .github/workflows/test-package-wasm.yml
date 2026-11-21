@@ -6,16 +6,17 @@ on:
       - ".github/workflows/package-wasm.yml"
       - ".github/workflows/test-package-wasm.yml"
       - "tools/package_wasm.py"
+      - "tools/download_builder.py"
       - "tools/sign_with_seed.py"
       - "tests/test_sign_with_seed.py"
       - "tools/unpack_signing_input.py"
+      - "tests/test_download_builder.py"
       - "tests/test_signing_workflow.py"
       - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
       - "tests/fixtures/package-workflow-developer.json"
       - "tests/fixtures/package-workflow-shortcut.json"
       - "tests/test_package_wasm.py"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,6 +33,17 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_package_wasm.py' -v
       - name: "Test | Signing client and input safety"
         run: python3 -m unittest discover -s tests -p 'test_*sign*.py' -v
+      - name: "Test | Published builder download validation"
+        run: python3 -m unittest discover -s tests -p 'test_download_builder.py' -v
+      - name: "Test | Published builder release download"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/download_builder.py \
+            --release xila-package-builder-v0.4.0 \
+            --sha256 02905040ef0c241c0cb6b006b729a0ee255b66b7e38ff938c8c12dac5df18554 \
+            --output "$RUNNER_TEMP/release-builder-smoke/xila-package"
+          "$RUNNER_TEMP/release-builder-smoke/xila-package" --version
       - name: "Setup | Minimal valid Wasm fixture"
         run: |
           printf '\x00asm\x01\x00\x00\x00' > example.wasm
@@ -94,4 +106,61 @@ jobs:
               assert hashes["shortcut.json"]["sha256"] == hashlib.sha256(shortcut_bytes).hexdigest()
               assert hashes["shortcut.json"]["size"] == len(shortcut_bytes)
           print("Xila archive smoke test passed.")
+          PY
+  package-release:
+    needs: inputs
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package-wasm.yml
+    with:
+      wasm-artifact: reusable-smoke-wasm
+      manifest-path: tests/fixtures/package-workflow-developer.json
+      shortcut-path: tests/fixtures/package-workflow-shortcut.json
+      builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      builder-release: xila-package-builder-v0.4.0
+      builder-sha256: 02905040ef0c241c0cb6b006b729a0ee255b66b7e38ff938c8c12dac5df18554
+      artifact-name: reusable-smoke-xila-package-release
+      upload-artifact: true
+      publish-release: false
+  verify-release:
+    needs: package-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: "Setup | Download release-builder package artifact"
+        uses: actions/download-artifact@v8
+        with:
+          name: reusable-smoke-xila-package-release
+          path: out
+      - name: "Validate | Release-builder package and checksum"
+        env:
+          EXPECTED_SHA256: ${{ needs.package-release.outputs.sha256 }}
+          EXPECTED_FILENAME: ${{ needs.package-release.outputs.filename }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tarfile
+
+          filename = os.environ["EXPECTED_FILENAME"]
+          data = (pathlib.Path("out") / filename).read_bytes()
+          assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_SHA256"]
+          with tarfile.open(fileobj=__import__("io").BytesIO(data), mode="r:") as tar:
+              manifest = json.load(tar.extractfile(".xila/manifest.json"))
+              assert manifest["name"] == "community.example"
+              wasm = tar.extractfile("executables/example.wasm").read()
+              assert wasm == b"\x00asm\x01\x00\x00\x00"
+              entry = manifest["files"][0]
+              assert entry["sha256"] == hashlib.sha256(wasm).hexdigest()
+              assert entry["size"] == len(wasm)
+              shortcut_bytes = tar.extractfile("shortcut.json").read()
+              shortcut = json.loads(shortcut_bytes)
+              assert shortcut["arguments"] == ["@bundle/executables/example.wasm"]
+              hashes = {file["path"]: file for file in manifest["files"]}
+              assert "shortcut.json" in hashes
+              assert hashes["shortcut.json"]["sha256"] == hashlib.sha256(shortcut_bytes).hexdigest()
+              assert hashes["shortcut.json"]["size"] == len(shortcut_bytes)
+          print("Xila release-builder archive smoke test passed.")
           PY
