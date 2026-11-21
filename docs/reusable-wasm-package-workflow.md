@@ -45,6 +45,26 @@ For a pull request, set `publish-release: false` and grant only
 revision to an immutable Git commit, and optionally set `builder-ref` to
 that same reviewed revision rather than the default `main`.
 
+To reuse a published Linux x86_64 `xila-package` executable instead of
+installing Rust and compiling `xila-package-builder` in every `package` and
+`sign` job, set both `builder-release` (for example
+`xila-package-builder-v0.4.0`) and `builder-sha256` (the lowercase hexadecimal
+SHA-256 digest of `xila-package-x86_64-unknown-linux-gnu.tar.gz`). When set,
+both `package` and `sign` download that release archive, verify its SHA-256
+digest, check that `xila-package --version` matches the release tag, and skip
+compiling from source. When omitted, the workflow compiles
+`xila-package-builder` from `builder-ref`. Keep `builder-ref` pinned so the
+Python staging and signing helper scripts come from a reviewed commit.
+
+```yaml
+    with:
+      wasm-artifact: weather-wasm
+      manifest-path: packaging/manifest.json
+      builder-ref: <pinned-commit>
+      builder-release: xila-package-builder-v0.4.0
+      builder-sha256: 02905040ef0c241c0cb6b006b729a0ee255b66b7e38ff938c8c12dac5df18554
+```
+
 A **previous job must upload** the Wasm file using
 `actions/upload-artifact`. The reusable workflow downloads it from the
 same workflow run; ordinary files left on a different job's runner are

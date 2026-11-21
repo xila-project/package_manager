@@ -44,3 +44,26 @@ class SigningRequestContextTests(unittest.TestCase):
         ]:
             with self.subTest(event=event, ref=ref):
                 self.assertNotEqual(self.check_context(event=event, ref=ref, sign=sign, publish=publish), 0)
+
+    def test_published_builder_inputs_skip_rust_compilation_and_keep_signing_gates(self):
+        workflow = WORKFLOW.read_text()
+        self.assertIn('builder-release:', workflow)
+        self.assertIn('builder-sha256:', workflow)
+
+        _, jobs_section = workflow.split('\njobs:\n', 1)
+        package_job, remaining = jobs_section.split('\n  sign:\n', 1)
+        sign_job, _ = remaining.split('\n  publish-release:\n', 1)
+        source_condition = "if: inputs.builder-release == '' && inputs.builder-sha256 == ''"
+        release_condition = "if: inputs.builder-release != '' || inputs.builder-sha256 != ''"
+
+        for job in (package_job, sign_job):
+            self.assertIn('timeout-minutes:', job)
+            self.assertIn('permissions:\n      contents: read', job)
+            self.assertIn(source_condition, job)
+            self.assertEqual(job.count(source_condition), 2)
+            self.assertIn(release_condition, job)
+            self.assertIn('package-manager/tools/download_builder.py', job)
+            self.assertIn('BUILDER_BINARY:', job)
+
+        self.assertIn('git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main', sign_job)
+        self.assertNotIn('XILA_DEV_SIGNING_SEED_B64', package_job)

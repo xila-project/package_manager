@@ -127,6 +127,10 @@ See [verification migration notes](docs/verification-migration.md) for the cross
 
 The Cargo packages are **private to this Git workspace**: every crate sets `publish = false`. Release-plz operates in `git_only = true` mode and tracks only the native `xila-package-builder` binary. It may create a version bump pull request and a GitHub Release, but it never sends any crate to crates.io. The release workflow attaches archives of the `xila-package` executable for Linux x86_64/ARM64, macOS ARM64 and Windows x86_64, with SHA-256 checksums. Releases are prepared on `main` and occur after merging the release-plz version bump pull request.
 
+### Reusable WebAssembly packaging workflow
+
+Caller repositories can invoke [`.github/workflows/package-wasm.yml`](.github/workflows/package-wasm.yml) pinned by commit hash. By default, each `package` and `sign` job installs Rust `1.97.0` and builds `xila-package-builder` from `builder-ref` (default `main`). To skip compiling from source and reuse a published Linux x86_64 release executable, pass both `builder-release` (for example `xila-package-builder-v0.4.0`) and `builder-sha256` (the lowercase hexadecimal SHA-256 digest of `xila-package-x86_64-unknown-linux-gnu.tar.gz`). Both inputs are required together; the workflow verifies the archive digest and `xila-package --version` output before staging or signing. See [reusable WebAssembly packaging workflow](docs/reusable-wasm-package-workflow.md) for all inputs and signing guarantees.
+
 ### Bootstrap the first GitHub Release (one time)
 
 The initial `xila-package-builder` version is already `0.1.0`, so `release-plz release-pr` computes the same version and creates no version-bump PR. Its normal `release_always = false` policy then prevents `release-plz release` from releasing arbitrary commits.
