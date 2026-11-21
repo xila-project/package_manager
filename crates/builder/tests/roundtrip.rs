@@ -20,7 +20,8 @@ fn command_generates_updates_and_packs() {
                 "xila.calculator",
                 "1.0.0",
                 "wasm32-wasip1",
-                "1"
+                "--xila-version",
+                "0.1"
             ])
             .status()
             .unwrap()
@@ -54,6 +55,10 @@ fn command_generates_updates_and_packs() {
     let bytes = fs::read(&archive).unwrap();
     let contents = xila_package_reader::inspect_unsigned(&bytes).unwrap();
     assert!(contents.application.is_none());
+    assert_eq!(
+        contents.xila_version,
+        xila_package_manifest::XilaVersion::new(0, 1)
+    );
     assert!(
         Command::new(binary)
             .args([
@@ -101,6 +106,41 @@ fn command_generates_updates_and_packs() {
             .status()
             .unwrap()
             .success()
+    );
+}
+
+#[test]
+fn bundle_init_requires_a_valid_xila_version() {
+    let temporary = tempdir().unwrap();
+    let directory = temporary.path().join("source");
+    let binary = env!("CARGO_BIN_EXE_xila-package");
+    let initialize = |version_arguments: &[&str]| {
+        Command::new(binary)
+            .args([
+                "bundle",
+                "init",
+                directory.to_str().unwrap(),
+                "community.example",
+                "2.0.0",
+                "wasm32-wasip1",
+            ])
+            .args(version_arguments)
+            .output()
+            .unwrap()
+    };
+    for arguments in [&[][..], &["--xila-version", "1.3.2"][..]] {
+        let output = initialize(arguments);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--xila-version"));
+        assert!(!directory.exists());
+    }
+    let output = initialize(&["--xila-version", "1.3"]);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let manifest = fs::read(directory.join("xila-package.json")).unwrap();
+    let manifest = xila_package_manifest::decode_developer(&manifest).unwrap();
+    assert_eq!(
+        manifest.xila_version,
+        xila_package_manifest::XilaVersion::new(1, 3)
     );
 }
 
@@ -154,7 +194,8 @@ fn external_signing_authenticates_manifest_and_payload() {
         "xila.test",
         "1.0.0",
         "wasm32-wasip1",
-        "1"
+        "--xila-version",
+        "0.1"
     ]));
     assert!(args(&[
         "manifest",
@@ -335,7 +376,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         .unwrap();
         fs::write(
             temp.path().join(source).join("xila-package.json"),
-            r#"{"format_version":1,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
+            r#"{"format_version":2,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
         )
         .unwrap();
         let bundle = path(&format!("{source}.app"));
@@ -456,7 +497,7 @@ fn registry_check_validates_keys_placement_and_archives() {
     fs::write(temp.path().join("src/executables/clock.wasm"), b"clock").unwrap();
     fs::write(
         temp.path().join("src/xila-package.json"),
-        r#"{"format_version":1,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+        r#"{"format_version":2,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
     )
     .unwrap();
     assert!(

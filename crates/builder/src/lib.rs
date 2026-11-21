@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use xila_package_bundle::FileHasher;
-use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile};
+use xila_package_manifest::{Application, FORMAT_VERSION, Manifest, ManifestFile, XilaVersion};
 use xila_package_writer::SourceFile;
 
 /// Result of a command: any failure is reported as a boxed error.
@@ -31,6 +31,24 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+fn manifest_error(context: &str, error: xila_package_manifest::Error) -> io::Error {
+    match error {
+        xila_package_manifest::Error::UnsupportedVersion => {
+            invalid(&format!("{context}: unsupported format version"))
+        }
+        _ => invalid(context),
+    }
+}
+
+fn package_verification_error(error: xila_package_reader::Error) -> io::Error {
+    match error {
+        xila_package_reader::Error::UnsupportedManifestVersion => {
+            invalid("unsupported package manifest format version")
+        }
+        _ => invalid("signed package verification failed"),
+    }
 }
 
 fn hash_file(path: &Path, relative: &str) -> Result<(u64, String)> {
@@ -126,7 +144,7 @@ fn generate(
     name: &str,
     version: &str,
     target: &str,
-    minimum_xila_abi: u32,
+    xila_version: XilaVersion,
 ) -> Result<()> {
     let root = source.canonicalize()?;
     let parent = output
@@ -145,7 +163,7 @@ fn generate(
         name: name.into(),
         version: version.into(),
         target: target.into(),
-        minimum_xila_abi,
+        xila_version,
         capabilities: vec![],
         files,
         application: None,
@@ -156,8 +174,8 @@ fn generate(
 
 fn update(source: &Path, manifest_path: &Path) -> Result<()> {
     let bytes = fs::read(manifest_path)?;
-    let mut manifest =
-        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+    let mut manifest = xila_package_manifest::decode(&bytes)
+        .map_err(|error| manifest_error("invalid existing manifest", error))?;
     let root = source.canonicalize()?;
     if manifest_path.canonicalize()?.starts_with(&root) {
         return Err(invalid("manifest must reside outside the source directory").into());
@@ -170,7 +188,7 @@ fn update(source: &Path, manifest_path: &Path) -> Result<()> {
 }
 
 /// Mark an existing package as an application without duplicating its
-/// identity/version/ABI and without executing its code.
+/// identity, version or Xila requirements and without executing its code.
 fn set_application(
     manifest_path: &Path,
     entrypoint: &str,
@@ -179,8 +197,8 @@ fn set_application(
     hidden: bool,
 ) -> Result<()> {
     let bytes = fs::read(manifest_path)?;
-    let mut manifest =
-        xila_package_manifest::decode(&bytes).map_err(|_| invalid("invalid existing manifest"))?;
+    let mut manifest = xila_package_manifest::decode(&bytes)
+        .map_err(|error| manifest_error("invalid existing manifest", error))?;
     // Adding application metadata changes the exact bytes. Any detached
     // signature must be produced *after* this operation.
     manifest.application = Some(Application {
@@ -216,8 +234,8 @@ fn pack(
 ) -> Result<()> {
     let root = source.canonicalize()?;
     let raw_manifest = fs::read(manifest_path)?;
-    let manifest =
-        xila_package_manifest::decode(&raw_manifest).map_err(|_| invalid("invalid manifest"))?;
+    let manifest = xila_package_manifest::decode(&raw_manifest)
+        .map_err(|error| manifest_error("invalid manifest", error))?;
     if signature.is_some() {
         let canonical =
             xila_package_manifest::encode(&manifest).map_err(|_| invalid("invalid manifest"))?;
@@ -270,7 +288,8 @@ fn pack(
 /// Export the exact canonical manifest message for an external Ed25519 signer.
 fn manifest_signing_payload(manifest: &Path, output: &Path) -> Result<()> {
     let raw = fs::read(manifest)?;
-    let decoded = xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid manifest"))?;
+    let decoded = xila_package_manifest::decode(&raw)
+        .map_err(|error| manifest_error("invalid manifest", error))?;
     let canonical =
         xila_package_manifest::encode(&decoded).map_err(|_| invalid("invalid manifest"))?;
     if canonical.as_bytes() != raw {
@@ -294,7 +313,7 @@ fn verify_archive(archive: &Path, public_key: &Path) -> Result<()> {
     let key = xila_package_verification::PublicKey::from_bytes(&raw)
         .map_err(|_| invalid("invalid Ed25519 public key"))?;
     xila_package_reader::verify_signed(&fs::read(archive)?, &key)
-        .map_err(|_| invalid("signed package verification failed"))?;
+        .map_err(package_verification_error)?;
     Ok(())
 }
 
@@ -478,8 +497,9 @@ pub enum BundleOperation<'a> {
         version: &'a str,
         /// Target architecture (e.g. wasm32-wasip1).
         target: &'a str,
-        /// Minimum supported Xila ABI.
-        minimum_xila_abi: u32,
+        /// Minimum Xila version (major.minor).
+        #[arg(long, value_name = "major.minor")]
+        xila_version: XilaVersion,
         /// Bundle-relative executable path (default executables/main.wasm).
         #[arg(long)]
         entrypoint: Option<&'a str>,
@@ -556,12 +576,13 @@ pub enum ManifestOperation<'a> {
         version: &'a str,
         /// Target architecture.
         target: &'a str,
-        /// Minimum Xila runtime application binary interface version.
-        minimum_xila_abi: u32,
+        /// Minimum Xila version (major.minor).
+        #[arg(long, value_name = "major.minor")]
+        xila_version: XilaVersion,
     },
     /// Add application metadata to an existing manifest without code execution.
     Application {
-        /// Manifest JSON file (upgraded to v2).
+        /// Manifest JSON file to update.
         manifest: &'a str,
         /// Bundle-relative executable, or trusted preinstalled system path.
         entrypoint: &'a str,
@@ -610,14 +631,14 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
                 name,
                 version,
                 target,
-                minimum_xila_abi,
+                xila_version,
             } => generate(
                 Path::new(directory),
                 Path::new(manifest),
                 name,
                 version,
                 target,
-                minimum_xila_abi,
+                xila_version,
             ),
             ManifestOperation::SigningPayload { manifest, output } => {
                 manifest_signing_payload(Path::new(manifest), Path::new(output))
@@ -640,7 +661,7 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
                 name,
                 version,
                 target,
-                minimum_xila_abi,
+                xila_version,
                 entrypoint,
                 display_name,
                 icon,
@@ -650,7 +671,7 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
                 name,
                 version,
                 target,
-                minimum_xila_abi,
+                xila_version,
                 entrypoint,
                 display_name,
                 icon,

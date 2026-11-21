@@ -25,14 +25,14 @@ Shared Rust workspace for building, signing and validating Xila application bund
 | `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them; also a library, reused by the `xila package` subcommand of [`tools`](https://github.com/xila-project/tools) |
 | `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
 
-The **experimental v1 runtime JSON Schema** is maintained in
+The **experimental version 2 runtime JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
 For editor validation of a **generated bundle** manifest, use the following optional field:
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
-  "format_version": 1
+  "format_version": 2
 }
 ```
 
@@ -40,6 +40,12 @@ This snippet shows the schema hint only, not a complete manifest.
 `manifest generate` emits `$schema` for the legacy workflow. New `bundle init` source folders instead reference `schemas/developer-manifest.schema.json`. The schema helps developers
 and CI catch structural mistakes; it does not authenticate package content or
 grant runtime capabilities.
+
+Both manifests and registry entries declare `xila_version` as a string such as
+`"0.1"`. For Xila 0.x, the running major and minor versions must match the
+declaration. Starting at 1.0, the running major must match and the running minor
+must be at least the declared minor. Patch releases share the same compatibility.
+Format version 1 documents must be regenerated for format version 2.
 
 **Current format is experimental.** A production signing envelope, canonical schema, streaming reader and installer trust policy are not yet frozen. In particular, the reader is not a bounded-memory network-streaming installer for microcontrollers, and unsigned packages must not be trusted. Review the [container and signature design proposal](docs/package-container-proposal.md) and [format-tracking issue](https://github.com/xila-project/core/issues/402).
 
@@ -71,7 +77,7 @@ There are **two distinct manifests**:
   SHA-256), and optionally `.xila/manifest.sig` authenticating that manifest.
 
 ```sh
-cargo run -p xila-package-builder -- bundle init ./weather community.weather 1.0.0 wasm32-wasip1 1 --entrypoint executables/weather.wasm --display-name Weather --icon resources/icon.png
+cargo run -p xila-package-builder -- bundle init ./weather community.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 --entrypoint executables/weather.wasm --display-name Weather --icon resources/icon.png
 # Place the compiled executable in weather/executables/ and your assets in weather/resources/.
 cargo run -p xila-package-builder -- bundle build ./weather ./Weather.app
 cargo run -p xila-package-builder -- bundle verify ./Weather.app

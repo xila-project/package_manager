@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
-  "title": "Xila package manifest (experimental v1)",
+  "title": "Xila package manifest (experimental version 2)",
   "description": "Authoring and structural validation for the experimental .xpk manifest. Validation is not a substitute for SHA-256, publisher trust, application reference resolution, or installation policy.",
   "type": "object",
   "additionalProperties": false,
@@ -10,7 +10,7 @@
     "name",
     "version",
     "target",
-    "minimum_xila_abi",
+    "xila_version",
     "capabilities",
     "files",
     "application"
@@ -28,8 +28,8 @@
       ]
     },
     "format_version": {
-      "const": 1,
-      "description": "Experimental v1 wire format. Breaking changes may occur before the format is frozen."
+      "const": 2,
+      "description": "Experimental wire format version 2. Breaking changes may occur before the format is frozen."
     },
     "name": {
       "type": "string",
@@ -49,10 +49,10 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9_-]+$"
     },
-    "minimum_xila_abi": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 4294967295
+    "xila_version": {
+      "description": "Minimum Xila release as major.minor. Both components are decimal integers from 0 through 65535 without leading zeros.",
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(?![\\s\\S])"
     },
     "capabilities": {
       "type": "array",

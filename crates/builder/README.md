@@ -15,16 +15,17 @@ they run exactly the same code as `xila-package`.
 ### 1. Initialize the developer source directory
 
 ```sh
-xila-package bundle init ./weather community.weather 1.0.0 wasm32-wasip1 1 \
+xila-package bundle init ./weather community.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 \
   --entrypoint executables/weather.wasm \
   --display-name Weather \
   --icon resources/icon.png
 ```
 
 `init` creates `weather/xila-package.json` plus `executables/` and `resources/`.
-The developer manifest includes identity, version, ABI, capability requests
-and application metadata, **but no generated hashes or signatures**. Edit it
-directly and place the compiled executable and any resources in the source tree:
+The developer manifest includes identity, package version, minimum Xila
+version, capability requests and application metadata. The builder generates
+hashes and signatures. Edit the manifest directly and place the compiled
+executable and any resources in the source tree:
 
 ```text
 weather/
@@ -208,7 +209,8 @@ present.
 The legacy `xila-package manifest generate/update/application` and
 `xila-package pack SOURCE MANIFEST ARCHIVE [SIGNATURE]` commands remain
 available for existing scripts and the old reusable Wasm workflow; they work
-directly with the generated runtime manifest format. Prefer `bundle init`
+directly with the generated runtime manifest format. Pass `--xila-version`
+with a `major.minor` value to `manifest generate` or `bundle init`. Prefer `bundle init`
 and `bundle build` for new applications.
 
 Xila VFS operations will eventually be implemented in an app under

@@ -1,4 +1,4 @@
-"""Repository-hosted JSON Schema regression tests for experimental v1 manifests.
+"""Repository-hosted JSON Schema regression tests for experimental version 2 manifests.
 
 Requires: python -m pip install jsonschema==4.25.1
 This test checks *editor-facing* structural validation. Runtime trust, hashing,
@@ -26,7 +26,7 @@ class ManifestSchemaTests(unittest.TestCase):
 
     def test_standalone_executable_package(self):
         VALIDATOR.validate(FIXTURE)
-        self.assertEqual(FIXTURE["format_version"], 1)
+        self.assertEqual(FIXTURE["format_version"], 2)
         package = copy.deepcopy(FIXTURE)
         package["$schema"] = None
         VALIDATOR.validate(package)
@@ -60,12 +60,16 @@ class ManifestSchemaTests(unittest.TestCase):
     def test_rejects_invalid_or_unexpected_fields(self):
         invalid = copy.deepcopy(FIXTURE)
         for changes in [
-            {"format_version": 2},
+            {"format_version": 1},
             {"name": "InvalidName"},
             {"name": "../escape"},
             {"version": "foo bar"},
             {"target": "wasm/invalid"},
-            {"minimum_xila_abi": -1},
+            {"xila_version": 1},
+            {"xila_version": "0.65536"},
+            {"xila_version": "01.2"},
+            {"xila_version": "+1.2"},
+            {"xila_version": "1.2\n"},
             {"$schema": "https://example.com/untrusted.schema.json"},
             {"application": []},
             {"files": []},

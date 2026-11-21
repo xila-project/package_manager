@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod registry;
 pub mod repository;
 pub mod trust;
+mod xila_version;
 use alloc::{string::String, vec::Vec};
 pub use developer::{
     DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
@@ -34,8 +35,10 @@ pub use trust::{
     signed_message,
 };
 
+pub use xila_version::{InvalidXilaVersion, XilaVersion, compatible};
+
 /// Current experimental manifest format version.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 /// Editor-facing JSON Schema hosted in the package-manager repository.
 /// This is a tooling hint, never a package trust anchor.
 pub const SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json";
@@ -92,7 +95,8 @@ pub struct Manifest {
     pub name: String,
     pub version: String,
     pub target: String,
-    pub minimum_xila_abi: u32,
+    /// Minimum compatible Xila release.
+    pub xila_version: XilaVersion,
     pub capabilities: Vec<String>,
     pub files: Vec<ManifestFile>,
     /// `None` means a standalone executable/data package, not an application.
@@ -102,8 +106,8 @@ pub struct Manifest {
     pub metadata: Option<Metadata>,
 }
 
-/// Application-specific metadata; identity/version/ABI/capabilities remain on
-/// the parent manifest so installed bundles have only one source of truth.
+/// Application-specific metadata. Package identity, version, compatibility and
+/// capabilities are declared on the parent manifest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
     /// Bundle-relative executable, or a preinstalled system executable path.
@@ -122,7 +126,7 @@ pub struct Application {
 pub struct ManifestFile {
     pub path: String,
     pub size: u64,
-    /// Lowercase hexadecimal SHA-256 of logical bytes (no decompression in v1).
+    /// Lowercase hexadecimal SHA-256 of the payload bytes.
     pub sha256: String,
 }
 
@@ -269,13 +273,32 @@ pub fn validate(manifest: &Manifest) -> Result<(), Error> {
 
 /// Parse bounded Miniserde JSON using `alloc`, then validate its structure.
 pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
+    let value = decode_versioned(bytes, FORMAT_VERSION)?;
+    validate(&value)?;
+    Ok(value)
+}
+
+fn decode_versioned<Document: Deserialize>(
+    bytes: &[u8],
+    expected_version: u32,
+) -> Result<Document, Error> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let value: Manifest = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
-    validate(&value)?;
-    Ok(value)
+    miniserde::json::from_str(source).map_err(|_| {
+        // Older documents can lack fields required by the current format.
+        // Read only the version when the full document cannot be decoded.
+        #[derive(Deserialize)]
+        struct FormatVersion {
+            format_version: u32,
+        }
+
+        match miniserde::json::from_str::<FormatVersion>(source) {
+            Ok(version) if version.format_version != expected_version => Error::UnsupportedVersion,
+            _ => Error::InvalidJson,
+        }
+    })
 }
 
 /// Serialize a validated manifest to bounded JSON for use inside TAR.
@@ -334,7 +357,7 @@ mod tests {
             name: "xila.calculator".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             files: vec![ManifestFile {
                 path: "executables/calculator.wasm".to_string(),
@@ -354,8 +377,20 @@ mod tests {
     fn round_trip() {
         let m = example();
         let json = encode(&m).unwrap();
+        assert!(json.contains(r#""xila_version":"0.1""#));
         assert_eq!(decode(json.as_bytes()).unwrap(), m);
     }
+    #[test]
+    fn rejects_legacy_documents_with_an_unsupported_format_error() {
+        let legacy = br#"{"format_version":1,"name":"xila.calculator","version":"1.0.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"files":[{"path":"calculator.wasm","size":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+        assert_eq!(decode(legacy), Err(Error::UnsupportedVersion));
+        assert_eq!(decode_developer(legacy), Err(Error::UnsupportedVersion));
+        assert_eq!(
+            decode_registry_entry(legacy),
+            Err(Error::UnsupportedVersion)
+        );
+    }
+
     #[test]
     fn validates_the_schema_editor_hint() {
         let mut m = example();

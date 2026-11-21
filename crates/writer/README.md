@@ -8,7 +8,7 @@ File sizes and SHA-256 hashes are checked before writing.
 ## Example
 
 ```rust
-use xila_package_manifest::{Manifest, ManifestFile, FORMAT_VERSION};
+use xila_package_manifest::{Manifest, ManifestFile, FORMAT_VERSION, XilaVersion};
 use xila_package_writer::{SourceFile, write_package};
 
 let manifest = Manifest {
@@ -17,7 +17,7 @@ let manifest = Manifest {
     name: "community.example".into(),
     version: "1.0.0".into(),
     target: "wasm32-wasip1".into(),
-    minimum_xila_abi: 1,
+    xila_version: XilaVersion::new(0, 1),
     capabilities: vec![],
     files: vec![ManifestFile {
         path: "executables/example.wasm".into(),

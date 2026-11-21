@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json",
-  "title": "Xila package registry entry (experimental v1)",
+  "title": "Xila package registry entry (experimental version 2)",
   "description": "One released package version: where its signed .xpk lives and which developer key published it. Generated from the archive by `xila-package registry entry`, never written by hand; identity fields must equal the archive's signed manifest.",
   "type": "object",
   "additionalProperties": false,
@@ -10,7 +10,7 @@
     "name",
     "version",
     "target",
-    "minimum_xila_abi",
+    "xila_version",
     "capabilities",
     "display_name",
     "metadata",
@@ -30,8 +30,8 @@
       ]
     },
     "format_version": {
-      "const": 1,
-      "description": "Experimental v1 registry entry format."
+      "const": 2,
+      "description": "Experimental registry entry format version 2."
     },
     "name": {
       "type": "string",
@@ -51,10 +51,10 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9_-]+$"
     },
-    "minimum_xila_abi": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 4294967295
+    "xila_version": {
+      "description": "Minimum Xila release as major.minor. Both components are decimal integers from 0 through 65535 without leading zeros.",
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(?![\\s\\S])"
     },
     "capabilities": {
       "type": "array",

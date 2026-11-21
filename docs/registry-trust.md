@@ -2,7 +2,8 @@
 
 How a device decides that registry metadata is authentic and current. Package
 archives keep their own developer signature; this document covers what sits
-above it. Formats are **experimental v1**.
+above it. Registry entries use experimental format version 2. The root and
+index use format version 1.
 
 ## Keys
 
@@ -90,7 +91,8 @@ A device can use several registries. Each configured repository
   `xila-package registry fingerprint root.pub` prints the expected value.
 - **Resolving** a package: `candidates` lists the entry paths to try (an exact
   version, or every listed semantic version newest first), and `compatible`
-  keeps the first entry matching the device's target and ABI. A name found in
+  keeps the first entry compatible with the device's target and running Xila
+  version. A name found in
   several repositories is ambiguous: the user must choose the repository.
 - **Origin**: each installed package records its repository and archive hash
   ([package-origin.schema.json](../schemas/package-origin.schema.json)). Updates

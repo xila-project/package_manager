@@ -14,7 +14,7 @@ use core::fmt;
 
 use xila_package_manifest::{
     self as manifest, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, Index,
-    NamedKey, ROOT_DOMAIN, RegistryEntry, Root, decode_developer_key, decode_index,
+    NamedKey, ROOT_DOMAIN, RegistryEntry, Root, XilaVersion, decode_developer_key, decode_index,
     decode_registry_entry, decode_root, signed_message,
 };
 use xila_package_verification::{PublicKey, Sha256Verifier};
@@ -246,9 +246,9 @@ pub fn fingerprint(public_key: &[u8; 32]) -> String {
 }
 
 /// Whether an entry can be installed on a device running `target` with
-/// Xila ABI `abi`.
-pub fn compatible(entry: &RegistryEntry, target: &str, abi: u32) -> bool {
-    entry.target == target && entry.minimum_xila_abi <= abi
+/// running Xila release.
+pub fn compatible(entry: &RegistryEntry, target: &str, running: XilaVersion) -> bool {
+    entry.target == target && manifest::compatible(entry.xila_version, running)
 }
 
 /// Registry-relative paths of the entries to try for `name`: the exact
@@ -341,11 +341,11 @@ mod tests {
     fn entry() -> RegistryEntry {
         RegistryEntry {
             schema: None,
-            format_version: 1,
+            format_version: manifest::REGISTRY_FORMAT_VERSION,
             name: "xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,
@@ -555,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn candidates_and_compatibility() {
+    fn candidates_are_ordered_and_can_select_a_version() {
         let file = |path: &str| IndexFile {
             path: path.into(),
             sha256: "a".repeat(64),
@@ -587,11 +587,20 @@ mod tests {
             candidates(&index, "xila.clock", Some("9.9.9")).err(),
             Some(Error::NotListed)
         );
-        let entry = entry();
-        assert!(compatible(&entry, "wasm32-wasip1", 1));
-        assert!(compatible(&entry, "wasm32-wasip1", 2));
-        assert!(!compatible(&entry, "wasm32-wasip1", 0));
-        assert!(!compatible(&entry, "thumbv7em-none-eabi", 1));
+    }
+
+    #[test]
+    fn entry_compatibility_checks_target_and_running_xila_version() {
+        let mut entry = entry();
+        assert!(compatible(&entry, "wasm32-wasip1", XilaVersion::new(0, 1)));
+        assert!(!compatible(&entry, "wasm32-wasip1", XilaVersion::new(0, 2)));
+        assert!(!compatible(
+            &entry,
+            "thumbv7em-none-eabi",
+            XilaVersion::new(0, 1)
+        ));
+        entry.xila_version = XilaVersion::new(1, 3);
+        assert!(compatible(&entry, "wasm32-wasip1", XilaVersion::new(1, 9)));
     }
 
     #[test]

@@ -83,7 +83,7 @@ mod tests {
             name: "xila.calculator".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
-            minimum_xila_abi: 1,
+            xila_version: xila_package_manifest::XilaVersion::new(0, 1),
             capabilities: vec![],
             files: vec![ManifestFile {
                 path: "executables/calculator.wasm".into(),

@@ -177,7 +177,7 @@ pub fn verify_signature(
 mod tests {
     use super::*;
     use alloc::{string::ToString, vec};
-    use xila_package_manifest::{Application, FORMAT_VERSION, SCHEMA_URL};
+    use xila_package_manifest::{Application, FORMAT_VERSION, SCHEMA_URL, XilaVersion};
 
     fn authoring() -> DeveloperManifest {
         DeveloperManifest {
@@ -186,7 +186,7 @@ mod tests {
             name: "community.example".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             application: Some(Application {
                 entrypoint: "executables/app.wasm".to_string(),

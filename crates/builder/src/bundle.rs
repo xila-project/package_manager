@@ -14,11 +14,14 @@ use ed25519_dalek::Signer;
 use xila_package_bundle::{Inventory, verify_signature};
 use xila_package_manifest::{
     Application, DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest,
-    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, decode_developer, encode_developer,
+    FORMAT_VERSION, MANIFEST_PATH, Manifest, SIGNATURE_PATH, XilaVersion, decode_developer,
+    encode_developer,
 };
 use xila_package_verification::PublicKey;
 
-use crate::{InventoryMode, Result, collect_files, hash_file, invalid, pack, safe_file};
+use crate::{
+    InventoryMode, Result, collect_files, hash_file, invalid, manifest_error, pack, safe_file,
+};
 
 fn check_regular_file(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
@@ -72,8 +75,8 @@ fn temporary_directory(destination: &Path) -> Result<PathBuf> {
 fn read_runtime_manifest(path: &Path) -> Result<(Manifest, Vec<u8>)> {
     check_regular_file(path)?;
     let raw = fs::read(path)?;
-    let manifest =
-        xila_package_manifest::decode(&raw).map_err(|_| invalid("invalid runtime manifest"))?;
+    let manifest = xila_package_manifest::decode(&raw)
+        .map_err(|error| manifest_error("invalid runtime manifest", error))?;
     let canonical = xila_package_manifest::encode(&manifest)
         .map_err(|_| invalid("invalid runtime manifest"))?;
     if canonical.as_bytes() != raw {
@@ -94,7 +97,7 @@ pub struct InitOptions<'a> {
     pub name: &'a str,
     pub version: &'a str,
     pub target: &'a str,
-    pub minimum_xila_abi: u32,
+    pub xila_version: XilaVersion,
     pub entrypoint: Option<&'a str>,
     pub display_name: Option<&'a str>,
     pub icon: Option<&'a str>,
@@ -107,7 +110,7 @@ pub fn init(options: InitOptions<'_>) -> Result<()> {
         name,
         version,
         target,
-        minimum_xila_abi,
+        xila_version,
         entrypoint,
         display_name,
         icon,
@@ -123,7 +126,7 @@ pub fn init(options: InitOptions<'_>) -> Result<()> {
         name: name.into(),
         version: version.into(),
         target: target.into(),
-        minimum_xila_abi,
+        xila_version,
         capabilities: vec![],
         application: if standalone {
             None
@@ -223,7 +226,7 @@ pub fn build(source: &Path, output: &Path, signing_key: Option<&Path>) -> Result
     let developer_path = source.join(DEVELOPER_MANIFEST_FILENAME);
     check_regular_file(&developer_path)?;
     let config = decode_developer(&fs::read(&developer_path)?)
-        .map_err(|_| invalid("invalid developer manifest"))?;
+        .map_err(|error| manifest_error("invalid developer manifest", error))?;
 
     let mut files = Vec::new();
     collect_files(&source, &source, &mut files, InventoryMode::Developer)?;
@@ -377,7 +380,7 @@ mod tests {
             name: "community.weather",
             version: "1.0.0",
             target: "wasm32-wasip1",
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             entrypoint: Some("executables/weather.wasm"),
             display_name: Some("Weather"),
             icon: Some("resources/icon.png"),
@@ -402,11 +405,13 @@ mod tests {
         let authored =
             decode_developer(&fs::read(source.join(DEVELOPER_MANIFEST_FILENAME)).unwrap()).unwrap();
         assert_eq!(authored.name, "community.weather");
+        assert_eq!(authored.xila_version, XilaVersion::new(0, 1));
         build(&source, &bundle, None).unwrap();
         assert!(!bundle.join(DEVELOPER_MANIFEST_FILENAME).exists());
         assert!(bundle.join(MANIFEST_PATH).exists());
         assert!(!bundle.join(SIGNATURE_PATH).exists());
         let runtime = decode(&fs::read(bundle.join(MANIFEST_PATH)).unwrap()).unwrap();
+        assert_eq!(runtime.xila_version, authored.xila_version);
         assert_eq!(runtime.files.len(), 3);
         assert!(
             runtime
@@ -429,7 +434,7 @@ mod tests {
                 name: "community.weather",
                 version: "1.0.0",
                 target: "wasm32-wasip1",
-                minimum_xila_abi: 1,
+                xila_version: XilaVersion::new(0, 1),
                 entrypoint: None,
                 display_name: None,
                 icon: None,
@@ -555,7 +560,7 @@ mod tests {
             name: "xila.tool",
             version: "1.0.0",
             target: "wasm32-wasip1",
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             entrypoint: None,
             display_name: None,
             icon: None,

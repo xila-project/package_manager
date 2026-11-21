@@ -9,12 +9,15 @@
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
-use crate::{Error, MAX_MANIFEST_BYTES, Manifest, Metadata, metadata::is_https_url};
+use crate::{
+    Error, MAX_MANIFEST_BYTES, Manifest, Metadata, XilaVersion, decode_versioned,
+    metadata::is_https_url,
+};
 
 /// Editor-facing JSON Schema; a tooling hint, never a trust anchor.
 pub const REGISTRY_ENTRY_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json";
 /// Current experimental registry entry format version.
-pub const REGISTRY_FORMAT_VERSION: u32 = 1;
+pub const REGISTRY_FORMAT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Archive {
@@ -34,7 +37,8 @@ pub struct RegistryEntry {
     pub name: String,
     pub version: String,
     pub target: String,
-    pub minimum_xila_abi: u32,
+    /// Minimum compatible Xila release, copied from the signed manifest.
+    pub xila_version: XilaVersion,
     pub capabilities: Vec<String>,
     /// Launcher name when the package is an application.
     pub display_name: Option<String>,
@@ -75,7 +79,7 @@ impl RegistryEntry {
             name: manifest.name.clone(),
             version: manifest.version.clone(),
             target: manifest.target.clone(),
-            minimum_xila_abi: manifest.minimum_xila_abi,
+            xila_version: manifest.xila_version,
             capabilities: manifest.capabilities.clone(),
             display_name: manifest
                 .application
@@ -131,7 +135,7 @@ impl RegistryEntry {
         if self.name != manifest.name
             || self.version != manifest.version
             || self.target != manifest.target
-            || self.minimum_xila_abi != manifest.minimum_xila_abi
+            || self.xila_version != manifest.xila_version
             || self.capabilities != manifest.capabilities
             || self.display_name.as_ref() != display_name
             || self.metadata != manifest.metadata
@@ -143,11 +147,7 @@ impl RegistryEntry {
 }
 
 pub fn decode_registry_entry(bytes: &[u8]) -> Result<RegistryEntry, Error> {
-    if bytes.len() > MAX_MANIFEST_BYTES {
-        return Err(Error::TooLarge);
-    }
-    let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
-    let entry: RegistryEntry = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
+    let entry: RegistryEntry = decode_versioned(bytes, REGISTRY_FORMAT_VERSION)?;
     entry.validate()?;
     Ok(entry)
 }
@@ -173,7 +173,7 @@ mod tests {
             name: "xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
-            minimum_xila_abi: 1,
+            xila_version: XilaVersion::new(0, 1),
             capabilities: Vec::new(),
             files: alloc::vec![ManifestFile {
                 path: "executables/clock.wasm".into(),
@@ -208,8 +208,9 @@ mod tests {
         let manifest = manifest();
         let entry = RegistryEntry::from_manifest(&manifest, "xila-project", archive()).unwrap();
         assert_eq!(entry.display_name.as_deref(), Some("Clock"));
-        let decoded =
-            decode_registry_entry(encode_registry_entry(&entry).unwrap().as_bytes()).unwrap();
+        let encoded = encode_registry_entry(&entry).unwrap();
+        assert!(encoded.contains(r#""xila_version":"0.1""#));
+        let decoded = decode_registry_entry(encoded.as_bytes()).unwrap();
         assert_eq!(decoded, entry);
         assert!(decoded.check_manifest(&manifest).is_ok());
     }
@@ -219,6 +220,9 @@ mod tests {
         let entry = RegistryEntry::from_manifest(&manifest(), "xila-project", archive()).unwrap();
         let mut other = manifest();
         other.version = "0.2.0".into();
+        assert_eq!(entry.check_manifest(&other), Err(Error::RegistryMismatch));
+        let mut other = manifest();
+        other.xila_version = XilaVersion::new(0, 2);
         assert_eq!(entry.check_manifest(&other), Err(Error::RegistryMismatch));
         let mut other = manifest();
         other.metadata.as_mut().unwrap().license = "GPL-3.0".into();
