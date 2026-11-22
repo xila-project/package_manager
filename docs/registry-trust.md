@@ -89,6 +89,34 @@ A developer key lists the kinds it may publish in `kinds` (`"wasm"`,
 keep their meaning and native publication always needs an explicit grant. A key
 that is not authorized for the kind of an entry's target fails `publisher_key`,
 `xila-package registry check` and `xila-package registry verify-signed`.
+## Installation planning
+
+`xila_package_manager::planner` (feature `planner`, `no_std + alloc`) chooses
+what to install. `IndexCatalog` lists the versions of a package from the
+authenticated index, newest first, and fetches only the entries it considers,
+running steps 3's `verify_entry` and `check_listed` on each. `plan` then:
+
+- keeps an installed version that satisfies every requirement, unless the
+  package was requested with `Options::upgrade`;
+- otherwise selects the first version that satisfies every requirement known
+  so far and is `compatible` with the device target and running Xila release;
+- never revisits a selection: a later requirement that it does not satisfy is
+  an `Error::Conflict`, as is a kept package whose dependency would change to
+  a version it does not accept;
+- rejects dependency cycles, downgrades (unless allowed), entries for another
+  package or version than the one asked for, and work beyond `Limits`
+  (packages, fetched entries, dependencies per package, depth).
+
+The result lists `Install`, `Upgrade` and `Downgrade` steps, each package after
+its dependencies, with the authenticated entry. For each step the caller
+downloads the archive, checks its size and SHA-256, verifies it with
+`publisher_key` (step 4) and hands it to the local installer, which owns every
+change to the device.
+
+Dependency requirements are written `*`, `=VERSION`, `>=VERSION` or
+`^VERSION`. Registry entries and manifests do not declare dependencies yet, so
+`IndexCatalog` candidates currently have none; the planner already handles
+them for other catalogs, such as `MemoryCatalog`.
 
 ## Several repositories
 
