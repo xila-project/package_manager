@@ -120,7 +120,7 @@ fn bundle_init_requires_a_valid_xila_version() {
                 "bundle",
                 "init",
                 directory.to_str().unwrap(),
-                "org.example.example",
+                "example.xila.example",
                 "2.0.0",
                 "wasm32-wasip1",
             ])
@@ -490,7 +490,7 @@ fn registry_check_validates_keys_placement_and_archives() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
-    let url = "https://example.com/releases/xila.clock-0.1.0-wasm32-wasip1.xpk";
+    let url = "https://xila.example/releases/xila.clock-0.1.0-wasm32-wasip1.xpk";
 
     assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
     fs::create_dir_all(temp.path().join("src/executables")).unwrap();
@@ -657,15 +657,15 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
     .unwrap();
     fs::create_dir(temp.path().join("registry/namespaces")).unwrap();
     fs::write(
-        path("registry/namespaces/org.example.json"),
-        r#"{"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["tester"]}"#,
+        path("registry/namespaces/example.xila.json"),
+        r#"{"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["tester"]}"#,
     )
     .unwrap();
     fs::create_dir_all(temp.path().join("source/executables")).unwrap();
     fs::write(temp.path().join("source/executables/clock.wasm"), b"clock").unwrap();
     fs::write(
         path("source/xila-package.json"),
-        r#"{"format_version":2,"name":"org.example.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+        r#"{"format_version":2,"name":"example.xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
     )
     .unwrap();
     assert!(
@@ -680,15 +680,15 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         .0
     );
     assert!(run(&["bundle", "archive", &path("Clock.app"), &path("Clock.xpk")]).0);
-    fs::create_dir_all(temp.path().join("registry/packages/org/example/clock")).unwrap();
+    fs::create_dir_all(temp.path().join("registry/packages/example/xila/clock")).unwrap();
     let (success, _, stderr) = run(&[
         "registry",
         "entry",
         &path("Clock.xpk"),
         &path("dev.pub"),
         "tester",
-        "https://example.com/releases/Clock.xpk",
-        &path("registry/packages/org/example/clock/0.1.0.json"),
+        "https://xila.example/releases/Clock.xpk",
+        &path("registry/packages/example/xila/clock/0.1.0.json"),
     ]);
     assert!(success, "{stderr}");
 

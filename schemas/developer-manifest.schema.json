@@ -34,7 +34,7 @@
       "type": "string",
       "maxLength": 96,
       "pattern": "^(?:[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?){2,}|xila\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?)$",
-      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null. Reverse-DNS with at least three lowercase components (org.example.weather); the namespace is every component but the last. Legacy rule until the migration of Xila's own packages: two-component xila.<name> identifiers stay valid."
+      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null. Reverse-DNS with at least three lowercase components (example.xila.weather); the namespace is every component but the last. Legacy rule until the migration of Xila's own packages: two-component xila.<name> identifiers stay valid."
     },
     "version": {
       "type": "string",

@@ -24,29 +24,29 @@ IDENTIFIER_SCHEMAS = [
 ]
 
 VALID_IDENTIFIERS = [
-    "org.example.weather",
+    "example.xila.weather",
     "io.github.alice.weather",
-    "org.example.tools.clock",
-    "org.example.pixel-painter",
-    "org.example.pixel_painter",
+    "example.xila.tools.clock",
+    "example.xila.pixel-painter",
+    "example.xila.pixel_painter",
     # Legacy rule, until Xila's own packages are migrated.
     "xila.calculator",
     "xila.pixel-painter",
 ]
 INVALID_IDENTIFIERS = [
     "weather",
-    "org.example",
+    "example.xila",
     "community.weather",
     "xilax.clock",
-    "Org.example.weather",
-    "org.example.Weather",
-    "org..weather",
-    "org.example.weather.",
-    "org.example.-weather",
-    "org.example.weather_",
-    "org.example.wea/ther",
+    "Example.xila.weather",
+    "example.xila.Weather",
+    "example..weather",
+    "example.xila.weather.",
+    "example.xila.-weather",
+    "example.xila.weather_",
+    "example.xila.wea/ther",
     "xila.Clock",
-    "org.example." + "a" * 96,
+    "example.xila." + "a" * 96,
 ]
 
 
@@ -56,7 +56,7 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
         self.assertEqual(SCHEMA["$id"], NAMESPACE["$schema"])
         VALIDATOR.validate(NAMESPACE)
         for namespace, kind, name in [
-            ("org.example.tools", "domain", "tools.example.org"),
+            ("example.xila.tools", "domain", "tools.xila.example"),
             ("io.github.alice", "github", "alice"),
             ("io.gitlab.alice_b", "gitlab", "alice_b"),
         ]:
@@ -71,8 +71,8 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
             lambda n: n.update(format_version=2),
             lambda n: n.update(namespace="org"),
             lambda n: n.update(namespace="xila"),
-            lambda n: n.update(namespace="Org.Example"),
-            lambda n: n.update(namespace="org.example."),
+            lambda n: n.update(namespace="Example.Xila"),
+            lambda n: n.update(namespace="example.xila."),
             lambda n: n.update(developer_keys=[]),
             lambda n: n.update(developer_keys=["alice", "alice"]),
             lambda n: n.update(developer_keys=["Alice"]),
@@ -84,10 +84,10 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
             lambda n: n.update(namespace="io.github", owner={"kind": "domain", "name": "github.io"}),
             lambda n: n.update(namespace="io.gitlab", owner={"kind": "domain", "name": "gitlab.io"}),
             lambda n: n.update(namespace="io.github.alice", owner={"kind": "domain", "name": "alice.github.io"}),
-            lambda n: n.update(namespace="org.example", owner={"kind": "github", "name": "alice"}),
+            lambda n: n.update(namespace="example.xila", owner={"kind": "github", "name": "alice"}),
             lambda n: n.update(namespace="io.github.alice.tools", owner={"kind": "github", "name": "alice"}),
             lambda n: n.update(namespace="io.github.alice_b", owner={"kind": "github", "name": "alice_b"}),
-            lambda n: n.update(namespace="org.my_site", owner={"kind": "domain", "name": "my_site.org"}),
+            lambda n: n.update(namespace="example.my_site", owner={"kind": "domain", "name": "my_site.example"}),
         ]:
             broken = copy.deepcopy(NAMESPACE)
             change(broken)

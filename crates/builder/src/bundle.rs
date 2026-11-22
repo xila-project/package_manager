@@ -377,7 +377,7 @@ mod tests {
         let source = root.join("source");
         init(InitOptions {
             directory: &source,
-            name: "org.example.weather",
+            name: "example.xila.weather",
             version: "1.0.0",
             target: "wasm32-wasip1",
             xila_version: XilaVersion::new(0, 1),
@@ -404,7 +404,7 @@ mod tests {
         let (source, bundle) = setup(temp.path());
         let authored =
             decode_developer(&fs::read(source.join(DEVELOPER_MANIFEST_FILENAME)).unwrap()).unwrap();
-        assert_eq!(authored.name, "org.example.weather");
+        assert_eq!(authored.name, "example.xila.weather");
         assert_eq!(authored.xila_version, XilaVersion::new(0, 1));
         build(&source, &bundle, None).unwrap();
         assert!(!bundle.join(DEVELOPER_MANIFEST_FILENAME).exists());
@@ -431,7 +431,7 @@ mod tests {
         assert!(
             init(InitOptions {
                 directory: &source,
-                name: "org.example.weather",
+                name: "example.xila.weather",
                 version: "1.0.0",
                 target: "wasm32-wasip1",
                 xila_version: XilaVersion::new(0, 1),

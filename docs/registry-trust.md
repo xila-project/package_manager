@@ -89,7 +89,7 @@ part of step 3: the per-file signatures still prove origin, but not freshness.
 ## Identifiers and namespaces
 
 A package identifier is reverse-DNS with at least three components, such as
-`org.example.weather` or `io.github.alice.weather`. Components use lowercase
+`example.xila.weather` or `io.github.alice.weather`. Components use lowercase
 letters, digits, `-` and `_`, start and end with a letter or digit, and are at
 most 63 bytes; the identifier is at most 96 bytes. Mixed case is not allowed:
 identifiers become paths, and FAT file systems ignore case. The namespace is
@@ -97,16 +97,16 @@ every component except the last.
 
 A namespace file `namespaces/<namespace>.json` records who owns a namespace
 and which developer keys may publish in it. A listed key may publish every
-identifier that starts with the namespace's components: `org.example` covers
-`org.example.weather` and `org.example.tools.clock`, but not
-`org.examples.weather`. A namespace has at least two components, so no file
+identifier that starts with the namespace's components: `example.xila` covers
+`example.xila.weather` and `example.xila.tools.clock`, but not
+`example.xilas.weather`. A namespace has at least two components, so no file
 can claim a whole top-level domain. Namespace files may not overlap (one
 owner per identifier) and may list only existing developer keys. Adding a
 developer or rotating a key therefore edits the namespace file only, never an
 identifier or a key file.
 
 The `owner` must match the namespace: a `domain` owner is the namespace
-reversed (`example.org` owns `org.example`, and may not contain `_`), and a
+reversed (`xila.example` owns `example.xila`, and may not contain `_`), and a
 `github` or `gitlab` owner is the account of an `io.github.<account>` or
 `io.gitlab.<account>` namespace. Registry CI proves the ownership, a domain by
 a token file under `https://<domain>/.well-known/` and an account by the

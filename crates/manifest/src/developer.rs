@@ -136,7 +136,7 @@ mod tests {
         DeveloperManifest {
             schema: Some(DEVELOPER_SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "org.example.weather".to_string(),
+            name: "example.xila.weather".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
             xila_version: XilaVersion::new(0, 1),
@@ -195,7 +195,7 @@ mod tests {
         source.name = "Invalid".into();
         assert_eq!(source.validate(), Err(Error::InvalidIdentifier));
         source = example();
-        source.schema = Some("https://example.com/schema".into());
+        source.schema = Some("https://xila.example/schema".into());
         assert_eq!(source.validate(), Err(Error::InvalidSchema));
         source = example();
         source.target = "thumbv8m..main-none-eabi".into();

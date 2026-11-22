@@ -425,10 +425,10 @@ mod tests {
             file("packages/xila/clockwork/1.0.0-rc.1.json"),
             file("packages/xila/nightly/latest.json"),
             file("packages/xila/notes/0.1.0.json.sig"),
-            file("packages/org/example/weather/2.0.0.json"),
-            file("packages/org/example.weather/1.0.0.json"),
-            file("packages/org//weather/1.0.0.json"),
-            file("packages/org/Example/weather/1.0.0.json"),
+            file("packages/example/xila/weather/2.0.0.json"),
+            file("packages/example/xila.weather/1.0.0.json"),
+            file("packages/example//weather/1.0.0.json"),
+            file("packages/example/Xila/weather/1.0.0.json"),
             file("packages/community/weather/2.0.0.json"),
         ];
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(
             index_packages(&index),
             [
-                "org.example.weather",
+                "example.xila.weather",
                 "xila.clock",
                 "xila.clock.extra",
                 "xila.clockwork"

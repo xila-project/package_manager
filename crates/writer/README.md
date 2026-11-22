@@ -14,7 +14,7 @@ use xila_package_writer::{SourceFile, write_package};
 let manifest = Manifest {
     schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
-    name: "org.example.example".into(),
+    name: "example.xila.example".into(),
     version: "1.0.0".into(),
     target: "wasm32-wasip1".into(),
     xila_version: XilaVersion::new(0, 1),

@@ -41,7 +41,7 @@ class DeveloperKeySchemaTests(unittest.TestCase):
             ("namespaces", []),
             ("namespaces", ["Xila"]),
             # Reverse-DNS namespaces are granted by namespace files only.
-            ("namespaces", ["org.example"]),
+            ("namespaces", ["example.xila"]),
             ("namespaces", ["community"]),
             ("namespaces", ["xila", "xila"]),
             ("openssh", "ssh-rsa AAAA"),

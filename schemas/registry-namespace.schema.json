@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-namespace.schema.json",
   "title": "Xila registry namespace (experimental v1)",
-  "description": "namespaces/<namespace>.json in xila-project/registry, signed (.sig) by a repository key. Records the owner of a reverse-DNS namespace and the developer keys allowed to publish in it: a listed key may publish every identifier that starts with the namespace's components (org.example covers org.example.weather and org.example.tools.clock). Namespace files may not overlap, and every listed key must exist in keys/developers. The owner must match the namespace: a domain is the namespace reversed (org.example is owned by example.org), and io.github.<account> or io.gitlab.<account> is owned by that account. Registry CI proves the ownership: a domain by a token file under https://<domain>/.well-known/, an account by the account itself.",
+  "description": "namespaces/<namespace>.json in xila-project/registry, signed (.sig) by a repository key. Records the owner of a reverse-DNS namespace and the developer keys allowed to publish in it: a listed key may publish every identifier that starts with the namespace's components (example.xila covers example.xila.weather and example.xila.tools.clock). Namespace files may not overlap, and every listed key must exist in keys/developers. The owner must match the namespace: a domain is the namespace reversed (example.xila is owned by xila.example), and io.github.<account> or io.gitlab.<account> is owned by that account. Registry CI proves the ownership: a domain by a token file under https://<domain>/.well-known/, an account by the account itself.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -53,7 +53,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 94,
-          "description": "The domain (example.org for org.example) or the account (alice for io.github.alice)."
+          "description": "The domain (xila.example for example.xila) or the account (alice for io.github.alice)."
         }
       }
     },

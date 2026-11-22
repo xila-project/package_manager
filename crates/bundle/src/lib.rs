@@ -169,7 +169,7 @@ mod tests {
         DeveloperManifest {
             schema: None,
             format_version: FORMAT_VERSION,
-            name: "org.example.example".to_string(),
+            name: "example.xila.example".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
             xila_version: XilaVersion::new(0, 1),

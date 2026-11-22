@@ -1,7 +1,7 @@
 //! Package identifiers and the namespaces that own them.
 //!
 //! Identifiers are reverse-DNS names with at least three lowercase
-//! components, such as `org.example.weather` or `io.github.alice.weather`. The
+//! components, such as `example.xila.weather` or `io.github.alice.weather`. The
 //! namespace is every component except the last one. Identifiers become paths
 //! on devices, and FAT file systems ignore case, so only lowercase letters,
 //! digits, `-` and `_` are allowed.
@@ -10,8 +10,8 @@
 //! registry, signed by the repository key. The file names the owner, whose
 //! ownership registry CI proves, and lists the developer keys allowed to
 //! publish in it. A listed key may publish every identifier that starts with
-//! the namespace (`org.example` covers `org.example.weather` and
-//! `org.example.tools.clock`), so adding a developer or rotating a key changes
+//! the namespace (`example.xila` covers `example.xila.weather` and
+//! `example.xila.tools.clock`), so adding a developer or rotating a key changes
 //! neither the identifiers nor the key files.
 //!
 //! Legacy rule, until the one-time migration of Xila's own packages: the
@@ -38,7 +38,7 @@ pub const NAMESPACES_DIRECTORY: &str = "namespaces";
 pub const LEGACY_NAMESPACE: &str = "xila";
 /// Minimum number of components of a reverse-DNS identifier.
 pub const MINIMUM_IDENTIFIER_COMPONENTS: usize = 3;
-/// Minimum number of components of a namespace (`org.example`).
+/// Minimum number of components of a namespace (`example.xila`).
 pub const MINIMUM_NAMESPACE_COMPONENTS: usize = MINIMUM_IDENTIFIER_COMPONENTS - 1;
 /// Maximum identifier and namespace length in bytes.
 pub const MAX_IDENTIFIER_LENGTH: usize = 96;
@@ -98,7 +98,7 @@ pub fn identifier_namespace(identifier: &str) -> Option<&str> {
 
 /// Whether `namespace` covers `identifier`: the identifier is valid and starts
 /// with the namespace's components. Prefixes only match whole components, so
-/// `org.example` covers neither `org.examples.weather` nor itself.
+/// `example.xila` covers neither `example.xilas.weather` nor itself.
 pub fn namespace_covers(namespace: &str, identifier: &str) -> bool {
     valid_namespace(namespace)
         && valid_identifier(identifier)
@@ -147,7 +147,7 @@ pub fn namespace_paths(identifier: &str) -> Vec<String> {
 pub struct NamespaceOwner {
     /// `domain`, `github` or `gitlab`.
     pub kind: String,
-    /// The domain (`example.org` for `org.example`) or the account name
+    /// The domain (`xila.example` for `example.xila`) or the account name
     /// (`alice` for `io.github.alice`).
     pub name: String,
 }
@@ -184,7 +184,7 @@ pub struct Namespace {
     #[serde(rename = "$schema")]
     pub schema: Option<String>,
     pub format_version: u32,
-    /// Reverse-DNS namespace, such as `org.example`; also the file name.
+    /// Reverse-DNS namespace, such as `example.xila`; also the file name.
     pub namespace: String,
     pub owner: NamespaceOwner,
     /// Identifiers of the developer keys (`keys/developers/<id>.json`) allowed
@@ -243,10 +243,10 @@ mod tests {
         Namespace {
             schema: Some(NAMESPACE_SCHEMA_URL.into()),
             format_version: NAMESPACE_FORMAT_VERSION,
-            namespace: "org.example".into(),
+            namespace: "example.xila".into(),
             owner: NamespaceOwner {
                 kind: DOMAIN_OWNER.into(),
-                name: "example.org".into(),
+                name: "xila.example".into(),
             },
             developer_keys: vec!["example-release".into(), "alice".into()],
         }
@@ -255,23 +255,23 @@ mod tests {
     #[test]
     fn accepts_reverse_domain_identifiers() {
         for identifier in [
-            "org.example.weather",
+            "example.xila.weather",
             "io.github.alice.weather",
-            "org.example.tools.clock",
-            "org.example.pixel-painter",
-            "org.example.pixel_painter",
+            "example.xila.tools.clock",
+            "example.xila.pixel-painter",
+            "example.xila.pixel_painter",
             "dev.x1.app2",
         ] {
             assert!(valid_identifier(identifier), "{identifier}");
             assert!(!is_legacy_identifier(identifier), "{identifier}");
         }
         assert_eq!(
-            identifier_namespace("org.example.weather"),
-            Some("org.example")
+            identifier_namespace("example.xila.weather"),
+            Some("example.xila")
         );
         assert_eq!(
-            identifier_namespace("org.example.tools.clock"),
-            Some("org.example.tools")
+            identifier_namespace("example.xila.tools.clock"),
+            Some("example.xila.tools")
         );
     }
 
@@ -281,7 +281,7 @@ mod tests {
         assert!(valid_identifier("xila.pixel-painter"));
         assert_eq!(identifier_namespace("xila.calculator"), Some("xila"));
         // The legacy rule is for the xila namespace only.
-        for identifier in ["community.weather", "org.weather", "xilax.clock"] {
+        for identifier in ["community.weather", "example.weather", "xilax.clock"] {
             assert!(!is_legacy_identifier(identifier), "{identifier}");
             assert!(!valid_identifier(identifier), "{identifier}");
         }
@@ -291,24 +291,24 @@ mod tests {
 
     #[test]
     fn rejects_invalid_identifiers() {
-        let long = format!("org.example.{}", "a".repeat(MAX_IDENTIFIER_LENGTH));
+        let long = format!("example.xila.{}", "a".repeat(MAX_IDENTIFIER_LENGTH));
         for identifier in [
             "",
             "weather",
-            "org.example",
-            "Org.example.weather",
-            "org.Example.weather",
-            "org.example.Weather",
-            "org..weather",
-            ".org.example.weather",
-            "org.example.weather.",
-            "org.example.-weather",
-            "org.example.weather-",
-            "org.example._weather",
-            "org.example.weather_",
-            "org.example.wea ther",
-            "org.example.wea/ther",
-            "org.example.wéather",
+            "example.xila",
+            "Example.xila.weather",
+            "example.Xila.weather",
+            "example.xila.Weather",
+            "example..weather",
+            ".example.xila.weather",
+            "example.xila.weather.",
+            "example.xila.-weather",
+            "example.xila.weather-",
+            "example.xila._weather",
+            "example.xila.weather_",
+            "example.xila.wea ther",
+            "example.xila.wea/ther",
+            "example.xila.wéather",
             "xila.",
             "xila.Clock",
             "xila.-clock",
@@ -321,24 +321,24 @@ mod tests {
 
     #[test]
     fn namespaces_cover_identifiers_by_whole_component_prefix() {
-        assert!(namespace_covers("org.example", "org.example.weather"));
-        assert!(namespace_covers("org.example", "org.example.tools.clock"));
+        assert!(namespace_covers("example.xila", "example.xila.weather"));
+        assert!(namespace_covers("example.xila", "example.xila.tools.clock"));
         assert!(namespace_covers(
             "io.github.alice",
             "io.github.alice.weather"
         ));
         for (namespace, identifier) in [
-            ("org.example", "org.examples.weather"),
-            ("org.example", "org.example"),
-            ("org.example", "org.exampl.weather"),
-            ("org.example", "com.example.weather"),
+            ("example.xila", "example.xilas.weather"),
+            ("example.xila", "example.xila"),
+            ("example.xila", "example.xil.weather"),
+            ("example.xila", "example.other.weather"),
             ("io.github.alice", "io.github.alicex.weather"),
-            // A single component is never a namespace, so `org` cannot claim
-            // every `org.*` identifier.
-            ("org", "org.example.weather"),
+            // A single component is never a namespace, so `example` cannot claim
+            // every `example.*` identifier.
+            ("example", "example.xila.weather"),
             // The legacy namespace has no namespace file.
             ("xila", "xila.calculator"),
-            ("org.example", "org.example.Weather"),
+            ("example.xila", "example.xila.Weather"),
         ] {
             assert!(
                 !namespace_covers(namespace, identifier),
@@ -350,18 +350,18 @@ mod tests {
     #[test]
     fn lists_the_namespace_files_that_could_cover_an_identifier() {
         assert_eq!(
-            namespace_paths("org.example.tools.clock"),
+            namespace_paths("example.xila.tools.clock"),
             vec![
-                "namespaces/org.example.json".to_string(),
-                "namespaces/org.example.tools.json".to_string(),
+                "namespaces/example.xila.json".to_string(),
+                "namespaces/example.xila.tools.json".to_string(),
             ]
         );
         assert!(namespace_paths("xila.calculator").is_empty());
         assert!(namespace_paths("Invalid").is_empty());
-        assert!(namespaces_overlap("org.example", "org.example.tools"));
-        assert!(namespaces_overlap("org.example.tools", "org.example"));
-        assert!(namespaces_overlap("org.example", "org.example"));
-        assert!(!namespaces_overlap("org.example", "org.examples"));
+        assert!(namespaces_overlap("example.xila", "example.xila.tools"));
+        assert!(namespaces_overlap("example.xila.tools", "example.xila"));
+        assert!(namespaces_overlap("example.xila", "example.xila"));
+        assert!(!namespaces_overlap("example.xila", "example.xilas"));
     }
 
     #[test]
@@ -370,14 +370,14 @@ mod tests {
         let encoded = encode_namespace(&namespace).unwrap();
         let decoded = decode_namespace(encoded.as_bytes()).unwrap();
         assert_eq!(decoded, namespace);
-        assert!(decoded.authorizes("alice", "org.example.weather"));
-        assert!(decoded.authorizes("example-release", "org.example.tools.clock"));
+        assert!(decoded.authorizes("alice", "example.xila.weather"));
+        assert!(decoded.authorizes("example-release", "example.xila.tools.clock"));
         // Denied: an unlisted key, an identifier outside the namespace, or
         // the namespace itself.
-        assert!(!decoded.authorizes("mallory", "org.example.weather"));
-        assert!(!decoded.authorizes("alice", "org.examples.weather"));
-        assert!(!decoded.authorizes("alice", "com.example.weather"));
-        assert!(!decoded.authorizes("alice", "org.example"));
+        assert!(!decoded.authorizes("mallory", "example.xila.weather"));
+        assert!(!decoded.authorizes("alice", "example.xilas.weather"));
+        assert!(!decoded.authorizes("alice", "example.other.weather"));
+        assert!(!decoded.authorizes("alice", "example.xila"));
         assert!(!decoded.authorizes("alice", "xila.calculator"));
     }
 
@@ -387,18 +387,18 @@ mod tests {
             kind: kind.into(),
             name: name.into(),
         };
-        assert!(owner("domain", "example.org").matches("org.example"));
-        assert!(owner("domain", "tools.example.org").matches("org.example.tools"));
+        assert!(owner("domain", "xila.example").matches("example.xila"));
+        assert!(owner("domain", "tools.xila.example").matches("example.xila.tools"));
         assert!(owner("github", "alice").matches("io.github.alice"));
         assert!(owner("gitlab", "alice_b").matches("io.gitlab.alice_b"));
         for (owner, namespace) in [
-            (owner("domain", "example.com"), "org.example"),
-            (owner("domain", "org.example"), "org.example"),
-            (owner("domain", "example.org"), "org.example.tools"),
+            (owner("domain", "other.example"), "example.xila"),
+            (owner("domain", "example.xila"), "example.xila"),
+            (owner("domain", "xila.example"), "example.xila.tools"),
             (owner("domain", "github.io"), "io.github"),
             (owner("domain", "gitlab.io"), "io.gitlab"),
             (owner("domain", "alice.github.io"), "io.github.alice"),
-            (owner("domain", "my_site.org"), "org.my_site"),
+            (owner("domain", "my_site.example"), "example.my_site"),
             (owner("github", "bob"), "io.github.alice"),
             (owner("github", "alice"), "io.gitlab.alice"),
             (owner("github", "alice"), "io.github.alice.tools"),
@@ -413,11 +413,11 @@ mod tests {
     #[test]
     fn rejects_malformed_namespace_files() {
         for change in [
-            |n: &mut Namespace| n.namespace = "org".into(),
+            |n: &mut Namespace| n.namespace = "example".into(),
             |n: &mut Namespace| n.namespace = "xila".into(),
-            |n: &mut Namespace| n.namespace = "Org.Example".into(),
-            |n: &mut Namespace| n.namespace = "org.example.".into(),
-            |n: &mut Namespace| n.owner.name = "example.com".into(),
+            |n: &mut Namespace| n.namespace = "Example.Xila".into(),
+            |n: &mut Namespace| n.namespace = "example.xila.".into(),
+            |n: &mut Namespace| n.owner.name = "other.example".into(),
             |n: &mut Namespace| n.owner.kind = "github".into(),
             |n: &mut Namespace| n.developer_keys.clear(),
             |n: &mut Namespace| n.developer_keys.push("alice".into()),
@@ -437,7 +437,7 @@ mod tests {
             );
         }
         let mut namespace = example();
-        namespace.schema = Some("https://example.com/schema.json".into());
+        namespace.schema = Some("https://xila.example/schema.json".into());
         assert_eq!(namespace.validate(), Err(Error::InvalidSchema));
         let mut namespace = example();
         namespace.format_version = 2;

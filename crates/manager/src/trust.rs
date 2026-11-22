@@ -314,7 +314,7 @@ mod tests {
     };
 
     const DEVELOPER: &str = r#"{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#;
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["xila-project"]}"#;
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila-project"]}"#;
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -376,7 +376,7 @@ mod tests {
             metadata: None,
             publisher: "xila-project".into(),
             archive: Archive {
-                url: "https://example.com/clock.xpk".into(),
+                url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),
                 size: 10,
             },
@@ -650,7 +650,7 @@ mod tests {
             Some(Error::Unauthorized)
         );
         let mut other = entry();
-        other.name = "org.example.clock".into();
+        other.name = "example.xila.clock".into();
         assert_eq!(
             publisher_key(&other, &developer).err(),
             Some(Error::Unauthorized)
@@ -686,9 +686,9 @@ mod tests {
         }
 
         let developer = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
-        let weather = namespaced_entry("org.example.weather");
+        let weather = namespaced_entry("example.xila.weather");
         assert!(namespace_publisher_key(&weather, &developer, Some(&namespace)).is_ok());
-        let nested = namespaced_entry("org.example.tools.clock");
+        let nested = namespaced_entry("example.xila.tools.clock");
         assert!(namespace_publisher_key(&nested, &developer, Some(&namespace)).is_ok());
         // The legacy rule still applies with or without a namespace file.
         assert!(namespace_publisher_key(&entry(), &developer, Some(&namespace)).is_ok());
@@ -697,8 +697,8 @@ mod tests {
         // key the file does not list, and a publisher that is not the key.
         for (entry, namespace) in [
             (weather.clone(), None),
-            (namespaced_entry("org.examples.weather"), Some(&namespace)),
-            (namespaced_entry("com.example.weather"), Some(&namespace)),
+            (namespaced_entry("example.xilas.weather"), Some(&namespace)),
+            (namespaced_entry("example.other.weather"), Some(&namespace)),
         ] {
             assert_eq!(
                 namespace_publisher_key(&entry, &developer, namespace).err(),
@@ -753,15 +753,15 @@ mod tests {
             version: 1,
             expires: 2,
             files: vec![
-                file("namespaces/org.example.json"),
-                file("namespaces/org.other.json"),
+                file("namespaces/example.other.json"),
+                file("namespaces/example.xila.json"),
             ],
         };
         assert_eq!(
-            namespace_candidates(&index, "org.example.tools.clock"),
-            ["namespaces/org.example.json"]
+            namespace_candidates(&index, "example.xila.tools.clock"),
+            ["namespaces/example.xila.json"]
         );
-        assert!(namespace_candidates(&index, "org.examples.clock").is_empty());
+        assert!(namespace_candidates(&index, "example.xilas.clock").is_empty());
         assert!(namespace_candidates(&index, "xila.clock").is_empty());
     }
 

@@ -244,17 +244,17 @@ mod tests {
         assert!(!key.authorizes("xilax.clock", None));
         // The legacy grant covers two-component identifiers only.
         assert!(!key.authorizes("xila.tools.clock", None));
-        assert!(!key.authorizes("org.example.weather", None));
+        assert!(!key.authorizes("example.xila.weather", None));
     }
 
     fn namespace(keys: &[&str]) -> Namespace {
         Namespace {
             schema: None,
             format_version: crate::NAMESPACE_FORMAT_VERSION,
-            namespace: "org.example".into(),
+            namespace: "example.xila".into(),
             owner: crate::NamespaceOwner {
                 kind: "domain".into(),
-                name: "example.org".into(),
+                name: "xila.example".into(),
             },
             developer_keys: keys.iter().map(|key| (*key).into()).collect(),
         }
@@ -267,19 +267,19 @@ mod tests {
         key.validate().unwrap();
         let listed = namespace(&["xila-project"]);
         listed.validate().unwrap();
-        assert!(key.authorizes("org.example.weather", Some(&listed)));
-        assert!(key.authorizes("org.example.tools.clock", Some(&listed)));
-        assert!(key.authorizes_package("org.example.weather", "wasm32-wasip1", Some(&listed)));
+        assert!(key.authorizes("example.xila.weather", Some(&listed)));
+        assert!(key.authorizes("example.xila.tools.clock", Some(&listed)));
+        assert!(key.authorizes_package("example.xila.weather", "wasm32-wasip1", Some(&listed)));
         // Denied: no namespace file, a file that does not list the key, an
         // identifier outside the file's namespace, the legacy identifiers
         // without the legacy grant, and native code without the native grant.
-        assert!(!key.authorizes("org.example.weather", None));
-        assert!(!key.authorizes("org.example.weather", Some(&namespace(&["alice"]))));
-        assert!(!key.authorizes("org.examples.weather", Some(&listed)));
-        assert!(!key.authorizes("com.example.weather", Some(&listed)));
+        assert!(!key.authorizes("example.xila.weather", None));
+        assert!(!key.authorizes("example.xila.weather", Some(&namespace(&["alice"]))));
+        assert!(!key.authorizes("example.xilas.weather", Some(&listed)));
+        assert!(!key.authorizes("example.other.weather", Some(&listed)));
         assert!(!key.authorizes("xila.clock", Some(&listed)));
         assert!(!key.authorizes_package(
-            "org.example.weather",
+            "example.xila.weather",
             "thumbv7em-none-eabi",
             Some(&listed)
         ));
@@ -297,10 +297,10 @@ mod tests {
         assert!(!key.authorizes("xila.clock", None));
         for namespaces in [
             r#"[]"#,
-            r#"["org.example"]"#,
+            r#"["example.xila"]"#,
             r#"["community"]"#,
             r#"["xila", "xila"]"#,
-            r#"["xila", "org.example"]"#,
+            r#"["xila", "example.xila"]"#,
         ] {
             let json = XILA_PROJECT.replace(r#"["xila"]"#, namespaces);
             assert_eq!(
@@ -402,7 +402,7 @@ mod tests {
             },
             |k: &mut DeveloperKey| k.namespaces = Some(Vec::new()),
             |k: &mut DeveloperKey| k.namespaces = Some(alloc::vec!["Xila".into()]),
-            |k: &mut DeveloperKey| k.namespaces = Some(alloc::vec!["org.example".into()]),
+            |k: &mut DeveloperKey| k.namespaces = Some(alloc::vec!["example.xila".into()]),
             |k: &mut DeveloperKey| k.openssh = Some("ssh-rsa AAAA".into()),
             |k: &mut DeveloperKey| k.kinds = Some(Vec::new()),
             |k: &mut DeveloperKey| k.kinds = Some(alloc::vec!["arm".into()]),

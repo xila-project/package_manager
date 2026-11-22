@@ -15,7 +15,7 @@ they run exactly the same code as `xila-package`.
 ### 1. Initialize the developer source directory
 
 ```sh
-xila-package bundle init ./weather org.example.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 \
+xila-package bundle init ./weather example.xila.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 \
   --entrypoint executables/weather.wasm \
   --display-name Weather \
   --icon resources/icon.png
@@ -175,7 +175,7 @@ Developer keys live in `keys/developers/<id>.json`
 files in `namespaces/<namespace>.json`
 ([registry-namespace.schema.json](../../schemas/registry-namespace.schema.json))
 and entries in `packages/<identifier with dots as />/<version>.json`, e.g.
-`packages/org/example/weather/0.1.0.json`. `check` requires namespace files not
+`packages/example/xila/weather/0.1.0.json`. `check` requires namespace files not
 to overlap and to list only existing keys, and each entry to be canonical
 (exactly as `registry entry` writes it), to sit at its own path, and to name a
 publisher listed in the namespace file covering its identifier (for a legacy

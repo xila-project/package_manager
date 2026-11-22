@@ -233,7 +233,7 @@ mod tests {
     fn rejects_invalid_location_or_publisher() {
         let base = RegistryEntry::from_manifest(&manifest(), "xila-project", archive()).unwrap();
         for change in [
-            |e: &mut RegistryEntry| e.archive.url = "http://example.com/a.xpk".into(),
+            |e: &mut RegistryEntry| e.archive.url = "http://xila.example/a.xpk".into(),
             |e: &mut RegistryEntry| e.archive.sha256 = "B".repeat(64),
             |e: &mut RegistryEntry| e.archive.size = 0,
             |e: &mut RegistryEntry| e.publisher = "Xila Project".into(),
