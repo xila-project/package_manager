@@ -1,18 +1,18 @@
 [package]
-publish = false
 name = "xila-package-reader"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Read Xila application bundles"
 
 [dependencies]
-xila-package-manifest = { path = "../manifest" }
-xila-package-bundle = { path = "../bundle" }
-xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
+xila-package-manifest = { version = "0.4.0", path = "../manifest" }
+xila-package-bundle = { version = "0.4.0", path = "../bundle" }
+xila-package-verification = { version = "0.1.0", path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
 tar-no-std = { version = "0.6.0", default-features = false }
 
 [dev-dependencies]
-xila-package-writer = { path = "../writer" }
+xila-package-writer = { version = "0.4.0", path = "../writer" }
 ed25519-dalek = { version = "3.0", default-features = false }

@@ -1,11 +1,11 @@
 [package]
-publish = false
 name = "xila-package-manifest"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Portable manifest format for Xila application packages"
 
 [dependencies]
 miniserde = { version = "0.1.46", default-features = false }

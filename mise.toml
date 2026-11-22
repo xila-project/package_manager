@@ -57,3 +57,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "version={{ vars.rust_version }}" >> "$GITHUB_OUTPUT"
 fi
 '''
+
+[tasks."release:package"]
+description = "Build and verify crates.io archives locally without uploading them"
+run = "cargo package --workspace --locked"
