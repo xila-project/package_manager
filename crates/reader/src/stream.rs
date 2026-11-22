@@ -4,12 +4,16 @@
 //! bounded signed metadata is buffered until header authentication succeeds,
 //! after which only the parsed manifest is retained in memory.
 //! File contents are authenticated incrementally with ContentVerifier.
+//!
+//! [`StreamingVerifier::extract`] also hands each payload's bytes to the
+//! caller in the same pass, so an installer can write them to staging without
+//! parsing the TAR again or reading the archive twice.
 
 use alloc::vec::Vec;
 use tar_no_std::{BLOCKSIZE, StreamEvent, TarStreamParser};
 use xila_package_bundle::decode_sha256;
 use xila_package_manifest::{
-    MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, SIGNATURE_PATH, SIGNED_DOMAIN,
+    MANIFEST_PATH, MAX_MANIFEST_BYTES, Manifest, ManifestFile, SIGNATURE_PATH, SIGNED_DOMAIN,
 };
 use xila_package_verification::{ContentVerifier, PublicKey};
 
@@ -20,6 +24,26 @@ use crate::{Error, require_ordinary_file};
 pub enum StreamError<E> {
     Source(E),
     Package(Error),
+}
+
+/// Part of a declared file carried by one TAR block, returned by
+/// [`StreamingVerifier::extract`].
+///
+/// Chunks of a file arrive in order and files arrive in manifest order. The
+/// header signature has been verified (when a trusted key was supplied) before
+/// the first chunk, but a file's contents are only proven once its `last`
+/// chunk is returned, and the package only once
+/// [`StreamingVerifier::finish`] succeeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileChunk<'b> {
+    /// Index of the file in [`Manifest::files`].
+    pub index: usize,
+    /// The next payload bytes; empty for the chunk that starts the file.
+    pub bytes: &'b [u8],
+    /// The file starts here: create it in staging. Its `bytes` are empty.
+    pub first: bool,
+    /// The file is complete and its size and SHA-256 match the manifest.
+    pub last: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +109,18 @@ impl<'a> StreamingVerifier<'a> {
 
     /// Push one block. On any failure, the verifier is permanently poisoned.
     pub fn push(&mut self, block: &[u8; BLOCKSIZE]) -> Result<(), Error> {
+        self.extract(block).map(|_| ())
+    }
+
+    /// Push one block and return the part of a declared file it carries, if
+    /// any. On any failure, the verifier is permanently poisoned.
+    ///
+    /// Write chunks only to non-executable staging, and discard everything
+    /// written for this package if any call or [`finish`](Self::finish) fails.
+    pub fn extract<'b>(
+        &mut self,
+        block: &'b [u8; BLOCKSIZE],
+    ) -> Result<Option<FileChunk<'b>>, Error> {
         if self.failed {
             return Err(Error::InvalidArchive);
         }
@@ -96,7 +132,13 @@ impl<'a> StreamingVerifier<'a> {
         result
     }
 
-    fn consume(&mut self, block: &[u8; BLOCKSIZE]) -> Result<(), Error> {
+    /// The decoded manifest, once its TAR entry has been read. Its header
+    /// signature is verified only when the first file chunk is returned.
+    pub fn manifest(&self) -> Option<&Manifest> {
+        self.manifest.as_ref()
+    }
+
+    fn consume<'b>(&mut self, block: &'b [u8; BLOCKSIZE]) -> Result<Option<FileChunk<'b>>, Error> {
         let event = self
             .parser
             .parse_block(block)
@@ -113,7 +155,7 @@ impl<'a> StreamingVerifier<'a> {
                 self.on_entry(path, size)
             }
             Some(StreamEvent::Data { data, remaining }) => self.on_data(data, remaining),
-            Some(StreamEvent::End) => self.on_end(),
+            Some(StreamEvent::End) => self.on_end().map(|()| None),
             None => {
                 // None also denotes skipped special TAR headers in the
                 // upstream parser. Those are *not* allowed in the Xila format.
@@ -123,13 +165,13 @@ impl<'a> StreamingVerifier<'a> {
                 if block.iter().any(|&byte| byte != 0) {
                     Err(Error::UnexpectedEntry)
                 } else {
-                    Ok(())
+                    Ok(None)
                 }
             }
         }
     }
 
-    fn on_entry(&mut self, path: &str, size: usize) -> Result<(), Error> {
+    fn on_entry(&mut self, path: &str, size: usize) -> Result<Option<FileChunk<'static>>, Error> {
         match self.state {
             State::ManifestHeader => {
                 if path != MANIFEST_PATH || size == 0 || size > MAX_MANIFEST_BYTES {
@@ -142,7 +184,7 @@ impl<'a> StreamingVerifier<'a> {
                 self.signed_message
                     .extend_from_slice(&(size as u32).to_le_bytes());
                 self.state = State::Manifest { size, received: 0 };
-                Ok(())
+                Ok(None)
             }
             State::AfterManifest if path == SIGNATURE_PATH => {
                 if size != self.signature.len() {
@@ -150,7 +192,7 @@ impl<'a> StreamingVerifier<'a> {
                 }
                 self.has_signature = true;
                 self.state = State::Signature { received: 0 };
-                Ok(())
+                Ok(None)
             }
             State::AfterManifest | State::Files => {
                 self.authenticate_header()?;
@@ -167,18 +209,28 @@ impl<'a> StreamingVerifier<'a> {
                     ContentVerifier::new(declared.size, digest)
                         .map_err(|_| Error::InvalidDigest)?,
                 );
+                let index = self.file_index;
                 if size == 0 {
                     self.end_file()?;
                 } else {
                     self.state = State::Payload;
                 }
-                Ok(())
+                Ok(Some(FileChunk {
+                    index,
+                    bytes: &[],
+                    first: true,
+                    last: size == 0,
+                }))
             }
             _ => Err(Error::UnexpectedEntry),
         }
     }
 
-    fn on_data(&mut self, bytes: &[u8], remaining: usize) -> Result<(), Error> {
+    fn on_data<'b>(
+        &mut self,
+        bytes: &'b [u8],
+        remaining: usize,
+    ) -> Result<Option<FileChunk<'b>>, Error> {
         match self.state {
             State::Manifest { size, received } => {
                 let next = received
@@ -204,7 +256,7 @@ impl<'a> StreamingVerifier<'a> {
                 if next != size && remaining == 0 {
                     return Err(Error::InvalidManifest);
                 }
-                Ok(())
+                Ok(None)
             }
             State::Signature { received } => {
                 let next = received
@@ -217,7 +269,7 @@ impl<'a> StreamingVerifier<'a> {
                 } else {
                     State::Signature { received: next }
                 };
-                Ok(())
+                Ok(None)
             }
             State::Payload => {
                 self.current_file
@@ -225,10 +277,16 @@ impl<'a> StreamingVerifier<'a> {
                     .ok_or(Error::UnexpectedEntry)?
                     .update(bytes)
                     .map_err(|_| Error::InvalidDigest)?;
+                let index = self.file_index;
                 if remaining == 0 {
                     self.end_file()?;
                 }
-                Ok(())
+                Ok(Some(FileChunk {
+                    index,
+                    bytes,
+                    first: false,
+                    last: remaining == 0,
+                }))
             }
             _ => Err(Error::UnexpectedEntry),
         }
@@ -312,10 +370,46 @@ where
     }
 }
 
+/// Verify a package and hand each declared file's bytes to `write` in the
+/// same pass, one 512-byte block at a time.
+///
+/// `write` receives the manifest entry of the file and the chunk. Source and
+/// write errors share `E` and fail closed. The returned manifest is the only
+/// proof that the package is valid: on any error, discard everything `write`
+/// produced.
+pub fn extract_streaming<S, W, E>(
+    mut read_block: S,
+    trusted: Option<&PublicKey>,
+    mut write: W,
+) -> Result<Manifest, StreamError<E>>
+where
+    S: FnMut(&mut [u8; BLOCKSIZE]) -> Result<bool, E>,
+    W: FnMut(&ManifestFile, FileChunk<'_>) -> Result<(), E>,
+{
+    let mut verifier = StreamingVerifier::new(trusted);
+    let mut block = [0_u8; BLOCKSIZE];
+    loop {
+        if !read_block(&mut block).map_err(StreamError::Source)? {
+            return verifier.finish().map_err(StreamError::Package);
+        }
+        if let Some(chunk) = verifier.extract(&block).map_err(StreamError::Package)? {
+            let file = verifier
+                .manifest()
+                .and_then(|manifest| manifest.files.get(chunk.index))
+                .ok_or(StreamError::Package(Error::InvalidManifest))?;
+            write(file, chunk).map_err(StreamError::Source)?;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{format, string::ToString, vec};
+    use alloc::{
+        format,
+        string::{String, ToString},
+        vec,
+    };
     use ed25519_dalek::{Signer, SigningKey};
     use xila_package_bundle::{FileHasher, signing_message};
     use xila_package_manifest::{
@@ -397,6 +491,190 @@ mod tests {
             },
             trusted,
         )
+    }
+
+    /// Path, contents and completion of each extracted file.
+    type Extracted = Vec<(String, Vec<u8>, bool)>;
+
+    /// Extract `bytes` and return each file's path and contents, checking
+    /// that chunks arrive in order with consistent `first`/`last` flags.
+    fn extract_all(
+        bytes: &[u8],
+        trusted: Option<&PublicKey>,
+    ) -> Result<(Manifest, Extracted), StreamError<()>> {
+        let mut blocks = bytes.as_chunks::<512>().0.iter();
+        let mut files: Extracted = Vec::new();
+        let manifest = extract_streaming(
+            |buf| {
+                if let Some(chunk) = blocks.next() {
+                    buf.copy_from_slice(chunk);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+            trusted,
+            |file, chunk| {
+                if chunk.first {
+                    assert_eq!(chunk.index, files.len());
+                    assert!(chunk.bytes.is_empty());
+                    files.push((file.path.clone(), Vec::new(), false));
+                }
+                let (path, contents, complete) = files.last_mut().unwrap();
+                assert_eq!(*path, file.path);
+                assert!(!*complete);
+                contents.extend_from_slice(chunk.bytes);
+                *complete = chunk.last;
+                Ok(())
+            },
+        )?;
+        Ok((manifest, files))
+    }
+
+    #[test]
+    fn extracts_every_file_in_the_verification_pass() {
+        let (archive, public, icon) = fixture(true);
+        let (manifest, files) = extract_all(&archive, Some(&public)).unwrap();
+        assert_eq!(manifest.files.len(), 2);
+        assert_eq!(
+            files,
+            vec![
+                (
+                    "executables/main.wasm".to_string(),
+                    vec![42_u8; 8 * 1024 + 17],
+                    true
+                ),
+                ("resources/icon.png".to_string(), icon, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_empty_files_as_one_complete_chunk() {
+        let manifest = Manifest {
+            schema: Some(SCHEMA_URL.to_string()),
+            format_version: FORMAT_VERSION,
+            name: "community.empty".into(),
+            version: "1.0.0".into(),
+            target: "wasm32-wasip1".into(),
+            xila_version: XilaVersion::new(0, 1),
+            capabilities: vec![],
+            files: vec![
+                hashed_file("resources/empty", b""),
+                hashed_file("resources/one", b"1"),
+            ],
+            application: None,
+            metadata: None,
+        };
+        let mut archive = Vec::new();
+        write_package(
+            &mut archive,
+            &manifest,
+            &[
+                SourceFile {
+                    path: "resources/empty",
+                    bytes: b"",
+                },
+                SourceFile {
+                    path: "resources/one",
+                    bytes: b"1",
+                },
+            ],
+            None,
+        )
+        .unwrap();
+        let mut verifier = StreamingVerifier::new(None);
+        let mut chunks = Vec::new();
+        for block in archive.as_chunks::<512>().0 {
+            if let Some(chunk) = verifier.extract(block).unwrap() {
+                chunks.push((chunk.index, chunk.bytes.to_vec(), chunk.first, chunk.last));
+            }
+        }
+        assert_eq!(verifier.finish().unwrap(), manifest);
+        assert_eq!(
+            chunks,
+            vec![
+                (0, vec![], true, true),
+                (1, vec![], true, false),
+                (1, b"1".to_vec(), false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn extraction_delivers_nothing_before_the_signature_is_verified() {
+        let (archive, _, _) = fixture(true);
+        let other = SigningKey::from_bytes(&[8_u8; 32]);
+        let other = PublicKey::from_bytes(&other.verifying_key().to_bytes()).unwrap();
+        assert_eq!(
+            extract_all(&archive, Some(&other)).err(),
+            Some(StreamError::Package(Error::InvalidSignature))
+        );
+        let (unsigned, public, _) = fixture(false);
+        let mut delivered = false;
+        let mut verifier = StreamingVerifier::new(Some(&public));
+        let mut result = Ok(None);
+        for block in unsigned.as_chunks::<512>().0 {
+            result = verifier.extract(block);
+            match &result {
+                Ok(Some(_)) => delivered = true,
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+        assert_eq!(result, Err(Error::MissingSignature));
+        assert!(!delivered);
+    }
+
+    #[test]
+    fn extraction_never_completes_a_modified_file() {
+        let (mut archive, public, icon) = fixture(true);
+        let offset = archive
+            .windows(icon.len())
+            .position(|bytes| bytes == icon.as_slice())
+            .unwrap();
+        archive[offset] ^= 1;
+        let mut verifier = StreamingVerifier::new(Some(&public));
+        let mut completed = Vec::new();
+        let mut result = Ok(None);
+        for block in archive.as_chunks::<512>().0 {
+            result = verifier.extract(block);
+            match &result {
+                Ok(Some(chunk)) if chunk.last => completed.push(chunk.index),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        assert_eq!(result, Err(Error::InvalidDigest));
+        assert_eq!(completed, vec![0]);
+    }
+
+    #[test]
+    fn extraction_write_errors_stop_the_pass() {
+        let (archive, public, _) = fixture(true);
+        let mut blocks = archive.as_chunks::<512>().0.iter();
+        let mut writes = 0;
+        let result = extract_streaming(
+            |buf| {
+                if let Some(chunk) = blocks.next() {
+                    buf.copy_from_slice(chunk);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            },
+            Some(&public),
+            |_, _| {
+                writes += 1;
+                if writes == 3 {
+                    Err("disk full")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(result, Err(StreamError::Source("disk full")));
+        assert_eq!(writes, 3);
     }
 
     #[test]

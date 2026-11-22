@@ -4,7 +4,7 @@
 extern crate alloc;
 
 mod stream;
-pub use stream::{StreamError, StreamingVerifier, inspect_streaming};
+pub use stream::{FileChunk, StreamError, StreamingVerifier, extract_streaming, inspect_streaming};
 
 use tar_no_std::{BLOCKSIZE, PosixHeader, TarArchiveRef, TypeFlag};
 use xila_package_bundle::{verify_bytes, verify_signature};
