@@ -57,6 +57,11 @@ class ManifestSchemaTests(unittest.TestCase):
         }
         VALIDATOR.validate(built_in)
 
+    def test_native_dotted_target(self):
+        package = copy.deepcopy(FIXTURE)
+        package["target"] = "thumbv8m.main-none-eabihf"
+        VALIDATOR.validate(package)
+
     def test_rejects_invalid_or_unexpected_fields(self):
         invalid = copy.deepcopy(FIXTURE)
         for changes in [
@@ -65,6 +70,9 @@ class ManifestSchemaTests(unittest.TestCase):
             {"name": "../escape"},
             {"version": "foo bar"},
             {"target": "wasm/invalid"},
+            {"target": ".thumbv8m"},
+            {"target": "thumbv8m."},
+            {"target": "thumbv8m..main-none-eabi"},
             {"xila_version": 1},
             {"xila_version": "0.65536"},
             {"xila_version": "01.2"},

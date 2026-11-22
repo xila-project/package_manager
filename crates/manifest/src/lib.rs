@@ -9,6 +9,7 @@ pub mod developer_key;
 pub mod metadata;
 pub mod registry;
 pub mod repository;
+mod target;
 pub mod transaction;
 pub mod trust;
 mod xila_version;
@@ -38,6 +39,7 @@ pub use trust::{
     signed_message,
 };
 
+pub use target::target_compatible;
 pub use transaction::{
     DOWNLOAD_PREFIX, Operation, PREVIOUS_PREFIX, REMOVING_PREFIX, STAGING_PREFIX,
     TRANSACTION_FORMAT_VERSION, TRANSACTION_SCHEMA_URL, Transaction, decode_transaction,
@@ -230,11 +232,14 @@ pub(crate) fn validate_identity(name: &str, version: &str, target: &str) -> Resu
     {
         return Err(Error::InvalidIdentifier);
     }
+    // Rust target triples, including dotted ones such as
+    // `thumbv8m.main-none-eabi`; a dot must sit between two other characters.
     if target.is_empty()
         || target.len() > 64
         || !target
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+        || target.split('.').any(str::is_empty)
     {
         return Err(Error::InvalidTarget);
     }
@@ -512,6 +517,23 @@ mod tests {
         assert_eq!(validate(&m), Ok(()));
         m.application.as_mut().unwrap().icon = "resources/missing.png".to_string();
         assert_eq!(validate(&m), Err(Error::InvalidApplication));
+    }
+
+    #[test]
+    fn accepts_dotted_targets_only_between_characters() {
+        let mut m = example();
+        m.target = "thumbv8m.main-none-eabihf".to_string();
+        assert_eq!(decode(encode(&m).unwrap().as_bytes()), Ok(m.clone()));
+        for target in [
+            ".thumbv8m",
+            "thumbv8m.",
+            "thumbv8m..main",
+            "riscv32/imc",
+            "",
+        ] {
+            m.target = target.to_string();
+            assert_eq!(validate(&m), Err(Error::InvalidTarget), "{target}");
+        }
     }
 
     #[test]
