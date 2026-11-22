@@ -112,6 +112,9 @@ A device can use several registries. Each configured repository
   ([package-origin.schema.json](../schemas/package-origin.schema.json)). Updates
   are only taken from that repository, so adding a repository cannot replace an
   installed package.
+  Installing, upgrading and removing a package, and recording its origin, are
+  crash-consistent transactions: see
+  [installation transactions](installation-transactions.md).
 
 ## Limits and follow-ups
 

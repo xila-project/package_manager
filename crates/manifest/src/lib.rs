@@ -9,6 +9,7 @@ pub mod developer_key;
 pub mod metadata;
 pub mod registry;
 pub mod repository;
+pub mod transaction;
 pub mod trust;
 mod xila_version;
 use alloc::{string::String, vec::Vec};
@@ -37,6 +38,11 @@ pub use trust::{
     signed_message,
 };
 
+pub use transaction::{
+    DOWNLOAD_PREFIX, Operation, PREVIOUS_PREFIX, REMOVING_PREFIX, STAGING_PREFIX,
+    TRANSACTION_FORMAT_VERSION, TRANSACTION_SCHEMA_URL, Transaction, decode_transaction,
+    encode_transaction, is_temporary_entry, is_temporary_name,
+};
 pub use xila_version::{InvalidXilaVersion, XilaVersion, compatible};
 
 /// Current experimental manifest format version.
@@ -85,6 +91,8 @@ pub enum Error {
     InvalidIndex,
     /// A repository configuration or installed-package origin is malformed.
     InvalidRepository,
+    /// An installation transaction journal is malformed.
+    InvalidTransaction,
 }
 
 /// A complete Xila archive manifest describing identity and every payload file.

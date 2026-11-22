@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-transaction.schema.json",
+  "title": "Xila installation transaction journal (experimental v1)",
+  "description": "The package operation in flight on a device, so recovery can finish or undo it after an interruption. Directory names are single entries of the bundles directory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "operation",
+    "name",
+    "staging",
+    "previous",
+    "origin",
+    "previous_origin"
+  ],
+  "properties": {
+    "$schema": {
+      "description": "Optional editor-facing schema URL; not a trust anchor.",
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-transaction.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1
+    },
+    "operation": {
+      "enum": [
+        "install",
+        "upgrade",
+        "remove"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "staging": {
+      "description": "Verified, sealed staging directory (install and upgrade).",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\.incoming-[A-Za-z0-9._-]{1,128}$"
+        }
+      ]
+    },
+    "previous": {
+      "description": "Where the installed bundle is moved aside (upgrade and removal).",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\.(previous|removing)-[A-Za-z0-9._-]{1,128}$"
+        }
+      ]
+    },
+    "origin": {
+      "description": "Origin recorded once the new bundle is active.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-origin.schema.json"
+        }
+      ]
+    },
+    "previous_origin": {
+      "description": "Origin of the replaced or removed bundle, restored on rollback.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-origin.schema.json"
+        }
+      ]
+    }
+  }
+}

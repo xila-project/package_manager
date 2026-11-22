@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,10 +19,16 @@ ROOT_VALIDATOR = Draft202012Validator(load("schemas/registry-root.schema.json"))
 INDEX_VALIDATOR = Draft202012Validator(load("schemas/registry-index.schema.json"))
 REPOSITORY_VALIDATOR = Draft202012Validator(load("schemas/repository.schema.json"))
 ORIGIN_VALIDATOR = Draft202012Validator(load("schemas/package-origin.schema.json"))
+ORIGIN_SCHEMA = load("schemas/package-origin.schema.json")
+TRANSACTION_VALIDATOR = Draft202012Validator(
+    load("schemas/package-transaction.schema.json"),
+    registry=Registry().with_resource(ORIGIN_SCHEMA["$id"], Resource.from_contents(ORIGIN_SCHEMA)),
+)
 ROOT_FIXTURE = load("tests/fixtures/registry-root.json")
 REPOSITORY_FIXTURE = load("tests/fixtures/repository.json")
 ORIGIN_FIXTURE = load("tests/fixtures/package-origin.json")
 INDEX_FIXTURE = load("tests/fixtures/registry-index.json")
+TRANSACTION_FIXTURE = load("tests/fixtures/package-transaction.json")
 
 
 class RegistryTrustSchemaTests(unittest.TestCase):
@@ -71,6 +78,23 @@ class RegistryTrustSchemaTests(unittest.TestCase):
             with self.subTest(key=key, value=value):
                 self.assertFalse(REPOSITORY_VALIDATOR.is_valid(dict(REPOSITORY_FIXTURE, **{key: value})))
         self.assertFalse(ORIGIN_VALIDATOR.is_valid(dict(ORIGIN_FIXTURE, archive_sha256="x")))
+
+    def test_transaction(self):
+        Draft202012Validator.check_schema(TRANSACTION_VALIDATOR.schema)
+        TRANSACTION_VALIDATOR.validate(TRANSACTION_FIXTURE)
+        TRANSACTION_VALIDATOR.validate(
+            dict(TRANSACTION_FIXTURE, operation="remove", staging=None, previous=".removing-xila.clock", origin=None)
+        )
+        for key, value in [
+            ("operation", "downgrade"),
+            ("staging", "../system"),
+            ("staging", ".incoming-a/b"),
+            ("previous", "/applications/bundles/xila.clock"),
+            ("origin", dict(ORIGIN_FIXTURE, archive_sha256="x")),
+            ("format_version", 2),
+        ]:
+            with self.subTest(key=key, value=value):
+                self.assertFalse(TRANSACTION_VALIDATOR.is_valid(dict(TRANSACTION_FIXTURE, **{key: value})))
 
 
 if __name__ == "__main__":
