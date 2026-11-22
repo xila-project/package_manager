@@ -234,24 +234,26 @@ impl PartialOrd for SemanticVersion<'_> {
     }
 }
 
+/// The package name path (labels separated by `/`) and version of an index
+/// path of the form `packages/<labels>/<version>.json`, if `path` has that form.
+fn entry_parts(path: &str) -> Option<(&str, &str)> {
+    let (name, version) = path
+        .strip_prefix("packages/")?
+        .strip_suffix(".json")?
+        .rsplit_once('/')?;
+    (!name.is_empty() && !version.is_empty()).then_some((name, version))
+}
+
 /// Versions of `name` listed in `index`, newest first. Only semantic versions
 /// are listed, and prereleases only when `prereleases` is set; other versions
 /// can still be installed by exact version.
 pub fn index_versions<'a>(index: &'a crate::Index, name: &str, prereleases: bool) -> Vec<&'a str> {
-    let mut prefix = String::from("packages/");
-    for label in name.split('.') {
-        prefix.push_str(label);
-        prefix.push('/');
-    }
     let mut versions: Vec<(SemanticVersion<'a>, &'a str)> = index
         .files
         .iter()
         .filter_map(|file| {
-            let version = file
-                .path
-                .strip_prefix(prefix.as_str())?
-                .strip_suffix(".json")?;
-            if version.contains('/') {
+            let (labels, version) = entry_parts(&file.path)?;
+            if !labels.split('/').eq(name.split('.')) {
                 return None;
             }
             let parsed = SemanticVersion::parse(version)?;
@@ -260,6 +262,25 @@ pub fn index_versions<'a>(index: &'a crate::Index, name: &str, prereleases: bool
         .collect();
     versions.sort_by(|a, b| b.0.cmp(&a.0));
     versions.into_iter().map(|(_, version)| version).collect()
+}
+
+/// Names of the packages listed in `index` with at least one semantic
+/// version (prereleases included), sorted and without duplicates. Use
+/// [`index_versions`] for the versions of each one. Only the signed index is
+/// read: no registry entry is fetched.
+pub fn index_packages(index: &crate::Index) -> Vec<String> {
+    let mut names: Vec<String> = index
+        .files
+        .iter()
+        .filter_map(|file| {
+            let (labels, version) = entry_parts(&file.path)?;
+            SemanticVersion::parse(version)?;
+            Some(labels.replace('/', "."))
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 #[cfg(test)]
@@ -378,5 +399,46 @@ mod tests {
             ["1.0.0-rc.1", "0.10.0", "0.2.0", "0.1.0"]
         );
         assert!(index_versions(&index, "xila.weather", true).is_empty());
+        assert_eq!(index_versions(&index, "xila.clock.extra", false), ["1.0.0"]);
+    }
+
+    #[test]
+    fn lists_packages_once_each() {
+        let file = |path: &str| IndexFile {
+            path: path.into(),
+            sha256: "a".repeat(64),
+            size: 1,
+        };
+        let mut files = vec![
+            file("keys/developers/xila.json"),
+            file("packages/1.0.0.json"),
+            file("packages/xila/clock/0.1.0.json"),
+            file("packages/xila/clock/0.2.0.json"),
+            file("packages/xila/clock/extra/1.0.0.json"),
+            file("packages/xila/clockwork/1.0.0-rc.1.json"),
+            file("packages/xila/nightly/latest.json"),
+            file("packages/xila/notes/0.1.0.json.sig"),
+            file("packages/community/weather/2.0.0.json"),
+        ];
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        let index = Index {
+            schema: Some(INDEX_SCHEMA_URL.into()),
+            format_version: TRUST_FORMAT_VERSION,
+            version: 1,
+            expires: 2,
+            files,
+        };
+        assert_eq!(
+            index_packages(&index),
+            [
+                "community.weather",
+                "xila.clock",
+                "xila.clock.extra",
+                "xila.clockwork"
+            ]
+        );
+        let mut empty = index.clone();
+        empty.files.clear();
+        assert!(index_packages(&empty).is_empty());
     }
 }
