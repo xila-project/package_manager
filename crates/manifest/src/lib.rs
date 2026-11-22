@@ -140,6 +140,47 @@ pub struct ManifestFile {
     pub sha256: String,
 }
 
+impl Manifest {
+    /// The inventory entry declared for a bundle-relative `path`, if any.
+    ///
+    /// The lookup is exact: callers must not normalize or alias the path.
+    pub fn file(&self, path: &str) -> Option<&ManifestFile> {
+        self.files.iter().find(|file| file.path == path)
+    }
+}
+
+impl ManifestFile {
+    /// The declared SHA-256 as raw bytes, for streaming content verification.
+    pub fn digest(&self) -> Result<[u8; 32], Error> {
+        decode_sha256(&self.sha256)
+    }
+}
+
+/// Strict decoding of the manifest's fixed-width lowercase hexadecimal SHA-256.
+pub fn decode_sha256(hexadecimal: &str) -> Result<[u8; 32], Error> {
+    const fn nibble(value: u8) -> Option<u8> {
+        match value {
+            b'0'..=b'9' => Some(value - b'0'),
+            b'a'..=b'f' => Some(value - b'a' + 10),
+            _ => None,
+        }
+    }
+    let (pairs, []) = hexadecimal.as_bytes().as_chunks::<2>() else {
+        return Err(Error::InvalidDigest);
+    };
+    if pairs.len() != 32 {
+        return Err(Error::InvalidDigest);
+    }
+    let mut output = [0_u8; 32];
+    for (byte, pair) in output.iter_mut().zip(pairs) {
+        let (Some(high), Some(low)) = (nibble(pair[0]), nibble(pair[1])) else {
+            return Err(Error::InvalidDigest);
+        };
+        *byte = (high << 4) | low;
+    }
+    Ok(output)
+}
+
 /// Reject unsafe relative paths, reserved metadata names, and traversal.
 /// Whether `path` is a safe bundle-relative file directly inside
 /// [`EXECUTABLES_DIRECTORY`], e.g. `executables/clock.wasm`.
@@ -381,6 +422,45 @@ mod tests {
                 show_in_launcher: true,
             }),
             metadata: None,
+        }
+    }
+    #[test]
+    fn finds_declared_files_and_decodes_their_digest() {
+        let mut manifest = example();
+        manifest.files[0].sha256 = "00ff".repeat(16);
+        let file = manifest.file("executables/calculator.wasm").unwrap();
+        assert_eq!(file.size, 3);
+        let mut expected = [0_u8; 32];
+        for pair in expected.chunks_mut(2) {
+            pair[1] = 0xff;
+        }
+        assert_eq!(file.digest(), Ok(expected));
+        for alias in [
+            "./executables/calculator.wasm",
+            "executables//calculator.wasm",
+            "/executables/calculator.wasm",
+            "executables/Calculator.wasm",
+        ] {
+            assert!(manifest.file(alias).is_none(), "{alias}");
+        }
+    }
+    #[test]
+    fn digest_decoding_is_strict() {
+        assert_eq!(decode_sha256(&"a".repeat(64)), Ok([0xaa; 32]));
+        for invalid in [
+            String::new(),
+            "a".repeat(63),
+            "a".repeat(65),
+            "A".repeat(64),
+            "g".repeat(64),
+            alloc::format!("{} ", "a".repeat(63)),
+            alloc::format!("{}é", "a".repeat(62)),
+        ] {
+            assert_eq!(
+                decode_sha256(&invalid),
+                Err(Error::InvalidDigest),
+                "{invalid}"
+            );
         }
     }
     #[test]

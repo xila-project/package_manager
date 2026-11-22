@@ -15,7 +15,7 @@ use core::fmt;
 use xila_package_manifest::{
     self as manifest, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, Index,
     NamedKey, ROOT_DOMAIN, RegistryEntry, Root, XilaVersion, decode_developer_key, decode_index,
-    decode_registry_entry, decode_root, signed_message,
+    decode_registry_entry, decode_root, decode_sha256, signed_message,
 };
 use xila_package_verification::{PublicKey, Sha256Verifier};
 
@@ -190,27 +190,10 @@ impl TrustedRoot {
     }
 }
 
-fn hex_digest(value: &str) -> Option<[u8; 32]> {
-    let digit = |b: u8| match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        _ => None,
-    };
-    let bytes = value.as_bytes();
-    if bytes.len() != 64 {
-        return None;
-    }
-    let mut output = [0u8; 32];
-    for (out, pair) in output.iter_mut().zip(bytes.chunks(2)) {
-        *out = digit(pair[0])? << 4 | digit(pair[1])?;
-    }
-    Some(output)
-}
-
 /// Require `bytes` to be exactly the file the index lists at `path`.
 pub fn check_listed(index: &Index, path: &str, bytes: &[u8]) -> Result<()> {
     let file = index.file(path).ok_or(Error::NotListed)?;
-    let expected = hex_digest(&file.sha256).ok_or(Error::NotListed)?;
+    let expected = decode_sha256(&file.sha256).map_err(|_| Error::NotListed)?;
     let mut hasher = Sha256Verifier::new();
     hasher.update(bytes).map_err(|_| Error::NotListed)?;
     let digest = hasher.finalize().map_err(|_| Error::NotListed)?;

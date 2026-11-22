@@ -34,6 +34,15 @@ The input limit is `MAX_MANIFEST_BYTES`, with additional file-count and
 content-size bounds. The v1 signature domain separator covers the **exact encoded
 manifest bytes**, not an arbitrary reserialization.
 
+`Manifest::file(path)` looks up the exact inventory entry for a bundle-relative
+path, and `ManifestFile::digest()` (or `decode_sha256`) strictly decodes its
+lowercase hexadecimal SHA-256. Together with
+`xila-package-verification::ContentVerifier`, they let a loader check installed
+bytes against the manifest while streaming them, without the signing
+dependencies. An installed manifest is only as trustworthy as the
+installation that verified its signature and the file system permissions
+that protect it afterwards.
+
 ## Example
 
 ```rust
