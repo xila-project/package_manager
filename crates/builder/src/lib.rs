@@ -336,6 +336,8 @@ pub enum Command<'a> {
     Key(KeyCommand<'a>),
     /// Generate or check registry entries for released, signed archives.
     Registry(RegistryCommand<'a>),
+    /// Check which device targets can run a package target.
+    Target(TargetCommand<'a>),
     /// Verify a signed archive against an externally trusted raw public key.
     Verify {
         archive: &'a str,
@@ -453,6 +455,32 @@ fn parse_number(value: Option<&str>, name: &str) -> Result<Option<u64>> {
                 .map_err(|_| invalid(&format!("--{name} must be a non-negative integer")).into())
         })
         .transpose()
+}
+
+#[derive(Debug, GetArgs)]
+pub struct TargetCommand<'a> {
+    #[command(subcommand)]
+    command: TargetOperation<'a>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TargetOperation<'a> {
+    /// Check that a package built for one target runs on a device target,
+    /// as devices do before installation; fails when it does not.
+    Compatible {
+        /// Target of the package, e.g. riscv32imc-unknown-none-elf.
+        package: &'a str,
+        /// Target of the device, e.g. riscv32imac-unknown-none-elf.
+        device: &'a str,
+    },
+}
+
+fn target_compatible(package: &str, device: &str) -> Result<()> {
+    if !xila_package_manifest::target_compatible(package, device) {
+        return Err(invalid(&format!("a package for {package} does not run on {device}")).into());
+    }
+    println!("A package for {package} runs on {device}");
+    Ok(())
 }
 
 #[derive(Debug, GetArgs)]
@@ -709,6 +737,9 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
                 bundle::archive(Path::new(directory), Path::new(output))
             }
         },
+        Command::Target(TargetCommand { command }) => match command {
+            TargetOperation::Compatible { package, device } => target_compatible(package, device),
+        },
         Command::Key(KeyCommand { command }) => match command {
             KeyOperation::Generate { seed, public_key } => {
                 key::generate(Path::new(seed), Path::new(public_key))
@@ -819,6 +850,26 @@ mod tests {
         assert!(run(["--help"].into_iter()).is_ok());
         assert!(run(["--version"].into_iter()).is_ok());
         assert!(run(["bundle", "--help"].into_iter()).is_ok());
+    }
+
+    #[test]
+    fn target_compatible_reports_incompatible_targets() {
+        let check = |package, device| run(["target", "compatible", package, device].into_iter());
+        assert!(
+            check(
+                "riscv32imc-unknown-none-elf",
+                "riscv32imac-unknown-none-elf"
+            )
+            .is_ok()
+        );
+        let error = check(
+            "riscv32imac-unknown-none-elf",
+            "riscv32imc-unknown-none-elf",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("does not run on"), "{error}");
+        assert!(check("wasm32-wasip1", "riscv32imc-unknown-none-elf").is_err());
     }
 
     #[test]

@@ -144,6 +144,35 @@ A device can use several registries. Each configured repository
   crash-consistent transactions: see
   [installation transactions](installation-transactions.md).
 
+## Target compatibility
+
+A package's `target` is a Rust target triple, dots included
+(`thumbv8m.main-none-eabihf`). `wasm32-*` and `wasm64-*` packages run in the
+virtual machine; every other target is native and runs directly on the
+processor.
+
+`compatible` checks the target with
+`xila_package_manifest::target_compatible`, and the Xila version. Equal
+targets match. Otherwise everything after the architecture (vendor, operating
+system, binary interface) must be equal, and the device architecture must
+provide every instruction the package may use:
+
+- RISC-V: same width, same base (`i` or `e`), same floating-point extensions
+  (`f`, `d`, `q`, which set the calling convention), and the package's other
+  extensions a subset of the device's (`g` is `imafd`). `riscv32imc` runs on
+  `riscv32imac`, not the reverse.
+- Arm M-profile: `thumbv6m` runs on every later profile, `thumbv7m` on
+  `thumbv7em` and `thumbv8m.main`, and `thumbv8m.base` on `thumbv8m.main`.
+  `thumbv7em` needs `thumbv7em`, since the DSP extension is optional in
+  `thumbv8m.main`.
+- Any other architecture (WebAssembly, Xtensa…) matches exactly.
+
+`xila-package target compatible <package> <device>` applies the same rule.
+
+The package's `xila_version` is also its native binary interface version:
+there is no separate number per target, so a native package is rebuilt for
+each Xila release it supports.
+
 ## Limits and follow-ups
 
 - Root rotation needs every intermediate `root.json` version; the registry

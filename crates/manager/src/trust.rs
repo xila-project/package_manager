@@ -232,9 +232,11 @@ pub fn fingerprint(public_key: &[u8; 32]) -> String {
 }
 
 /// Whether an entry can be installed on a device whose target is `target`
-/// and whose Xila release is `running`.
+/// and whose Xila release is `running`, following
+/// [`manifest::target_compatible`] and [`manifest::compatible`].
 pub fn compatible(entry: &RegistryEntry, target: &str, running: XilaVersion) -> bool {
-    entry.target == target && manifest::compatible(entry.xila_version, running)
+    manifest::target_compatible(&entry.target, target)
+        && manifest::compatible(entry.xila_version, running)
 }
 
 /// Registry-relative paths of the entries to try for `name`: the exact
@@ -587,6 +589,18 @@ mod tests {
         ));
         entry.xila_version = XilaVersion::new(1, 3);
         assert!(compatible(&entry, "wasm32-wasip1", XilaVersion::new(1, 9)));
+        entry.target = "riscv32imc-unknown-none-elf".into();
+        assert!(compatible(
+            &entry,
+            "riscv32imac-unknown-none-elf",
+            XilaVersion::new(1, 3)
+        ));
+        assert!(!compatible(
+            &entry,
+            "riscv32imac-unknown-none-elf",
+            XilaVersion::new(2, 0)
+        ));
+        assert!(!compatible(&entry, "wasm32-wasip1", XilaVersion::new(1, 3)));
     }
 
     #[test]

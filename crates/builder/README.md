@@ -215,6 +215,15 @@ directly with the generated runtime manifest format. Pass `--xila-version`
 with a `major.minor` value to `manifest generate` or `bundle init`. Prefer `bundle init`
 and `bundle build` for new applications.
 
+The target given to `bundle init` is a Rust target triple, dots included
+(`thumbv8m.main-none-eabihf`). To check whether a package built for one target
+runs on a device target, as devices do before installing it (see
+[target compatibility](../../docs/registry-trust.md#target-compatibility)):
+
+```sh
+xila-package target compatible riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf
+```
+
 Xila VFS operations will eventually be implemented in an app under
 `xila-project/applications`, and Shell will discover unpacked bundles.
 Neither feature is part of this host-side build implementation.
