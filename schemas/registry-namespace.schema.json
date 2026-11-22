@@ -128,7 +128,7 @@
         "properties": {
           "namespace": {
             "not": {
-              "pattern": "^io\\.(github|gitlab)\\.|_"
+              "pattern": "^io\\.(github|gitlab)(?:\\.|$)|_"
             }
           },
           "owner": {

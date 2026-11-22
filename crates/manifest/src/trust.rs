@@ -17,7 +17,12 @@
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
-use crate::{Error, MAX_MANIFEST_BYTES, developer_key::decode_key, registry::valid_publisher};
+use crate::{
+    Error, MAX_MANIFEST_BYTES,
+    developer_key::decode_key,
+    namespace::{NAMESPACES_DIRECTORY, namespace_paths, valid_namespace},
+    registry::valid_publisher,
+};
 
 /// Editor-facing JSON Schemas; tooling hints, never trust anchors.
 pub const ROOT_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-root.schema.json";
@@ -151,6 +156,12 @@ pub struct Index {
     pub files: Vec<IndexFile>,
 }
 
+fn listed_namespace(path: &str) -> Option<&str> {
+    path.strip_prefix(NAMESPACES_DIRECTORY)?
+        .strip_prefix('/')?
+        .strip_suffix(".json")
+}
+
 /// Registry-relative path of a key, namespace or entry file:
 /// `keys/developers/<id>.json`, `namespaces/<namespace>.json` or
 /// `packages/<labels…>/<version>.json`, without `.`/`..` segments.
@@ -163,9 +174,7 @@ pub fn valid_listed_path(path: &str) -> bool {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
     };
-    let namespace = path
-        .strip_prefix("namespaces/")
-        .is_some_and(|name| !name.contains('/'));
+    let namespace = listed_namespace(path).is_some_and(valid_namespace);
     path.len() <= 512
         && path.ends_with(".json")
         && (path.starts_with("keys/developers/") || path.starts_with("packages/") || namespace)
@@ -204,6 +213,15 @@ impl Index {
                 .all(|pair| pair[0].path.as_bytes() < pair[1].path.as_bytes());
         if self.version == 0 || self.expires <= self.version || !files {
             return Err(Error::InvalidIndex);
+        }
+        for file in &self.files {
+            if let Some(namespace) = listed_namespace(&file.path)
+                && namespace_paths(namespace)
+                    .iter()
+                    .any(|ancestor| self.file(ancestor).is_some())
+            {
+                return Err(Error::InvalidIndex);
+            }
         }
         Ok(())
     }
@@ -338,6 +356,22 @@ mod tests {
             700
         );
         assert!(decoded.file("packages/xila/clock/0.2.0.json").is_none());
+    }
+
+    #[test]
+    fn rejects_overlapping_namespaces_in_an_index() {
+        let mut index = index();
+        index.files.insert(
+            2,
+            IndexFile {
+                path: "namespaces/org.example.tools.json".into(),
+                sha256: "d".repeat(64),
+                size: 200,
+            },
+        );
+        assert_eq!(index.validate(), Err(Error::InvalidIndex));
+        index.files[2].path = "namespaces/org.examples.json".into();
+        assert_eq!(index.validate(), Ok(()));
     }
 
     #[test]

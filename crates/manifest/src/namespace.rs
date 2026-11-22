@@ -165,8 +165,8 @@ impl NamespaceOwner {
         };
         match self.kind.as_str() {
             DOMAIN_OWNER => {
-                !namespace.starts_with("io.github.")
-                    && !namespace.starts_with("io.gitlab.")
+                !namespaces_overlap(namespace, "io.github")
+                    && !namespaces_overlap(namespace, "io.gitlab")
                     && !namespace.contains('_')
                     && self.name.split('.').rev().eq(namespace.split('.'))
             }
@@ -395,6 +395,8 @@ mod tests {
             (owner("domain", "example.com"), "org.example"),
             (owner("domain", "org.example"), "org.example"),
             (owner("domain", "example.org"), "org.example.tools"),
+            (owner("domain", "github.io"), "io.github"),
+            (owner("domain", "gitlab.io"), "io.gitlab"),
             (owner("domain", "alice.github.io"), "io.github.alice"),
             (owner("domain", "my_site.org"), "org.my_site"),
             (owner("github", "bob"), "io.github.alice"),

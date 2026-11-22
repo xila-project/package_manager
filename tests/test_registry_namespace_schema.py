@@ -81,6 +81,8 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
             lambda n: n["owner"].update(kind="email"),
             lambda n: n["owner"].update(extra=True),
             # Account namespaces are owned by the account, never by a domain.
+            lambda n: n.update(namespace="io.github", owner={"kind": "domain", "name": "github.io"}),
+            lambda n: n.update(namespace="io.gitlab", owner={"kind": "domain", "name": "gitlab.io"}),
             lambda n: n.update(namespace="io.github.alice", owner={"kind": "domain", "name": "alice.github.io"}),
             lambda n: n.update(namespace="org.example", owner={"kind": "github", "name": "alice"}),
             lambda n: n.update(namespace="io.github.alice.tools", owner={"kind": "github", "name": "alice"}),
