@@ -221,8 +221,11 @@ pub fn check_listed(index: &Index, path: &str, bytes: &[u8]) -> Result<()> {
 }
 
 /// The developer key that must have signed the archive described by `entry`.
+///
+/// The key must be the entry's publisher and be authorized for the package's
+/// namespace and kind (Wasm or native, from the entry's target).
 pub fn publisher_key(entry: &RegistryEntry, key: &DeveloperKey) -> Result<PublicKey> {
-    if entry.publisher != key.id || !key.authorizes(&entry.name) {
+    if entry.publisher != key.id || !key.authorizes_package(&entry.name, &entry.target) {
         return Err(Error::Unauthorized);
     }
     PublicKey::from_bytes(&key.public_key_bytes()?).map_err(|_| Error::Unauthorized)
@@ -619,5 +622,51 @@ mod tests {
             Some(Error::Unauthorized)
         );
         assert_eq!(Error::Expired.to_string(), "registry index has expired");
+    }
+
+    #[test]
+    fn native_packages_need_a_native_authorization() {
+        let wasm_only = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
+        let mut native = entry();
+        native.target = "thumbv7em-none-eabi".into();
+        assert!(publisher_key(&entry(), &wasm_only).is_ok());
+        assert_eq!(
+            publisher_key(&native, &wasm_only).err(),
+            Some(Error::Unauthorized)
+        );
+        // Unknown, empty and differently cased targets count as native too.
+        for target in ["", "unknown", "WASM32-wasip1", "wasm32"] {
+            let mut other = entry();
+            other.target = target.into();
+            assert_eq!(
+                publisher_key(&other, &wasm_only).err(),
+                Some(Error::Unauthorized),
+                "{target}"
+            );
+        }
+        let both = decode_developer_key(
+            DEVELOPER
+                .replace(
+                    r#""namespaces":["xila"]"#,
+                    r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
+                )
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(publisher_key(&native, &both).is_ok());
+        let native_only = decode_developer_key(
+            DEVELOPER
+                .replace(
+                    r#""namespaces":["xila"]"#,
+                    r#""namespaces":["xila"],"kinds":["native"]"#,
+                )
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(publisher_key(&native, &native_only).is_ok());
+        assert_eq!(
+            publisher_key(&entry(), &native_only).err(),
+            Some(Error::Unauthorized)
+        );
     }
 }

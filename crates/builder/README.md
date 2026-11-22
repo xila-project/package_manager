@@ -166,7 +166,7 @@ then signs entries with its repository key (section 5).
 To check a whole registry checkout (as `xila-project/registry` CI does):
 
 ```sh
-xila-package registry check ./registry                       # keys, entry placement, namespaces
+xila-package registry check ./registry                       # keys, entry placement, namespaces, kinds
 xila-package registry check ./registry --archives ./downloads  # also every archive and signature
 ```
 
@@ -176,7 +176,9 @@ in `packages/<identifier with dots as />/<version>.json`, e.g.
 `packages/xila/pixel-painter/0.1.0.json`. `check` requires each entry to be
 canonical (exactly as `registry entry` writes it), to sit at its own path, and
 to name a publisher whose key lists the identifier's first label in
-`namespaces`. `--archives` takes the downloaded `.xpk` files, named after
+`namespaces` and the package's kind in `kinds` (`wasm` for `wasm32-*` and
+`wasm64-*` targets, `native` for every other target; a key without `kinds`
+may publish Wasm only). `--archives` takes the downloaded `.xpk` files, named after
 their URLs; the command itself never accesses the network.
 
 ### 5. Sign the registry (registry maintainers)
