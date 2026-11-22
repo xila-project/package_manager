@@ -186,6 +186,18 @@ their URLs; the command itself never accesses the network.
 Devices pin a **root** key and trust nothing else; see
 [registry-trust.md](../../docs/registry-trust.md) for the model and file formats.
 
+To start a new registry from scratch, `registry init` creates the layout
+(`root.json`, `root.json.sig`, `root.pub`, `keys/developers/`, `packages/`),
+generates the root and repository keys, and lists the repository key in
+`root.json`. The private seeds go to a directory you choose, outside the
+registry, created owner-only (`0600` files); keep the root seed offline:
+
+```sh
+xila-package registry init ./registry ~/.xila-registry-keys
+```
+
+The steps below do the same by hand, which is also how a root is rotated.
+
 ```sh
 # Offline, with the root key: name the online repository key (version must increase).
 xila-package key generate ./root.seed ./root.pub
