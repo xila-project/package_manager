@@ -5,14 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+description = "Trusted package and registry verification for Xila"
 
 [lib]
 name = "xila_package_manager"
 
 [dependencies]
-xila-package-manifest = { path = "../manifest" }
-xila-package-verification = { path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
+xila-package-manifest = { version = "0.4.0", path = "../manifest" }
+xila-package-verification = { version = "0.1.0", path = "../verification", default-features = false, features = ["sha256", "ed25519"] }
 
 [dev-dependencies]
 ed25519-dalek = { version = "3.0", default-features = false }

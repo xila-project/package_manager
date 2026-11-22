@@ -483,7 +483,6 @@ dependencies = [
  "tar",
  "xila-package-bundle",
  "xila-package-manifest",
- "xila-package-reader",
  "xila-package-verification",
 ]
 

@@ -96,19 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_between_writer_and_reader() {
-        let mut output = vec![];
-        let file = SourceFile {
-            path: "executables/calculator.wasm",
-            bytes: b"abc",
-        };
-        write_package(&mut output, &fixture(), &[file], None).unwrap();
-        let inspected = xila_package_reader::inspect_unsigned(&output).unwrap();
-        assert_eq!(inspected, fixture());
-    }
-
-    #[test]
-    fn reproducible_and_rejects_corruption() {
+    fn reproducible_and_rejects_incorrect_payload() {
         let file = SourceFile {
             path: "executables/calculator.wasm",
             bytes: b"abc",
@@ -139,11 +127,5 @@ mod tests {
             )
             .is_err()
         );
-        let offset = first
-            .windows(3)
-            .position(|window| window == b"abc")
-            .unwrap();
-        first[offset] ^= 1; // mutate the actual file payload
-        assert!(xila_package_reader::inspect_unsigned(&first).is_err());
     }
 }

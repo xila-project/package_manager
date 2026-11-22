@@ -1,10 +1,10 @@
 [package]
-publish = false
 name = "xila-package-verification"
 version = "0.1.0"
 edition = "2024"
 rust-version.workspace = true
-license = "Apache-2.0"
+license.workspace = true
+repository.workspace = true
 description = "Allocation-free SHA-256 and strict Ed25519 verification primitives"
 
 [features]

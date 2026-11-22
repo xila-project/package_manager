@@ -262,12 +262,12 @@ fn externally_signed_developer_bundle_authenticates_shortcut() {
     fs::write(source.join("executables/example.wasm"), b"wasm payload").unwrap();
     fs::write(
         source.join("xila-package.json"),
-        include_bytes!("../../../tests/fixtures/package-workflow-developer.json"),
+        include_bytes!("fixtures/package-workflow-developer.json"),
     )
     .unwrap();
     fs::write(
         source.join("shortcut.json"),
-        include_bytes!("../../../tests/fixtures/package-workflow-shortcut.json"),
+        include_bytes!("fixtures/package-workflow-shortcut.json"),
     )
     .unwrap();
     let bundle = temp.path().join("bundle.app");
