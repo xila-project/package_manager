@@ -24,17 +24,12 @@
 //!
 //! Archive extraction, networking and privilege checks stay with the device:
 //! the installer verifies a package into a staging directory, then hands it to
-//! [`installation::activate`].
+//! [`installation::activate`]. The planner changes nothing: the local installer
+//! applies each step.
 
 extern crate alloc;
 
 pub mod installation;
-//! The planner changes nothing: the local installer (xila-project/core#491)
-//! applies each step. Filesystems, networking and atomic installation stay
-//! outside this crate.
-
-extern crate alloc;
-
 #[cfg(feature = "planner")]
 pub mod planner;
 pub mod trust;
