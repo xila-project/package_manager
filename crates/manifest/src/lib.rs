@@ -37,7 +37,7 @@ pub use registry::{
 pub use repository::{
     ORIGIN_SCHEMA_URL, Origin, REPOSITORY_FORMAT_VERSION, REPOSITORY_SCHEMA_URL, Repository,
     SemanticVersion, decode_origin, decode_repository, encode_origin, encode_repository,
-    index_versions,
+    index_packages, index_versions,
 };
 pub use trust::{
     DEVELOPER_KEY_DOMAIN, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH, INDEX_SCHEMA_URL, Index,
