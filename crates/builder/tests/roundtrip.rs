@@ -589,3 +589,121 @@ fn registry_check_validates_keys_placement_and_archives() {
             .contains("differs")
     );
 }
+
+#[test]
+fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
+    let temp = tempdir().unwrap();
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
+    let run = |items: &[&str]| {
+        let output = Command::new(cli).args(items).output().unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    // Create the registry; private keys go outside it.
+    let (success, stdout, stderr) = run(&["registry", "init", &path("registry"), &path("private")]);
+    assert!(success, "{stderr}");
+    assert!(stdout.contains(&path("private")), "{stdout}");
+    for file in ["root.json", "root.json.sig", "root.pub"] {
+        assert!(temp.path().join("registry").join(file).is_file(), "{file}");
+    }
+    assert!(temp.path().join("registry/keys/developers").is_dir());
+    assert!(temp.path().join("registry/packages").is_dir());
+    let root = fs::read_to_string(path("registry/root.json")).unwrap();
+    let repository_public = fs::read(path("private/repository.pub")).unwrap();
+    assert!(root.contains(&base64(&repository_public)), "{root}");
+    assert!(root.contains(r#""id":"repository""#), "{root}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for seed in ["private/root.seed", "private/repository.seed"] {
+            let mode = fs::metadata(path(seed)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "{seed}");
+        }
+    }
+
+    // Refuse a non-empty registry and a key directory inside the registry.
+    assert!(!run(&["registry", "init", &path("registry"), &path("other")]).0);
+    assert!(
+        run(&["registry", "init", &path("second"), &path("second/keys")])
+            .2
+            .contains("outside the registry")
+    );
+
+    // Add a developer key and one entry for a test package.
+    assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
+    fs::write(
+        path("registry/keys/developers/tester.json"),
+        format!(
+            r#"{{"id":"tester","author":"Tester","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":["community"]}}"#,
+            base64(&fs::read(path("dev.pub")).unwrap())
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(temp.path().join("source/executables")).unwrap();
+    fs::write(temp.path().join("source/executables/clock.wasm"), b"clock").unwrap();
+    fs::write(
+        path("source/xila-package.json"),
+        r#"{"format_version":2,"name":"community.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+    )
+    .unwrap();
+    assert!(
+        run(&[
+            "bundle",
+            "build",
+            &path("source"),
+            &path("Clock.app"),
+            "--signing-key",
+            &path("dev.seed")
+        ])
+        .0
+    );
+    assert!(run(&["bundle", "archive", &path("Clock.app"), &path("Clock.xpk")]).0);
+    fs::create_dir_all(temp.path().join("registry/packages/community/clock")).unwrap();
+    let (success, _, stderr) = run(&[
+        "registry",
+        "entry",
+        &path("Clock.xpk"),
+        &path("dev.pub"),
+        "tester",
+        "https://example.com/releases/Clock.xpk",
+        &path("registry/packages/community/clock/0.1.0.json"),
+    ]);
+    assert!(success, "{stderr}");
+
+    // Sign the site and verify it from the pinned root key, as a device would.
+    let (success, _, stderr) = run(&[
+        "registry",
+        "sign",
+        &path("registry"),
+        &path("registry/root.pub"),
+        &path("private/repository.seed"),
+        &path("site"),
+    ]);
+    assert!(success, "{stderr}");
+    let (success, stdout, stderr) = run(&[
+        "registry",
+        "verify-signed",
+        &path("site"),
+        &path("registry/root.pub"),
+    ]);
+    assert!(success, "{stderr}");
+    assert!(stdout.contains("1 developer key(s), 1 entry"), "{stdout}");
+
+    // The root seed is not a repository key: signing with it must fail.
+    assert!(
+        !run(&[
+            "registry",
+            "sign",
+            &path("registry"),
+            &path("registry/root.pub"),
+            &path("private/root.seed"),
+            &path("site-wrong"),
+        ])
+        .0
+    );
+}

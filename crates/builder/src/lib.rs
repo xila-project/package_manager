@@ -429,6 +429,20 @@ pub enum RegistryOperation<'a> {
         #[arg(long)]
         expires_in_days: Option<&'a str>,
     },
+    /// Create a new registry: root key, repository key, signed root.json and
+    /// the empty layout. Private keys go outside the registry; never overwrites.
+    Init {
+        /// New registry directory (must be absent or empty).
+        directory: &'a str,
+        /// Directory for the private seeds, outside the registry (created owner-only).
+        key_directory: &'a str,
+        /// Identifier of the root key (default root).
+        #[arg(long)]
+        root_id: Option<&'a str>,
+        /// Identifier of the repository key (default repository).
+        #[arg(long)]
+        repository_id: Option<&'a str>,
+    },
     /// Print the fingerprint of a raw public key, as devices show it before
     /// trusting a repository's root key.
     Fingerprint {
@@ -802,6 +816,17 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
                     parse_number(expires_in_days, "expires-in-days")?.unwrap_or(30),
                 )
             })(),
+            RegistryOperation::Init {
+                directory,
+                key_directory,
+                root_id,
+                repository_id,
+            } => registry::init(
+                Path::new(directory),
+                Path::new(key_directory),
+                root_id.unwrap_or("root"),
+                repository_id.unwrap_or("repository"),
+            ),
             RegistryOperation::Fingerprint { public_key } => {
                 registry::fingerprint(Path::new(public_key))
             }
