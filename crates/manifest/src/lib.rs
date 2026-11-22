@@ -232,8 +232,12 @@ pub(crate) fn validate_identity(name: &str, version: &str, target: &str) -> Resu
     {
         return Err(Error::InvalidIdentifier);
     }
-    // Rust target triples, including dotted ones such as
-    // `thumbv8m.main-none-eabi`; a dot must sit between two other characters.
+    validate_target(target)
+}
+
+/// Rust target triples, including dotted ones such as
+/// `thumbv8m.main-none-eabi`; a dot must sit between two other characters.
+pub(crate) fn validate_target(target: &str) -> Result<(), Error> {
     if target.is_empty()
         || target.len() > 64
         || !target
