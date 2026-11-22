@@ -77,7 +77,7 @@ There are **two distinct manifests**:
   SHA-256), and optionally `.xila/manifest.sig` authenticating that manifest.
 
 ```sh
-cargo run -p xila-package-builder -- bundle init ./weather community.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 --entrypoint executables/weather.wasm --display-name Weather --icon resources/icon.png
+cargo run -p xila-package-builder -- bundle init ./weather org.example.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 --entrypoint executables/weather.wasm --display-name Weather --icon resources/icon.png
 # Place the compiled executable in weather/executables/ and your assets in weather/resources/.
 cargo run -p xila-package-builder -- bundle build ./weather ./Weather.app
 cargo run -p xila-package-builder -- bundle verify ./Weather.app

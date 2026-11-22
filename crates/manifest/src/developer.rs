@@ -43,16 +43,7 @@ impl DeveloperManifest {
         if self.format_version != FORMAT_VERSION {
             return Err(Error::UnsupportedVersion);
         }
-        if self.name.len() > 96
-            || !self.name.contains('.')
-            || self.name.split('.').any(|component| {
-                component.is_empty()
-                    || component.starts_with('-')
-                    || component.ends_with('-')
-                    || !component.bytes().all(|byte| {
-                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
-                    })
-            })
+        if !crate::valid_identifier(&self.name)
             || self.version.is_empty()
             || self.version.len() > 64
             || !self
@@ -145,7 +136,7 @@ mod tests {
         DeveloperManifest {
             schema: Some(DEVELOPER_SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "community.weather".to_string(),
+            name: "org.example.weather".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
             xila_version: XilaVersion::new(0, 1),

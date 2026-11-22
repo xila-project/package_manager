@@ -120,7 +120,7 @@ fn bundle_init_requires_a_valid_xila_version() {
                 "bundle",
                 "init",
                 directory.to_str().unwrap(),
-                "community.example",
+                "org.example.example",
                 "2.0.0",
                 "wasm32-wasip1",
             ])
@@ -545,12 +545,23 @@ fn registry_check_validates_keys_placement_and_archives() {
     assert!(run(&["registry", "check", root]).0);
     assert!(run(&["registry", "check", root, "--archives", &archives]).0);
 
-    // A key that does not cover the namespace.
-    fs::write(&key_file, key(r#""community""#)).unwrap();
+    // A key without the legacy grant may not publish xila.<name>.
+    fs::write(
+        &key_file,
+        key(r#""xila""#).replace(r#","namespaces":["xila"]"#, ""),
+    )
+    .unwrap();
     assert!(
         run(&["registry", "check", root])
             .1
             .contains("may not publish xila.clock")
+    );
+    // Key files grant no namespace other than the legacy one.
+    fs::write(&key_file, key(r#""community""#)).unwrap();
+    assert!(
+        run(&["registry", "check", root])
+            .1
+            .contains("invalid developer key")
     );
     fs::write(&key_file, key(r#""xila""#)).unwrap();
 
@@ -639,16 +650,22 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
     fs::write(
         path("registry/keys/developers/tester.json"),
         format!(
-            r#"{{"id":"tester","author":"Tester","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":["community"]}}"#,
+            r#"{{"id":"tester","author":"Tester","algorithm":"ed25519","public_key":"{}","openssh":null}}"#,
             base64(&fs::read(path("dev.pub")).unwrap())
         ),
+    )
+    .unwrap();
+    fs::create_dir(temp.path().join("registry/namespaces")).unwrap();
+    fs::write(
+        path("registry/namespaces/org.example.json"),
+        r#"{"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["tester"]}"#,
     )
     .unwrap();
     fs::create_dir_all(temp.path().join("source/executables")).unwrap();
     fs::write(temp.path().join("source/executables/clock.wasm"), b"clock").unwrap();
     fs::write(
         path("source/xila-package.json"),
-        r#"{"format_version":2,"name":"community.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+        r#"{"format_version":2,"name":"org.example.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
     )
     .unwrap();
     assert!(
@@ -663,7 +680,7 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         .0
     );
     assert!(run(&["bundle", "archive", &path("Clock.app"), &path("Clock.xpk")]).0);
-    fs::create_dir_all(temp.path().join("registry/packages/community/clock")).unwrap();
+    fs::create_dir_all(temp.path().join("registry/packages/org/example/clock")).unwrap();
     let (success, _, stderr) = run(&[
         "registry",
         "entry",
@@ -671,7 +688,7 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         &path("dev.pub"),
         "tester",
         "https://example.com/releases/Clock.xpk",
-        &path("registry/packages/community/clock/0.1.0.json"),
+        &path("registry/packages/org/example/clock/0.1.0.json"),
     ]);
     assert!(success, "{stderr}");
 
@@ -692,7 +709,10 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         &path("registry/root.pub"),
     ]);
     assert!(success, "{stderr}");
-    assert!(stdout.contains("1 developer key(s), 1 entry"), "{stdout}");
+    assert!(
+        stdout.contains("1 developer key(s), 1 namespace(s), 1 entry"),
+        "{stdout}"
+    );
 
     // The root seed is not a repository key: signing with it must fail.
     assert!(

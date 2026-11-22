@@ -51,7 +51,7 @@ use xila_package_manifest::{Manifest, ManifestFile, Application, Metadata, FORMA
 let manifest = Manifest {
     schema: Some(xila_package_manifest::SCHEMA_URL.into()),
     format_version: FORMAT_VERSION,
-    name: "community.weather".into(),
+    name: "org.example.weather".into(),
     version: "1.0.0".into(),
     target: "wasm32-wasip1".into(),
     xila_version: XilaVersion::new(0, 1),

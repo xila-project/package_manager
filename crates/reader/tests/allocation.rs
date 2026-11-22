@@ -117,7 +117,7 @@ fn large_manifest_archive(sign: bool) -> (Vec<u8>, PublicKey, usize, usize) {
     let manifest = Manifest {
         schema: Some(SCHEMA_URL.to_string()),
         format_version: FORMAT_VERSION,
-        name: "community.large-manifest-benchmark".into(),
+        name: "org.example.large-manifest-benchmark".into(),
         version: "1.0.0".into(),
         target: "wasm32-wasip1".into(),
         xila_version: XilaVersion::new(0, 1),
