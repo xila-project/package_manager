@@ -133,6 +133,34 @@ A developer key lists the kinds it may publish in `kinds` (`"wasm"`,
 keep their meaning and native publication always needs an explicit grant. A key
 that is not authorized for the kind of an entry's target fails `publisher_key`,
 `xila-package registry check` and `xila-package registry verify-signed`.
+## Installation planning
+
+`xila_package_manager::planner` (feature `planner`, `no_std + alloc`) chooses
+what to install. `IndexCatalog` lists the versions of a package from the
+authenticated index, newest first, and fetches only the entries it considers,
+running steps 3's `verify_entry` and `check_listed` on each. `plan` then:
+
+- keeps an installed version that satisfies every requirement, unless the
+  package was requested with `Options::upgrade`;
+- otherwise selects the first version that satisfies every requirement known
+  so far and is `compatible` with the device target and running Xila release;
+- never revisits a selection: a later requirement that it does not satisfy is
+  an `Error::Conflict`, as is a kept package whose dependency would change to
+  a version it does not accept;
+- rejects dependency cycles, downgrades (unless allowed), entries for another
+  package or version than the one asked for, and work beyond `Limits`
+  (packages, fetched entries, dependencies per package, depth).
+
+The result lists `Install`, `Upgrade` and `Downgrade` steps, each package after
+its dependencies, with the authenticated entry. For each step the caller
+downloads the archive, checks its size and SHA-256, verifies it with
+`publisher_key` (step 4) and hands it to the local installer, which owns every
+change to the device.
+
+Dependency requirements are written `*`, `=VERSION`, `>=VERSION` or
+`^VERSION`. Registry entries and manifests do not declare dependencies yet, so
+`IndexCatalog` candidates currently have none; the planner already handles
+them for other catalogs, such as `MemoryCatalog`.
 
 ## Several repositories
 
@@ -159,6 +187,35 @@ A device can use several registries. Each configured repository
   Installing, upgrading and removing a package, and recording its origin, are
   crash-consistent transactions: see
   [installation transactions](installation-transactions.md).
+
+## Target compatibility
+
+A package's `target` is a Rust target triple, dots included
+(`thumbv8m.main-none-eabihf`). `wasm32-*` and `wasm64-*` packages run in the
+virtual machine; every other target is native and runs directly on the
+processor.
+
+`compatible` checks the target with
+`xila_package_manifest::target_compatible`, and the Xila version. Equal
+targets match. Otherwise everything after the architecture (vendor, operating
+system, binary interface) must be equal, and the device architecture must
+provide every instruction the package may use:
+
+- RISC-V: same width, same base (`i` or `e`), same floating-point extensions
+  (`f`, `d`, `q`, which set the calling convention), and the package's other
+  extensions a subset of the device's (`g` is `imafd`). `riscv32imc` runs on
+  `riscv32imac`, not the reverse.
+- Arm M-profile: `thumbv6m` runs on every later profile, `thumbv7m` on
+  `thumbv7em` and `thumbv8m.main`, and `thumbv8m.base` on `thumbv8m.main`.
+  `thumbv7em` needs `thumbv7em`, since the DSP extension is optional in
+  `thumbv8m.main`.
+- Any other architecture (WebAssembly, Xtensa…) matches exactly.
+
+`xila-package target compatible <package> <device>` applies the same rule.
+
+The package's `xila_version` is also its native binary interface version:
+there is no separate number per target, so a native package is rebuilt for
+each Xila release it supports.
 
 ## Limits and follow-ups
 

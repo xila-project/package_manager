@@ -519,6 +519,68 @@ fn write_signed_site(
     verify_signed(output, root_public_key, Some(version))
 }
 
+/// Create a new registry in `directory` with the layout of
+/// `xila-project/registry`: a root-signed `root.json`, `root.pub`, an empty
+/// `keys/developers` and an empty `packages`. A root key and a repository key
+/// are generated; their private seeds go to `key_directory`, which must be
+/// outside the registry (it is never published), created owner-only. The
+/// repository key is the one `root.json` lists for signing.
+pub fn init(
+    directory: &Path,
+    key_directory: &Path,
+    root_id: &str,
+    repository_id: &str,
+) -> Result<()> {
+    if directory.exists() && fs::read_dir(directory)?.next().is_some() {
+        return Err(invalid("registry directory exists and is not empty").into());
+    }
+    fs::create_dir_all(key_directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(key_directory, fs::Permissions::from_mode(0o700))?;
+    }
+    fs::create_dir_all(directory)?;
+    let registry = directory.canonicalize()?;
+    let keys = key_directory.canonicalize()?;
+    if keys.starts_with(&registry) || registry.starts_with(&keys) {
+        return Err(invalid("the key directory must be outside the registry").into());
+    }
+
+    let root_seed = keys.join("root.seed");
+    let repository_seed = keys.join("repository.seed");
+    let repository_public = keys.join("repository.pub");
+    let root_public = registry.join("root.pub");
+    crate::key::generate(&root_seed, &root_public)?;
+    crate::key::generate(&repository_seed, &repository_public)?;
+    fs::create_dir_all(registry.join("keys/developers"))?;
+    fs::create_dir_all(registry.join("packages"))?;
+    root(
+        &root_seed,
+        root_id,
+        &repository_public,
+        repository_id,
+        1,
+        &registry.join(ROOT_PATH),
+    )?;
+
+    println!("Created registry {}", registry.display());
+    println!(
+        "Root key {}",
+        trust::fingerprint(&read_raw_public_key(&root_public)?)
+    );
+    println!(
+        "Private keys written to {} (keep them outside the registry):",
+        keys.display()
+    );
+    println!("  {} (root key: keep offline)", root_seed.display());
+    println!(
+        "  {} (repository key: signs publications)",
+        repository_seed.display()
+    );
+    Ok(())
+}
+
 fn collect_site(root: &Path, directory: &Path, output: &mut Vec<String>) -> Result<()> {
     for path in sorted_entries(directory)? {
         let metadata = fs::symlink_metadata(&path)?;

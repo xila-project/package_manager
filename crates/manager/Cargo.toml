@@ -5,10 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Trusted package and registry verification for Xila"
+description = "Trusted package and registry verification and installation planning for Xila"
 
 [lib]
 name = "xila_package_manager"
+
+[features]
+default = ["planner"]
+# Bounded dependency planner over registry entries.
+planner = []
 
 [dependencies]
 xila-package-manifest = { version = "0.4.0", path = "../manifest" }

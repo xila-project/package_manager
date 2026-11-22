@@ -191,6 +191,18 @@ their URLs; the command itself never accesses the network.
 Devices pin a **root** key and trust nothing else; see
 [registry-trust.md](../../docs/registry-trust.md) for the model and file formats.
 
+To start a new registry from scratch, `registry init` creates the layout
+(`root.json`, `root.json.sig`, `root.pub`, `keys/developers/`, `packages/`),
+generates the root and repository keys, and lists the repository key in
+`root.json`. The private seeds go to a directory you choose, outside the
+registry, created owner-only (`0600` files); keep the root seed offline:
+
+```sh
+xila-package registry init ./registry ~/.xila-registry-keys
+```
+
+The steps below do the same by hand, which is also how a root is rotated.
+
 ```sh
 # Offline, with the root key: name the online repository key (version must increase).
 xila-package key generate ./root.seed ./root.pub
@@ -219,6 +231,15 @@ available for existing scripts and the old reusable Wasm workflow; they work
 directly with the generated runtime manifest format. Pass `--xila-version`
 with a `major.minor` value to `manifest generate` or `bundle init`. Prefer `bundle init`
 and `bundle build` for new applications.
+
+The target given to `bundle init` is a Rust target triple, dots included
+(`thumbv8m.main-none-eabihf`). To check whether a package built for one target
+runs on a device target, as devices do before installing it (see
+[target compatibility](../../docs/registry-trust.md#target-compatibility)):
+
+```sh
+xila-package target compatible riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf
+```
 
 Xila VFS operations will eventually be implemented in an app under
 `xila-project/applications`, and Shell will discover unpacked bundles.

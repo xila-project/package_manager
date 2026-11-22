@@ -53,15 +53,7 @@ impl DeveloperManifest {
         {
             return Err(Error::InvalidIdentifier);
         }
-        if self.target.is_empty()
-            || self.target.len() > 64
-            || !self
-                .target
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
-        {
-            return Err(Error::InvalidTarget);
-        }
+        crate::validate_target(&self.target)?;
         if self.capabilities.len() > 32
             || self
                 .capabilities
@@ -205,5 +197,10 @@ mod tests {
         source = example();
         source.schema = Some("https://example.com/schema".into());
         assert_eq!(source.validate(), Err(Error::InvalidSchema));
+        source = example();
+        source.target = "thumbv8m..main-none-eabi".into();
+        assert_eq!(source.validate(), Err(Error::InvalidTarget));
+        source.target = "thumbv8m.main-none-eabihf".into();
+        assert_eq!(source.validate(), Ok(()));
     }
 }

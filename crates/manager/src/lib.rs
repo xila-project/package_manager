@@ -10,6 +10,9 @@
 //! - [`installation`]: crash-consistent install, upgrade, removal and
 //!   recovery of verified bundles over a small [`installation::Storage`]
 //!   trait, with a transaction journal (`no_std + alloc`).
+//! - [`planner`] (feature `planner`, enabled by default): turn install
+//!   requests into an ordered, bounded installation plan over authenticated
+//!   registry entries (`no_std + alloc`).
 //!
 //! The other subcrates provide:
 //!
@@ -21,9 +24,12 @@
 //!
 //! Archive extraction, networking and privilege checks stay with the device:
 //! the installer verifies a package into a staging directory, then hands it to
-//! [`installation::activate`].
+//! [`installation::activate`]. The planner changes nothing: the local installer
+//! applies each step.
 
 extern crate alloc;
 
 pub mod installation;
+#[cfg(feature = "planner")]
+pub mod planner;
 pub mod trust;
