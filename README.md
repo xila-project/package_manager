@@ -23,7 +23,7 @@ Shared Rust workspace for building, signing and validating Xila application bund
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
 | `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them; also a library, reused by the `xila package` subcommand of [`tools`](https://github.com/xila-project/tools) |
-| `xila-package-manager` | `no_std + alloc` registry trust chain and crash-consistent installation transactions (install, upgrade, removal and recovery; see [installation transactions](docs/installation-transactions.md)) |
+| `xila-package-manager` | `no_std + alloc` registry trust chain (`trust`), crash-consistent installation transactions (install, upgrade, removal and recovery; see [installation transactions](docs/installation-transactions.md)) and a bounded, deterministic dependency planner (`planner`, default feature) that turns install requests into ordered steps for the local installer |
 
 The **experimental version 2 runtime JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
