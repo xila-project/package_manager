@@ -1,7 +1,8 @@
 //! Bounded-memory verification of signed Xila packages from TAR blocks.
 //!
 //! The TAR and each executable/resource are never buffered in full. Only
-//! bounded signed metadata and the parsed manifest are retained in memory.
+//! bounded signed metadata is buffered until header authentication succeeds,
+//! after which only the parsed manifest is retained in memory.
 //! File contents are authenticated incrementally with ContentVerifier.
 
 use alloc::vec::Vec;
@@ -35,7 +36,10 @@ enum State {
 /// Consume a package, one exactly 512-byte TAR block at a time.
 ///
 /// - A maximum of 64 KiB of raw manifest bytes (plus signing domain separator)
-///   is buffered. The parsed manifest also allocates a bounded inventory.
+///   is buffered until header authentication succeeds (or until manifest
+///   decoding succeeds when no trusted key is supplied), then released before
+///   payload verification begins. The parsed manifest also allocates a bounded
+///   inventory.
 /// - Each payload is hashed with a constant-size SHA-256 state, independently
 ///   of its size; the caller owns the 512-byte I/O buffer.
 /// - When a trusted key is supplied, the detached *ordinary* Ed25519 signature
@@ -87,6 +91,7 @@ impl<'a> StreamingVerifier<'a> {
         let result = self.consume(block);
         if result.is_err() {
             self.failed = true;
+            self.signed_message = Vec::new();
         }
         result
     }
@@ -186,6 +191,9 @@ impl<'a> StreamingVerifier<'a> {
                     let decoded = xila_package_manifest::decode(&self.signed_message[start..])
                         .map_err(Error::from_manifest)?;
                     self.manifest = Some(decoded);
+                    if self.trusted.is_none() {
+                        self.signed_message = Vec::new();
+                    }
                     self.state = State::AfterManifest;
                 } else {
                     self.state = State::Manifest {
@@ -249,6 +257,7 @@ impl<'a> StreamingVerifier<'a> {
                 .verify(&self.signed_message, &self.signature)
                 .map_err(|_| Error::InvalidSignature)?;
         }
+        self.signed_message = Vec::new();
         self.signature_verified = true;
         Ok(())
     }
@@ -599,5 +608,109 @@ mod tests {
         assert_eq!(verifier.push(&[0xff; 512]), Err(Error::InvalidArchive));
         assert_eq!(verifier.push(&[0; 512]), Err(Error::InvalidArchive));
         assert_eq!(verifier.finish(), Err(Error::InvalidArchive));
+    }
+
+    #[test]
+    fn releases_signed_manifest_buffer_after_header_authentication() {
+        let (archive, public, _) = fixture(true);
+        let manifest_len =
+            xila_package_manifest::encode(&crate::verify_signed(&archive, &public).unwrap())
+                .unwrap()
+                .len();
+        let manifest_blocks = 1 + manifest_len.div_ceil(BLOCKSIZE);
+        let first_payload_block = manifest_blocks + 2;
+
+        let mut verifier = StreamingVerifier::new(Some(&public));
+        for (index, chunk) in archive.as_chunks::<BLOCKSIZE>().0.iter().enumerate() {
+            if index == first_payload_block {
+                assert!(
+                    verifier.signed_message.capacity() >= SIGNED_DOMAIN.len() + 4 + manifest_len
+                );
+                assert!(!verifier.signature_verified);
+            }
+            verifier.push(chunk).unwrap();
+            if index >= first_payload_block {
+                assert!(verifier.signature_verified);
+                assert!(verifier.signed_message.is_empty());
+                assert_eq!(verifier.signed_message.capacity(), 0);
+            }
+        }
+        let manifest = verifier.finish().unwrap();
+        assert_eq!(manifest.files.len(), 2);
+    }
+
+    #[test]
+    fn releases_manifest_buffer_immediately_for_unsigned_inspection() {
+        let (archive, _, _) = fixture(false);
+        let manifest_len =
+            xila_package_manifest::encode(&crate::inspect_unsigned(&archive).unwrap())
+                .unwrap()
+                .len();
+        let manifest_end_block = manifest_len.div_ceil(BLOCKSIZE);
+
+        let mut verifier = StreamingVerifier::new(None);
+        for (index, chunk) in archive.as_chunks::<BLOCKSIZE>().0.iter().enumerate() {
+            verifier.push(chunk).unwrap();
+            if index >= manifest_end_block {
+                assert!(verifier.signed_message.is_empty());
+                assert_eq!(verifier.signed_message.capacity(), 0);
+            }
+        }
+        assert_eq!(verifier.finish().unwrap().files.len(), 2);
+    }
+
+    #[test]
+    fn releases_signed_manifest_buffer_on_zero_file_package_and_failure() {
+        let manifest = Manifest {
+            schema: Some(SCHEMA_URL.to_string()),
+            format_version: FORMAT_VERSION,
+            name: "community.native-reference".into(),
+            version: "1.0.0".into(),
+            target: "native".into(),
+            xila_version: XilaVersion::new(0, 1),
+            capabilities: vec![],
+            files: vec![],
+            application: Some(Application {
+                entrypoint: "/system/executables/settings".into(),
+                display_name: "Settings".into(),
+                icon: alloc::string::String::new(),
+                show_in_launcher: true,
+            }),
+            metadata: None,
+        };
+        let private = SigningKey::from_bytes(&[11_u8; 32]);
+        let public = PublicKey::from_bytes(&private.verifying_key().to_bytes()).unwrap();
+        let json = xila_package_manifest::encode(&manifest).unwrap();
+        let signature = private
+            .sign(&signing_message(json.as_bytes()).unwrap())
+            .to_bytes();
+        let mut archive = Vec::new();
+        write_package(&mut archive, &manifest, &[], Some(&signature)).unwrap();
+
+        let mut verifier = StreamingVerifier::new(Some(&public));
+        for chunk in archive.as_chunks::<BLOCKSIZE>().0 {
+            verifier.push(chunk).unwrap();
+        }
+        assert!(verifier.signature_verified);
+        assert_eq!(verifier.signed_message.capacity(), 0);
+        assert_eq!(verifier.finish().unwrap(), manifest);
+
+        // Corrupt the signature and confirm the buffer is released on failure
+        // and the verifier stays permanently poisoned.
+        let signature_data_block = 1 + json.len().div_ceil(BLOCKSIZE) + 1;
+        let mut bad_archive = archive.clone();
+        bad_archive[signature_data_block * BLOCKSIZE] ^= 0xff;
+        let mut failing = StreamingVerifier::new(Some(&public));
+        let mut observed = None;
+        for chunk in bad_archive.as_chunks::<BLOCKSIZE>().0 {
+            if let Err(error) = failing.push(chunk) {
+                observed = Some(error);
+                break;
+            }
+        }
+        assert_eq!(observed, Some(Error::InvalidSignature));
+        assert_eq!(failing.signed_message.capacity(), 0);
+        assert_eq!(failing.push(&[0; BLOCKSIZE]), Err(Error::InvalidArchive));
+        assert_eq!(failing.finish(), Err(Error::InvalidArchive));
     }
 }
