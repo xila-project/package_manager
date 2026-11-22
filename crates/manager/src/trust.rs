@@ -1,6 +1,7 @@
 //! Registry trust chain: pinned root key → `root.json` → repository key →
-//! `index.json`, registry entries and developer keys → developer key allowed to
-//! publish a package.
+//! `index.json`, registry entries, developer keys and namespace files →
+//! developer key that the namespace file (or, for `xila.<name>`, the legacy
+//! rule) allows to publish a package.
 //!
 //! This module only authenticates metadata. Verifying the archive itself
 //! (size, SHA-256, manifest signature with [`publisher_key`], file hashes) and
@@ -14,8 +15,9 @@ use core::fmt;
 
 use xila_package_manifest::{
     self as manifest, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, Index,
-    NamedKey, ROOT_DOMAIN, RegistryEntry, Root, XilaVersion, decode_developer_key, decode_index,
-    decode_registry_entry, decode_root, decode_sha256, signed_message,
+    NAMESPACE_DOMAIN, NamedKey, Namespace, ROOT_DOMAIN, RegistryEntry, Root, XilaVersion,
+    decode_developer_key, decode_index, decode_namespace, decode_registry_entry, decode_root,
+    decode_sha256, signed_message,
 };
 use xila_package_verification::{PublicKey, Sha256Verifier};
 
@@ -32,7 +34,8 @@ pub enum Error {
     Expired,
     /// The file is absent from the index, or differs from its listed hash/size.
     NotListed,
-    /// The developer key does not match the entry's publisher or namespace.
+    /// The developer key does not match the entry's publisher, is not listed
+    /// in the namespace file covering the entry, or lacks the kind.
     Unauthorized,
 }
 
@@ -188,6 +191,13 @@ impl TrustedRoot {
         verify_any(&self.repository_keys, DEVELOPER_KEY_DOMAIN, bytes, sig)?;
         Ok(decode_developer_key(bytes)?)
     }
+
+    /// Authenticate one namespace file (`namespaces/<namespace>.json`) by its
+    /// own signature. Also call [`check_listed`] when an index is available.
+    pub fn verify_namespace(&self, bytes: &[u8], sig: &[u8]) -> Result<Namespace> {
+        verify_any(&self.repository_keys, NAMESPACE_DOMAIN, bytes, sig)?;
+        Ok(decode_namespace(bytes)?)
+    }
 }
 
 /// Require `bytes` to be exactly the file the index lists at `path`.
@@ -205,13 +215,39 @@ pub fn check_listed(index: &Index, path: &str, bytes: &[u8]) -> Result<()> {
 
 /// The developer key that must have signed the archive described by `entry`.
 ///
-/// The key must be the entry's publisher and be authorized for the package's
-/// namespace and kind (Wasm or native, from the entry's target).
-pub fn publisher_key(entry: &RegistryEntry, key: &DeveloperKey) -> Result<PublicKey> {
-    if entry.publisher != key.id || !key.authorizes_package(&entry.name, &entry.target) {
+/// The key must be the entry's publisher, be listed in `namespace`, the
+/// verified namespace file covering the entry's identifier (see
+/// [`namespace_candidates`]), and be authorized for the package's kind (Wasm
+/// or native, from the entry's target). Without a namespace file only the
+/// legacy rule applies: a `xila.<name>` entry and a key whose own `namespaces`
+/// list `xila`.
+pub fn namespace_publisher_key(
+    entry: &RegistryEntry,
+    key: &DeveloperKey,
+    namespace: Option<&Namespace>,
+) -> Result<PublicKey> {
+    if entry.publisher != key.id || !key.authorizes_package(&entry.name, &entry.target, namespace) {
         return Err(Error::Unauthorized);
     }
     PublicKey::from_bytes(&key.public_key_bytes()?).map_err(|_| Error::Unauthorized)
+}
+
+/// [`namespace_publisher_key`] without a namespace file: only the legacy
+/// `xila.<name>` rule can authorize the key.
+pub fn publisher_key(entry: &RegistryEntry, key: &DeveloperKey) -> Result<PublicKey> {
+    namespace_publisher_key(entry, key, None)
+}
+
+/// Registry-relative paths of the listed namespace files that may cover
+/// `name`. Namespace files never overlap, so at most one is returned: fetch
+/// it, authenticate it with [`TrustedRoot::verify_namespace`] and
+/// [`check_listed`], and pass it to [`namespace_publisher_key`]. Empty for a
+/// legacy `xila.<name>` identifier.
+pub fn namespace_candidates(index: &Index, name: &str) -> Vec<String> {
+    manifest::namespace_paths(name)
+        .into_iter()
+        .filter(|path| index.file(path).is_some())
+        .collect()
 }
 
 /// Human-comparable fingerprint of a public key: the first 16 bytes of its
@@ -276,6 +312,7 @@ mod tests {
     };
 
     const DEVELOPER: &str = r#"{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#;
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["xila-project"]}"#;
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -599,12 +636,119 @@ mod tests {
             Some(Error::Unauthorized)
         );
         let mut other = entry();
-        other.name = "community.clock".into();
+        other.name = "org.example.clock".into();
         assert_eq!(
             publisher_key(&other, &developer).err(),
             Some(Error::Unauthorized)
         );
         assert_eq!(Error::Expired.to_string(), "registry index has expired");
+    }
+
+    fn namespaced_entry(name: &str) -> RegistryEntry {
+        RegistryEntry {
+            name: name.into(),
+            ..entry()
+        }
+    }
+
+    #[test]
+    fn namespace_files_authorize_reverse_domain_entries() {
+        let trusted = trusted();
+        let bytes = NAMESPACE.as_bytes();
+        let namespace = trusted
+            .verify_namespace(bytes, &sign(&key(2), NAMESPACE_DOMAIN, bytes))
+            .unwrap();
+        // Denied signatures: the root key, another domain, a truncated one.
+        for bad in [
+            sign(&key(1), NAMESPACE_DOMAIN, bytes),
+            sign(&key(2), DEVELOPER_KEY_DOMAIN, bytes),
+            sign(&key(2), ENTRY_DOMAIN, bytes),
+            vec![0; 63],
+        ] {
+            assert_eq!(
+                trusted.verify_namespace(bytes, &bad).err(),
+                Some(Error::InvalidSignature)
+            );
+        }
+
+        let developer = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
+        let weather = namespaced_entry("org.example.weather");
+        assert!(namespace_publisher_key(&weather, &developer, Some(&namespace)).is_ok());
+        let nested = namespaced_entry("org.example.tools.clock");
+        assert!(namespace_publisher_key(&nested, &developer, Some(&namespace)).is_ok());
+        // The legacy rule still applies with or without a namespace file.
+        assert!(namespace_publisher_key(&entry(), &developer, Some(&namespace)).is_ok());
+
+        // Denied: no namespace file, an identifier the file does not cover, a
+        // key the file does not list, and a publisher that is not the key.
+        for (entry, namespace) in [
+            (weather.clone(), None),
+            (namespaced_entry("org.examples.weather"), Some(&namespace)),
+            (namespaced_entry("com.example.weather"), Some(&namespace)),
+        ] {
+            assert_eq!(
+                namespace_publisher_key(&entry, &developer, namespace).err(),
+                Some(Error::Unauthorized),
+                "{}",
+                entry.name
+            );
+        }
+        assert_eq!(
+            publisher_key(&weather, &developer).err(),
+            Some(Error::Unauthorized)
+        );
+        let mut other = namespace.clone();
+        other.developer_keys = vec!["alice".to_string()];
+        assert_eq!(
+            namespace_publisher_key(&weather, &developer, Some(&other)).err(),
+            Some(Error::Unauthorized)
+        );
+        let mut stranger = developer.clone();
+        stranger.id = "alice".into();
+        assert_eq!(
+            namespace_publisher_key(&weather, &stranger, Some(&namespace)).err(),
+            Some(Error::Unauthorized)
+        );
+        // A listed key still needs the native grant for native code.
+        let mut native = weather.clone();
+        native.target = "thumbv7em-none-eabi".into();
+        assert_eq!(
+            namespace_publisher_key(&native, &developer, Some(&namespace)).err(),
+            Some(Error::Unauthorized)
+        );
+        // A key without the legacy grant cannot publish xila.<name>.
+        let mut modern = developer.clone();
+        modern.namespaces = None;
+        assert!(namespace_publisher_key(&weather, &modern, Some(&namespace)).is_ok());
+        assert_eq!(
+            namespace_publisher_key(&entry(), &modern, Some(&namespace)).err(),
+            Some(Error::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn namespace_candidates_are_the_listed_covering_files() {
+        let file = |path: &str| IndexFile {
+            path: path.into(),
+            sha256: "a".repeat(64),
+            size: 1,
+        };
+        let index = Index {
+            schema: Some(INDEX_SCHEMA_URL.into()),
+            format_version: TRUST_FORMAT_VERSION,
+            version: 1,
+            expires: 2,
+            files: vec![
+                file("namespaces/org.example.json"),
+                file("namespaces/org.other.json"),
+            ],
+        };
+        assert_eq!(
+            namespace_candidates(&index, "org.example.tools.clock"),
+            ["namespaces/org.example.json"]
+        );
+        assert!(namespace_candidates(&index, "org.examples.clock").is_empty());
+        assert!(namespace_candidates(&index, "xila.clock").is_empty());
     }
 
     #[test]

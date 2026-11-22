@@ -16,10 +16,11 @@ use std::{
 use xila_package_manager::trust::{self, TrustedRoot};
 use xila_package_manifest::{
     Archive, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH,
-    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NamedKey, PackageKind, ROOT_DOMAIN, ROOT_PATH,
-    ROOT_SCHEMA_URL, RegistryEntry, Root, SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION,
-    decode_developer_key, decode_registry_entry, encode_index, encode_registry_entry, encode_root,
-    signed_message,
+    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NAMESPACE_DOMAIN, NAMESPACES_DIRECTORY, NamedKey,
+    Namespace, PackageKind, ROOT_DOMAIN, ROOT_PATH, ROOT_SCHEMA_URL, RegistryEntry, Root,
+    SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_developer_key, decode_namespace,
+    decode_registry_entry, encode_index, encode_registry_entry, encode_root, is_legacy_identifier,
+    namespace_covers, namespace_path, signed_message,
 };
 use xila_package_verification::PublicKey;
 
@@ -123,11 +124,80 @@ fn failure(path: &Path, message: &str) -> Box<dyn std::error::Error> {
     invalid(&format!("{}: {message}", path.display())).into()
 }
 
-/// Check a registry checkout: developer keys (`keys/developers/<id>.json`)
-/// and entries (`packages/<name, dots as />/<version>.json`). Each entry must
-/// be canonical, sit at its own path, and name a publisher whose key covers
-/// its namespace. With `archives`, a directory of the downloaded `.xpk` files
-/// (named after their URLs), each archive is also verified against its entry.
+/// The namespace file covering `name`, if any (they never overlap).
+fn covering<'a>(namespaces: &'a BTreeMap<String, Namespace>, name: &str) -> Option<&'a Namespace> {
+    namespaces
+        .values()
+        .find(|namespace| namespace_covers(&namespace.namespace, name))
+}
+
+/// Check that a new namespace file overlaps no other one and lists only known
+/// developer keys.
+fn check_namespace(
+    namespace: &Namespace,
+    namespaces: &BTreeMap<String, Namespace>,
+    keys: &BTreeMap<String, DeveloperKey>,
+) -> std::result::Result<(), String> {
+    if let Some(other) = namespaces.keys().find(|other| {
+        xila_package_manifest::namespace::namespaces_overlap(other, &namespace.namespace)
+    }) {
+        return Err(format!(
+            "namespace {} overlaps namespace {other}; one owner per identifier",
+            namespace.namespace
+        ));
+    }
+    if let Some(unknown) = namespace
+        .developer_keys
+        .iter()
+        .find(|key| !keys.contains_key(*key))
+    {
+        return Err(format!("unknown developer key {unknown}"));
+    }
+    Ok(())
+}
+
+/// Why `key` may not publish `entry`, if it may not.
+fn authorization_failure(
+    entry: &RegistryEntry,
+    key: &DeveloperKey,
+    namespace: Option<&Namespace>,
+) -> Option<String> {
+    if !key.authorizes(&entry.name, namespace) {
+        return Some(match namespace {
+            None if !is_legacy_identifier(&entry.name) => format!(
+                "no namespace file covers {}; add {NAMESPACES_DIRECTORY}/<namespace>.json",
+                entry.name
+            ),
+            None => format!(
+                "publisher {} may not publish {} (legacy namespace not granted)",
+                key.id, entry.name
+            ),
+            Some(namespace) => format!(
+                "publisher {} may not publish {}: not listed in namespace {}",
+                key.id, entry.name, namespace.namespace
+            ),
+        });
+    }
+    let kind = PackageKind::of_target(&entry.target);
+    (!key.authorizes_kind(kind)).then(|| {
+        format!(
+            "publisher {} is not authorized for {} packages (target {})",
+            key.id,
+            kind.name(),
+            entry.target
+        )
+    })
+}
+
+/// Check a registry checkout: developer keys (`keys/developers/<id>.json`),
+/// namespace files (`namespaces/<namespace>.json`, optional) and entries
+/// (`packages/<name, dots as />/<version>.json`). Namespace files may not
+/// overlap and may list only known keys. Each entry must be canonical, sit at
+/// its own path, and name a publisher listed in the namespace file covering
+/// its identifier (or, for a legacy `xila.<name>` identifier, a key granted
+/// the legacy namespace) and authorized for its kind. With `archives`, a
+/// directory of the downloaded `.xpk` files (named after their URLs), each
+/// archive is also verified against its entry.
 pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
     let mut keys: BTreeMap<String, DeveloperKey> = BTreeMap::new();
     for path in sorted_entries(&root.join("keys/developers"))? {
@@ -137,6 +207,33 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
             return Err(failure(&path, "file name must be <id>.json"));
         }
         keys.insert(key.id.clone(), key);
+    }
+
+    let mut namespaces: BTreeMap<String, Namespace> = BTreeMap::new();
+    let directory = root.join(NAMESPACES_DIRECTORY);
+    if fs::symlink_metadata(&directory).is_ok() {
+        for path in sorted_entries(&directory)? {
+            if !fs::symlink_metadata(&path)?.is_file() {
+                return Err(failure(
+                    &path,
+                    "namespace files may not be in subdirectories",
+                ));
+            }
+            let namespace = decode_namespace(&fs::read(&path)?).map_err(|error| {
+                failure(
+                    &path,
+                    &manifest_error("invalid namespace file", error).to_string(),
+                )
+            })?;
+            if path.file_name().and_then(|name| name.to_str())
+                != Some(&format!("{}.json", namespace.namespace))
+            {
+                return Err(failure(&path, "file name must be <namespace>.json"));
+            }
+            check_namespace(&namespace, &namespaces, &keys)
+                .map_err(|message| failure(&path, &message))?;
+            namespaces.insert(namespace.namespace.clone(), namespace);
+        }
     }
 
     let packages = root.join("packages");
@@ -175,23 +272,10 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
         let key = keys
             .get(&entry.publisher)
             .ok_or_else(|| failure(path, &format!("unknown publisher {}", entry.publisher)))?;
-        if !key.authorizes(&entry.name) {
-            return Err(failure(
-                path,
-                &format!("publisher {} may not publish {}", key.id, entry.name),
-            ));
-        }
-        let kind = PackageKind::of_target(&entry.target);
-        if !key.authorizes_kind(kind) {
-            return Err(failure(
-                path,
-                &format!(
-                    "publisher {} is not authorized for {} packages (target {})",
-                    key.id,
-                    kind.name(),
-                    entry.target
-                ),
-            ));
+        if let Some(message) =
+            authorization_failure(&entry, key, covering(&namespaces, &entry.name))
+        {
+            return Err(failure(path, &message));
         }
         if let Some(archives) = archives {
             let name = entry
@@ -211,8 +295,9 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
         }
     }
     println!(
-        "Checked {} developer key(s) and {} registry entr{}{}",
+        "Checked {} developer key(s), {} namespace(s) and {} registry entr{}{}",
         keys.len(),
+        namespaces.len(),
         files.len(),
         if files.len() == 1 { "y" } else { "ies" },
         if archives.is_some() {
@@ -318,7 +403,8 @@ pub fn root(
 }
 
 /// Sign a checked registry into the new directory `output`: copy `root.json`
-/// (already root-signed), sign every developer key and entry, and write a
+/// (already root-signed), sign every developer key, namespace file and
+/// entry, and write a
 /// signed `index.json` valid for `expires_in_days`. `version` defaults to the
 /// current Unix time, so successive publications increase.
 pub fn sign(
@@ -381,11 +467,21 @@ fn write_signed_site(
     write_new_file(&signature_path(&output.join(ROOT_PATH)), &root_signature)?;
 
     let mut listed = Vec::new();
-    collect_json(&registry.join("keys/developers"), &mut listed)?;
-    let developer_keys = listed.len();
-    collect_json(&registry.join("packages"), &mut listed)?;
+    for (directory, domain) in [
+        ("keys/developers", DEVELOPER_KEY_DOMAIN),
+        (NAMESPACES_DIRECTORY, NAMESPACE_DOMAIN),
+        ("packages", ENTRY_DOMAIN),
+    ] {
+        let directory = registry.join(directory);
+        if domain == NAMESPACE_DOMAIN && fs::symlink_metadata(&directory).is_err() {
+            continue;
+        }
+        let mut paths = Vec::new();
+        collect_json(&directory, &mut paths)?;
+        listed.extend(paths.into_iter().map(|path| (path, domain)));
+    }
     let mut files = Vec::with_capacity(listed.len());
-    for (position, path) in listed.iter().enumerate() {
+    for (path, domain) in &listed {
         let relative = path
             .strip_prefix(registry)
             .ok()
@@ -393,11 +489,6 @@ fn write_signed_site(
             .ok_or_else(|| invalid("registry path is not UTF-8"))?
             .to_owned();
         let bytes = fs::read(path)?;
-        let domain = if position < developer_keys {
-            DEVELOPER_KEY_DOMAIN
-        } else {
-            ENTRY_DOMAIN
-        };
         let destination = output.join(&relative);
         fs::create_dir_all(destination.parent().expect("listed files have a parent"))?;
         write_new_file(&destination, &bytes)?;
@@ -455,8 +546,9 @@ pub fn fingerprint(public_key: &Path) -> Result<()> {
 
 /// Verify a signed registry the way a device would, from the pinned
 /// `root_public_key`: root, index (and its expiry at `now`, if given), every
-/// listed file and its own signature, and each entry's publisher. Rejects
-/// unlisted files.
+/// listed file and its own signature, namespace files (no overlap, known
+/// keys), and each entry's publisher against the namespace file covering it.
+/// Rejects unlisted files.
 pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> Result<()> {
     let pinned = [read_raw_public_key(root_public_key)?];
     let read_signed = |relative: &str| -> Result<(Vec<u8>, Vec<u8>)> {
@@ -475,7 +567,7 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
         .map_err(|error| invalid(&format!("{INDEX_PATH}: {error}")))?;
 
     let mut present = Vec::new();
-    for directory in ["keys", "packages"] {
+    for directory in ["keys", NAMESPACES_DIRECTORY, "packages"] {
         if site.join(directory).is_dir() {
             collect_site(site, &site.join(directory), &mut present)?;
         }
@@ -504,6 +596,27 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
         }
         developers.insert(key.id.clone(), key);
     }
+    let mut namespaces: BTreeMap<String, Namespace> = BTreeMap::new();
+    for file in index
+        .files
+        .iter()
+        .filter(|file| file.path.starts_with("namespaces/"))
+    {
+        let (bytes, signature) = read_signed(&file.path)?;
+        let fail = |error: trust::Error| invalid(&format!("{}: {error}", file.path));
+        trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
+        let namespace = trusted.verify_namespace(&bytes, &signature).map_err(fail)?;
+        if file.path != namespace_path(&namespace.namespace) {
+            return Err(invalid(&format!(
+                "{}: file name must be <namespace>.json",
+                file.path
+            ))
+            .into());
+        }
+        check_namespace(&namespace, &namespaces, &developers)
+            .map_err(|message| invalid(&format!("{}: {message}", file.path)))?;
+        namespaces.insert(namespace.namespace.clone(), namespace);
+    }
     let mut entries = 0usize;
     for file in index
         .files
@@ -523,16 +636,18 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
                 file.path, entry.publisher
             ))
         })?;
-        trust::publisher_key(&entry, developer).map_err(fail)?;
+        trust::namespace_publisher_key(&entry, developer, covering(&namespaces, &entry.name))
+            .map_err(fail)?;
         entries += 1;
     }
     println!(
-        "Verified signed registry: root v{} (root key {}), index v{} (expires {}), {} developer key(s), {} entr{}",
+        "Verified signed registry: root v{} (root key {}), index v{} (expires {}), {} developer key(s), {} namespace(s), {} entr{}",
         trusted.version(),
         trust::fingerprint(&pinned[0]),
         index.version,
         index.expires,
         developers.len(),
+        namespaces.len(),
         entries,
         if entries == 1 { "y" } else { "ies" }
     );
@@ -808,6 +923,234 @@ mod tests {
         )
         .unwrap();
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
+    }
+
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["xila-project"]}"#;
+
+    /// A registry with one reverse-DNS entry, `org.example.weather`, covered
+    /// by `namespaces/org.example.json`.
+    fn write_namespaced_registry(directory: &Path) {
+        write_registry(directory);
+        let legacy = directory.join("packages/xila/clock/0.1.0.json");
+        let entry = decode_registry_entry(&fs::read(&legacy).unwrap()).unwrap();
+        let weather = RegistryEntry {
+            name: "org.example.weather".into(),
+            ..entry
+        };
+        fs::create_dir_all(directory.join("packages/org/example/weather")).unwrap();
+        fs::write(
+            directory.join("packages/org/example/weather/0.1.0.json"),
+            encode_registry_entry(&weather).unwrap(),
+        )
+        .unwrap();
+        fs::create_dir_all(directory.join("namespaces")).unwrap();
+        fs::write(directory.join("namespaces/org.example.json"), NAMESPACE).unwrap();
+    }
+
+    fn check_error(registry: &Path) -> String {
+        check(registry, None).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn namespace_files_authorize_reverse_domain_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        write_namespaced_registry(&registry);
+        check(&registry, None).unwrap();
+        let namespace = registry.join("namespaces/org.example.json");
+
+        // Denied: no namespace file covers the entry.
+        fs::remove_file(&namespace).unwrap();
+        let error = check_error(&registry);
+        assert!(
+            error.contains("no namespace file covers org.example.weather"),
+            "{error}"
+        );
+
+        // Denied: the namespace file does not list the publisher.
+        let alice = registry.join("keys/developers/alice.json");
+        fs::write(
+            &alice,
+            r#"{"id":"alice","author":"Alice","algorithm":"ed25519","public_key":"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=","openssh":null}"#,
+        )
+        .unwrap();
+        fs::write(
+            &namespace,
+            NAMESPACE.replace(r#"["xila-project"]"#, r#"["alice"]"#),
+        )
+        .unwrap();
+        let error = check_error(&registry);
+        assert!(
+            error.contains("not listed in namespace org.example"),
+            "{error}"
+        );
+
+        // Denied: a namespace file listing an unknown key.
+        fs::write(
+            &namespace,
+            NAMESPACE.replace(r#"["xila-project"]"#, r#"["mallory"]"#),
+        )
+        .unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("unknown developer key mallory"), "{error}");
+
+        // Denied: a file name that is not its namespace, and an owner that
+        // does not match the namespace.
+        fs::remove_file(&namespace).unwrap();
+        fs::write(registry.join("namespaces/org.other.json"), NAMESPACE).unwrap();
+        let error = check_error(&registry);
+        assert!(
+            error.contains("file name must be <namespace>.json"),
+            "{error}"
+        );
+        fs::remove_file(registry.join("namespaces/org.other.json")).unwrap();
+        fs::write(&namespace, NAMESPACE.replace("example.org", "example.com")).unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("invalid namespace file"), "{error}");
+
+        // Denied: overlapping namespace files.
+        fs::write(&namespace, NAMESPACE).unwrap();
+        fs::write(
+            registry.join("namespaces/org.example.tools.json"),
+            NAMESPACE
+                .replace(r#""org.example""#, r#""org.example.tools""#)
+                .replace("example.org", "tools.example.org"),
+        )
+        .unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("overlaps namespace org.example"), "{error}");
+        fs::remove_file(registry.join("namespaces/org.example.tools.json")).unwrap();
+
+        // Denied: a namespace file in a subdirectory.
+        fs::create_dir_all(registry.join("namespaces/org")).unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("may not be in subdirectories"), "{error}");
+        fs::remove_dir(registry.join("namespaces/org")).unwrap();
+        check(&registry, None).unwrap();
+
+        // The legacy grant never covers reverse-DNS identifiers: with the
+        // namespace file removed, the xila-project key's ["xila"] is not enough.
+        fs::remove_file(&namespace).unwrap();
+        assert!(check(&registry, None).is_err());
+    }
+
+    #[test]
+    fn legacy_entries_need_the_legacy_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        write_registry(&registry);
+        let key_path = registry.join("keys/developers/xila-project.json");
+        let key = fs::read_to_string(&key_path).unwrap();
+        fs::write(&key_path, key.replace(r#","namespaces":["xila"]"#, "")).unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("legacy namespace not granted"), "{error}");
+        // A namespace file cannot grant the legacy namespace.
+        fs::create_dir_all(registry.join("namespaces")).unwrap();
+        fs::write(
+            registry.join("namespaces/xila.json"),
+            NAMESPACE.replace(r#""org.example""#, r#""xila""#),
+        )
+        .unwrap();
+        let error = check_error(&registry);
+        assert!(error.contains("invalid namespace file"), "{error}");
+    }
+
+    #[test]
+    fn signs_and_verifies_namespace_files() {
+        let keys = new_keys();
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        write_namespaced_registry(&registry);
+        root(
+            &keys.root_seed,
+            "root-test",
+            &keys.repository_public,
+            "repository-test",
+            1,
+            &registry.join(ROOT_PATH),
+        )
+        .unwrap();
+        let site = temp.path().join("site");
+        sign(
+            &registry,
+            &keys.root_public,
+            &keys.repository_seed,
+            &site,
+            Some(1_000),
+            30,
+        )
+        .unwrap();
+        assert!(site.join("namespaces/org.example.json.sig").is_file());
+        let index = fs::read_to_string(site.join(INDEX_PATH)).unwrap();
+        assert!(
+            index.contains(r#""path":"namespaces/org.example.json""#),
+            "{index}"
+        );
+        verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
+
+        // Denied: a namespace file altered after signing (index hash and
+        // signature both break).
+        let namespace = site.join("namespaces/org.example.json");
+        let original = fs::read(&namespace).unwrap();
+        fs::write(&namespace, NAMESPACE.replace("xila-project", "alice")).unwrap();
+        assert!(verify_signed(&site, &keys.root_public, None).is_err());
+        fs::write(&namespace, &original).unwrap();
+
+        // Denied: an entry signature replayed as the namespace signature.
+        let signature = signature_path(&namespace);
+        let original_signature = fs::read(&signature).unwrap();
+        fs::write(
+            &signature,
+            sign_bytes(
+                &crate::key::read_seed(&keys.repository_seed).unwrap(),
+                ENTRY_DOMAIN,
+                &original,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let error = verify_signed(&site, &keys.root_public, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("signature not made by a trusted key"),
+            "{error}"
+        );
+        fs::write(&signature, &original_signature).unwrap();
+
+        // Denied: an unlisted namespace file.
+        fs::write(site.join("namespaces/org.other.json"), NAMESPACE).unwrap();
+        let error = verify_signed(&site, &keys.root_public, None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not listed"), "{error}");
+        fs::remove_file(site.join("namespaces/org.other.json")).unwrap();
+        verify_signed(&site, &keys.root_public, None).unwrap();
+
+        // Signed metadata follows the same rule as `check`: a namespace file
+        // that does not list the publisher fails verification even when
+        // signed (here bypassing `check`).
+        fs::write(
+            registry.join("keys/developers/alice.json"),
+            r#"{"id":"alice","author":"Alice","algorithm":"ed25519","public_key":"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=","openssh":null}"#,
+        )
+        .unwrap();
+        fs::write(
+            registry.join("namespaces/org.example.json"),
+            NAMESPACE.replace(r#"["xila-project"]"#, r#"["alice"]"#),
+        )
+        .unwrap();
+        let error = write_signed_site(
+            &registry,
+            &keys.root_public,
+            &keys.repository_seed,
+            &temp.path().join("unchecked"),
+            Some(1_000),
+            30,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("may not publish this package"), "{error}");
     }
 
     #[test]

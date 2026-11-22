@@ -15,7 +15,7 @@ they run exactly the same code as `xila-package`.
 ### 1. Initialize the developer source directory
 
 ```sh
-xila-package bundle init ./weather community.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 \
+xila-package bundle init ./weather org.example.weather 1.0.0 wasm32-wasip1 --xila-version 0.1 \
   --entrypoint executables/weather.wasm \
   --display-name Weather \
   --icon resources/icon.png
@@ -171,14 +171,19 @@ xila-package registry check ./registry --archives ./downloads  # also every arch
 ```
 
 Developer keys live in `keys/developers/<id>.json`
-([developer-key.schema.json](../../schemas/developer-key.schema.json)) and entries
-in `packages/<identifier with dots as />/<version>.json`, e.g.
-`packages/xila/pixel-painter/0.1.0.json`. `check` requires each entry to be
-canonical (exactly as `registry entry` writes it), to sit at its own path, and
-to name a publisher whose key lists the identifier's first label in
-`namespaces` and the package's kind in `kinds` (`wasm` for `wasm32-*` and
-`wasm64-*` targets, `native` for every other target; a key without `kinds`
-may publish Wasm only). `--archives` takes the downloaded `.xpk` files, named after
+([developer-key.schema.json](../../schemas/developer-key.schema.json)), namespace
+files in `namespaces/<namespace>.json`
+([registry-namespace.schema.json](../../schemas/registry-namespace.schema.json))
+and entries in `packages/<identifier with dots as />/<version>.json`, e.g.
+`packages/org/example/weather/0.1.0.json`. `check` requires namespace files not
+to overlap and to list only existing keys, and each entry to be canonical
+(exactly as `registry entry` writes it), to sit at its own path, and to name a
+publisher listed in the namespace file covering its identifier (for a legacy
+`xila.<name>` identifier, a key whose `namespaces` is `["xila"]`) and whose
+`kinds` contain the package's kind (`wasm` for `wasm32-*` and `wasm64-*`
+targets, `native` for every other target; a key without `kinds` may publish
+Wasm only). See
+[identifiers and namespaces](../../docs/registry-trust.md#identifiers-and-namespaces). `--archives` takes the downloaded `.xpk` files, named after
 their URLs; the command itself never accesses the network.
 
 ### 5. Sign the registry (registry maintainers)

@@ -431,7 +431,7 @@ mod tests {
         let manifest = Manifest {
             schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "community.example".into(),
+            name: "org.example.example".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: XilaVersion::new(0, 1),
@@ -554,7 +554,7 @@ mod tests {
         let manifest = Manifest {
             schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "community.empty".into(),
+            name: "org.example.empty".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: XilaVersion::new(0, 1),
@@ -942,7 +942,7 @@ mod tests {
         let manifest = Manifest {
             schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "community.native-reference".into(),
+            name: "org.example.native-reference".into(),
             version: "1.0.0".into(),
             target: "native".into(),
             xila_version: XilaVersion::new(0, 1),

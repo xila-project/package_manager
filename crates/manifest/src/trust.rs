@@ -4,8 +4,8 @@
 //!
 //! - the **root** key (kept offline) signs `root.json`, which names the keys
 //!   allowed to sign the next root version and the online repository keys;
-//! - a **repository** key signs `index.json`, every registry entry and every
-//!   developer key file;
+//! - a **repository** key signs `index.json`, every registry entry, every
+//!   developer key file and every namespace file;
 //! - a **developer** key signs package manifests (see [`crate::DeveloperKey`]).
 //!
 //! Every signature is a detached raw 64-byte Ed25519 signature over
@@ -36,6 +36,7 @@ pub const ROOT_DOMAIN: &[u8] = b"XILA-REGISTRY-ROOT-V1\0";
 pub const INDEX_DOMAIN: &[u8] = b"XILA-REGISTRY-INDEX-V1\0";
 pub const ENTRY_DOMAIN: &[u8] = b"XILA-REGISTRY-ENTRY-V1\0";
 pub const DEVELOPER_KEY_DOMAIN: &[u8] = b"XILA-REGISTRY-DEVELOPER-KEY-V1\0";
+pub const NAMESPACE_DOMAIN: &[u8] = b"XILA-REGISTRY-NAMESPACE-V1\0";
 
 /// Maximum keys per role in `root.json`; verifiers try each, so keep it small.
 pub const MAX_ROLE_KEYS: usize = 4;
@@ -150,8 +151,9 @@ pub struct Index {
     pub files: Vec<IndexFile>,
 }
 
-/// Registry-relative path of a key or entry file: `keys/developers/<id>.json`
-/// or `packages/<labels…>/<version>.json`, without `.`/`..` segments.
+/// Registry-relative path of a key, namespace or entry file:
+/// `keys/developers/<id>.json`, `namespaces/<namespace>.json` or
+/// `packages/<labels…>/<version>.json`, without `.`/`..` segments.
 pub fn valid_listed_path(path: &str) -> bool {
     let segment = |value: &str| {
         !value.is_empty()
@@ -161,9 +163,12 @@ pub fn valid_listed_path(path: &str) -> bool {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
     };
+    let namespace = path
+        .strip_prefix("namespaces/")
+        .is_some_and(|name| !name.contains('/'));
     path.len() <= 512
         && path.ends_with(".json")
-        && (path.starts_with("keys/developers/") || path.starts_with("packages/"))
+        && (path.starts_with("keys/developers/") || path.starts_with("packages/") || namespace)
         && path.split('/').all(segment)
 }
 
@@ -284,6 +289,11 @@ mod tests {
                     size: 300,
                 },
                 IndexFile {
+                    path: "namespaces/org.example.json".into(),
+                    sha256: "c".repeat(64),
+                    size: 200,
+                },
+                IndexFile {
                     path: "packages/xila/clock/0.1.0.json".into(),
                     sha256: "b".repeat(64),
                     size: 700,
@@ -307,6 +317,7 @@ mod tests {
             INDEX_DOMAIN,
             ENTRY_DOMAIN,
             DEVELOPER_KEY_DOMAIN,
+            NAMESPACE_DOMAIN,
         ];
         for (i, a) in domains.iter().enumerate() {
             for b in &domains[i + 1..] {
@@ -364,6 +375,9 @@ mod tests {
             },
             |i: &mut Index| i.files[0].path = "packages/../root.json".into(),
             |i: &mut Index| i.files[0].path = "root.json".into(),
+            |i: &mut Index| i.files[1].path = "namespaces/org/example.json".into(),
+            |i: &mut Index| i.files[1].path = "namespaces/../root.json".into(),
+            |i: &mut Index| i.files[1].path = "namespaces/org.example.txt".into(),
             |i: &mut Index| i.files[0].path = "/packages/xila/clock/0.1.0.json".into(),
             |i: &mut Index| i.files[0].sha256 = "A".repeat(64),
             |i: &mut Index| i.files[0].size = 0,

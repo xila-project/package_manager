@@ -2,15 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-key.schema.json",
   "title": "Xila developer key (experimental v1)",
-  "description": "A developer (publisher) key file, keys/developers/<id>.json in xila-project/registry. The key signs package manifests; it is not a trust anchor and may only publish packages whose first identifier label is in namespaces and whose kind is in kinds (Wasm only when kinds is absent).",
+  "description": "A developer (publisher) key file, keys/developers/<id>.json in xila-project/registry. The key signs package manifests; it is not a trust anchor. It may publish an identifier when the namespace file covering it (namespaces/<namespace>.json) lists this key, and only packages whose kind is in kinds (Wasm only when kinds is absent).",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "id",
     "author",
     "algorithm",
-    "public_key",
-    "namespaces"
+    "public_key"
   ],
   "properties": {
     "$schema": {
@@ -59,16 +58,20 @@
       "description": "The same key in OpenSSH form; informational only."
     },
     "namespaces": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 32,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 64,
-        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-      },
-      "description": "First labels of package identifiers this key may publish, e.g. xila for xila.clock."
+      "description": "Legacy grant, until the migration of Xila's own packages: [\"xila\"] lets this key publish the two-component xila.<name> identifiers. No other namespace may be listed here; reverse-DNS namespaces are granted by namespace files, so adding a developer never changes a key file.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "xila"
+          }
+        }
+      ]
     },
     "kinds": {
       "description": "Package kinds this key may publish. Absent or null means wasm only: native code on a microcontroller without a memory protection unit runs fully trusted, so a key needs an explicit native grant. A target starting with wasm32- or wasm64- is wasm; every other target is native.",

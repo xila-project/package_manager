@@ -51,7 +51,7 @@
           "path": {
             "type": "string",
             "maxLength": 512,
-            "pattern": "^(keys/developers|packages)(/[A-Za-z0-9._+-]+)+\\.json$",
+            "pattern": "^(?:(keys/developers|packages)(/[A-Za-z0-9._+-]+)+|namespaces/[A-Za-z0-9._+-]+)\\.json$",
             "not": {
               "pattern": "(^|/)\\.\\.?(/|$)"
             }

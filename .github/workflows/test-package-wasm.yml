@@ -92,7 +92,7 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_SHA256"]
           with tarfile.open(fileobj=__import__("io").BytesIO(data), mode="r:") as tar:
               manifest = json.load(tar.extractfile(".xila/manifest.json"))
-              assert manifest["name"] == "community.example"
+              assert manifest["name"] == "org.example.example"
               wasm = tar.extractfile("executables/example.wasm").read()
               assert wasm == b"\x00asm\x01\x00\x00\x00"
               entry = manifest["files"][0]
@@ -149,7 +149,7 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == os.environ["EXPECTED_SHA256"]
           with tarfile.open(fileobj=__import__("io").BytesIO(data), mode="r:") as tar:
               manifest = json.load(tar.extractfile(".xila/manifest.json"))
-              assert manifest["name"] == "community.example"
+              assert manifest["name"] == "org.example.example"
               wasm = tar.extractfile("executables/example.wasm").read()
               assert wasm == b"\x00asm\x01\x00\x00\x00"
               entry = manifest["files"][0]

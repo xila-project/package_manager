@@ -25,6 +25,13 @@ class DeveloperKeySchemaTests(unittest.TestCase):
             with self.subTest(kinds=kinds):
                 VALIDATOR.validate(key)
 
+    def test_namespaces_are_an_optional_legacy_grant(self):
+        key = copy.deepcopy(KEY)
+        del key["namespaces"]
+        VALIDATOR.validate(key)
+        key["namespaces"] = None
+        VALIDATOR.validate(key)
+
     def test_rejects_invalid_keys(self):
         for key, value in [
             ("id", "Xila Project"),
@@ -33,6 +40,10 @@ class DeveloperKeySchemaTests(unittest.TestCase):
             ("public_key", "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbd="),
             ("namespaces", []),
             ("namespaces", ["Xila"]),
+            # Reverse-DNS namespaces are granted by namespace files only.
+            ("namespaces", ["org.example"]),
+            ("namespaces", ["community"]),
+            ("namespaces", ["xila", "xila"]),
             ("openssh", "ssh-rsa AAAA"),
             ("kinds", []),
             ("kinds", ["arm"]),

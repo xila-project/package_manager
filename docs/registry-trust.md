@@ -10,8 +10,8 @@ index use format version 1.
 | Key | Kept | Signs | Trusted because |
 |---|---|---|---|
 | Root | offline | `root.json` | pinned on the device (first version), then listed in the previous `root.json` |
-| Repository | registry publication CI | `index.json`, every entry, every developer key file | listed in the trusted `root.json` |
-| Developer | the publisher | each `.xpk` manifest and its file inventory | its key file is signed by a repository key, and its `namespaces` and `kinds` cover the package |
+| Repository | registry publication CI | `index.json`, every entry, every developer key file, every namespace file | listed in the trusted `root.json` |
+| Developer | the publisher | each `.xpk` manifest and its file inventory | its key file is signed by a repository key, the namespace file covering the package lists it (see [Identifiers and namespaces](#identifiers-and-namespaces)), and its `kinds` cover the package |
 
 A key may not be both a root key and a repository key, so the online key can
 never sign a new root. Up to 4 keys per role.
@@ -24,6 +24,7 @@ Published at the registry root (`registry.xila.dev`):
 root.json            + root.json.sig            root key
 index.json           + index.json.sig           repository key
 keys/developers/<id>.json            + .sig     repository key
+namespaces/<namespace>.json          + .sig     repository key
 packages/<labels…>/<version>.json    + .sig     repository key
 ```
 
@@ -42,17 +43,21 @@ verifies as another:
 | `index.json` | `XILA-REGISTRY-INDEX-V1\0` |
 | entry | `XILA-REGISTRY-ENTRY-V1\0` |
 | developer key | `XILA-REGISTRY-DEVELOPER-KEY-V1\0` |
+| namespace file | `XILA-REGISTRY-NAMESPACE-V1\0` |
 
 Schemas: [registry-root](../schemas/registry-root.schema.json),
 [registry-index](../schemas/registry-index.schema.json),
 [registry-entry](../schemas/registry-entry.schema.json),
-[developer-key](../schemas/developer-key.schema.json).
+[developer-key](../schemas/developer-key.schema.json),
+[registry-namespace](../schemas/registry-namespace.schema.json).
 
 - **`root.json`**: `version` (strictly increasing), `root_keys` (allowed to sign
   the next version) and `repository_keys`.
 - **`index.json`**: `version` (signing time in Unix seconds, so it increases
   between publications), `expires` (Unix seconds) and every developer key and
   entry with its `path`, `sha256` and `size`, sorted by path.
+- **`namespaces/<namespace>.json`** (format version 1): the `namespace`, its
+  `owner` and the `developer_keys` allowed to publish in it.
 
 ## Device verification
 
@@ -65,17 +70,56 @@ Schemas: [registry-root](../schemas/registry-root.schema.json),
 2. `verify_index`: signed by a repository key; version at least the highest
    persisted one (**rollback**); not expired when the device has a trustworthy
    clock (**freeze**). Persist the accepted version.
-3. `verify_developer_key` / `verify_entry`: the file's own signature, then
+3. `verify_developer_key` / `verify_namespace` / `verify_entry`: the file's own signature, then
    `check_listed` against the index (**mix-and-match**: every file must be the
    one listed in this snapshot).
-4. `publisher_key`: the entry's `publisher` is the key file's `id` and the key's
-   `namespaces` contain the package's first label and its `kinds` contain the
-   package's kind (below). The returned key verifies
+4. `namespace_publisher_key`: the entry's `publisher` is the key file's `id`,
+   the namespace file covering the identifier (`namespace_candidates` lists
+   the listed path to fetch) names that key in `developer_keys`, or, for a
+   legacy `xila.<name>` identifier, the key's own `namespaces` is `["xila"]`,
+   and the key's `kinds` contain the package's kind (below). `publisher_key`
+   is the same check without a namespace file, so only the legacy rule. The
+   returned key verifies
    the archive's manifest signature; the entry's SHA-256 and size pin the
    archive bytes.
 
 A device too small to hold the index may skip step 2 and the `check_listed`
 part of step 3: the per-file signatures still prove origin, but not freshness.
+
+## Identifiers and namespaces
+
+A package identifier is reverse-DNS with at least three components, such as
+`org.example.weather` or `io.github.alice.weather`. Components use lowercase
+letters, digits, `-` and `_`, start and end with a letter or digit, and are at
+most 63 bytes; the identifier is at most 96 bytes. Mixed case is not allowed:
+identifiers become paths, and FAT file systems ignore case. The namespace is
+every component except the last.
+
+A namespace file `namespaces/<namespace>.json` records who owns a namespace
+and which developer keys may publish in it. A listed key may publish every
+identifier that starts with the namespace's components: `org.example` covers
+`org.example.weather` and `org.example.tools.clock`, but not
+`org.examples.weather`. A namespace has at least two components, so no file
+can claim a whole top-level domain. Namespace files may not overlap (one
+owner per identifier) and may list only existing developer keys. Adding a
+developer or rotating a key therefore edits the namespace file only, never an
+identifier or a key file.
+
+The `owner` must match the namespace: a `domain` owner is the namespace
+reversed (`example.org` owns `org.example`, and may not contain `_`), and a
+`github` or `gitlab` owner is the account of an `io.github.<account>` or
+`io.gitlab.<account>` namespace. Registry CI proves the ownership, a domain by
+a token file under `https://<domain>/.well-known/` and an account by the
+account itself, so namespaces are never allocated by hand.
+
+**Legacy rule**, until Xila's own packages migrate: the two-component
+identifiers `xila.<name>` stay valid, have no namespace file, and are granted
+by a developer key whose own `namespaces` field is `["xila"]`. That field
+accepts no other value and is optional; it is removed with the migration.
+
+`xila-package registry check` and `xila-package registry verify-signed`
+enforce all of the above; `registry sign` signs namespace files with their own
+domain and lists them in the index.
 
 ## Package kinds
 

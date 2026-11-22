@@ -120,7 +120,7 @@ fn bundle_init_requires_a_valid_xila_version() {
                 "bundle",
                 "init",
                 directory.to_str().unwrap(),
-                "community.example",
+                "org.example.example",
                 "2.0.0",
                 "wasm32-wasip1",
             ])
@@ -545,12 +545,23 @@ fn registry_check_validates_keys_placement_and_archives() {
     assert!(run(&["registry", "check", root]).0);
     assert!(run(&["registry", "check", root, "--archives", &archives]).0);
 
-    // A key that does not cover the namespace.
-    fs::write(&key_file, key(r#""community""#)).unwrap();
+    // A key without the legacy grant may not publish xila.<name>.
+    fs::write(
+        &key_file,
+        key(r#""xila""#).replace(r#","namespaces":["xila"]"#, ""),
+    )
+    .unwrap();
     assert!(
         run(&["registry", "check", root])
             .1
             .contains("may not publish xila.clock")
+    );
+    // Key files grant no namespace other than the legacy one.
+    fs::write(&key_file, key(r#""community""#)).unwrap();
+    assert!(
+        run(&["registry", "check", root])
+            .1
+            .contains("invalid developer key")
     );
     fs::write(&key_file, key(r#""xila""#)).unwrap();
 

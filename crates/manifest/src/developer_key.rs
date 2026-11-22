@@ -1,11 +1,16 @@
 //! Developer (publisher) key files: `keys/developers/<id>.json` in the
 //! registry. A developer key signs package manifests; it is not a trust anchor
-//! on its own, and may only publish packages in its listed namespaces.
+//! on its own. It may publish an identifier when the namespace file covering
+//! that identifier lists it (see [`crate::namespace`]), or, under the legacy
+//! rule, a `xila.<name>` identifier when its own `namespaces` lists `xila`.
 
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
-use crate::{Error, MAX_MANIFEST_BYTES, registry::valid_publisher};
+use crate::{
+    Error, LEGACY_NAMESPACE, MAX_MANIFEST_BYTES, Namespace, is_legacy_identifier,
+    registry::valid_publisher,
+};
 
 /// Editor-facing JSON Schema; a tooling hint, never a trust anchor.
 pub const DEVELOPER_KEY_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-key.schema.json";
@@ -57,8 +62,11 @@ pub struct DeveloperKey {
     pub public_key: String,
     /// The same key in OpenSSH form, for convenience; informational only.
     pub openssh: Option<String>,
-    /// First labels of package identifiers this key may publish (`xila` for `xila.clock`).
-    pub namespaces: Vec<String>,
+    /// Legacy grant: `["xila"]` lets this key publish the two-component
+    /// `xila.<name>` identifiers. No other value is accepted: reverse-DNS
+    /// namespaces are granted by namespace files, so adding a developer never
+    /// changes a key file. Remove once Xila's packages are migrated.
+    pub namespaces: Option<Vec<String>>,
     /// Package kinds this key may publish: `wasm` and/or `native`. Absent means
     /// `wasm` only, so native executables always need an explicit grant.
     pub kinds: Option<Vec<String>>,
@@ -103,16 +111,6 @@ pub(crate) fn decode_key(encoded: &str) -> Option<[u8; 32]> {
     Some(key)
 }
 
-fn valid_namespace(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && !value.starts_with('-')
-        && !value.ends_with('-')
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-
 impl DeveloperKey {
     pub fn validate(&self) -> Result<(), Error> {
         if self
@@ -134,17 +132,18 @@ impl DeveloperKey {
             || self.algorithm != ED25519
             || decode_key(&self.public_key).is_none()
             || !openssh
-            || self.namespaces.is_empty()
-            || self.namespaces.len() > 32
-            || !self
-                .namespaces
-                .iter()
-                .all(|namespace| valid_namespace(namespace))
+            || !self.valid_legacy_namespaces()
             || !self.valid_kinds()
         {
             return Err(Error::InvalidDeveloperKey);
         }
         Ok(())
+    }
+
+    fn valid_legacy_namespaces(&self) -> bool {
+        self.namespaces
+            .as_ref()
+            .is_none_or(|namespaces| namespaces.len() == 1 && namespaces[0] == LEGACY_NAMESPACE)
     }
 
     fn valid_kinds(&self) -> bool {
@@ -163,11 +162,25 @@ impl DeveloperKey {
         decode_key(&self.public_key).ok_or(Error::InvalidDeveloperKey)
     }
 
-    /// Whether this key may publish the package identifier `name`.
-    pub fn authorizes(&self, name: &str) -> bool {
-        name.split_once('.').is_some_and(|(namespace, _)| {
-            self.namespaces.iter().any(|allowed| allowed == namespace)
-        })
+    /// Legacy rule: whether this key's own `namespaces` grant the legacy
+    /// identifier `name` (`xila.<name>`). Never true for a reverse-DNS
+    /// identifier.
+    pub fn authorizes_legacy(&self, name: &str) -> bool {
+        is_legacy_identifier(name)
+            && self.namespaces.as_ref().is_some_and(|namespaces| {
+                namespaces
+                    .iter()
+                    .any(|namespace| namespace == LEGACY_NAMESPACE)
+            })
+    }
+
+    /// Whether this key may publish the package identifier `name`: the
+    /// `namespace` file covering it lists this key, or the legacy rule
+    /// applies. `namespace` is the verified namespace file covering `name`,
+    /// if any; a file for another namespace grants nothing.
+    pub fn authorizes(&self, name: &str, namespace: Option<&Namespace>) -> bool {
+        namespace.is_some_and(|namespace| namespace.authorizes(&self.id, name))
+            || self.authorizes_legacy(name)
     }
 }
 
@@ -181,9 +194,15 @@ impl DeveloperKey {
     }
 
     /// Whether this key may publish the package `name` built for `target`:
-    /// its namespace and its kind must both be authorized.
-    pub fn authorizes_package(&self, name: &str, target: &str) -> bool {
-        self.authorizes(name) && self.authorizes_kind(PackageKind::of_target(target))
+    /// its identifier (see [`Self::authorizes`]) and its kind must both be
+    /// authorized.
+    pub fn authorizes_package(
+        &self,
+        name: &str,
+        target: &str,
+        namespace: Option<&Namespace>,
+    ) -> bool {
+        self.authorizes(name, namespace) && self.authorizes_kind(PackageKind::of_target(target))
     }
 }
 
@@ -218,11 +237,78 @@ mod tests {
             key.public_key_bytes().unwrap()[..4],
             [0xe8, 0x3d, 0x5c, 0xbe]
         );
-        assert!(key.authorizes("xila.clock"));
-        assert!(key.authorizes("xila.pixel-painter"));
-        assert!(!key.authorizes("community.weather"));
-        assert!(!key.authorizes("xilaclock"));
-        assert!(!key.authorizes("xilax.clock"));
+        assert!(key.authorizes("xila.clock", None));
+        assert!(key.authorizes("xila.pixel-painter", None));
+        assert!(!key.authorizes("community.weather", None));
+        assert!(!key.authorizes("xilaclock", None));
+        assert!(!key.authorizes("xilax.clock", None));
+        // The legacy grant covers two-component identifiers only.
+        assert!(!key.authorizes("xila.tools.clock", None));
+        assert!(!key.authorizes("org.example.weather", None));
+    }
+
+    fn namespace(keys: &[&str]) -> Namespace {
+        Namespace {
+            schema: None,
+            format_version: crate::NAMESPACE_FORMAT_VERSION,
+            namespace: "org.example".into(),
+            owner: crate::NamespaceOwner {
+                kind: "domain".into(),
+                name: "example.org".into(),
+            },
+            developer_keys: keys.iter().map(|key| (*key).into()).collect(),
+        }
+    }
+
+    #[test]
+    fn namespace_files_authorize_listed_keys_by_prefix() {
+        let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+        key.namespaces = None;
+        key.validate().unwrap();
+        let listed = namespace(&["xila-project"]);
+        listed.validate().unwrap();
+        assert!(key.authorizes("org.example.weather", Some(&listed)));
+        assert!(key.authorizes("org.example.tools.clock", Some(&listed)));
+        assert!(key.authorizes_package("org.example.weather", "wasm32-wasip1", Some(&listed)));
+        // Denied: no namespace file, a file that does not list the key, an
+        // identifier outside the file's namespace, the legacy identifiers
+        // without the legacy grant, and native code without the native grant.
+        assert!(!key.authorizes("org.example.weather", None));
+        assert!(!key.authorizes("org.example.weather", Some(&namespace(&["alice"]))));
+        assert!(!key.authorizes("org.examples.weather", Some(&listed)));
+        assert!(!key.authorizes("com.example.weather", Some(&listed)));
+        assert!(!key.authorizes("xila.clock", Some(&listed)));
+        assert!(!key.authorizes_package(
+            "org.example.weather",
+            "thumbv7em-none-eabi",
+            Some(&listed)
+        ));
+    }
+
+    #[test]
+    fn namespaces_field_is_optional_and_legacy_only() {
+        let json = XILA_PROJECT.replace(
+            r#",
+  "namespaces": ["xila"]"#,
+            "",
+        );
+        let key = decode_developer_key(json.as_bytes()).unwrap();
+        assert_eq!(key.namespaces, None);
+        assert!(!key.authorizes("xila.clock", None));
+        for namespaces in [
+            r#"[]"#,
+            r#"["org.example"]"#,
+            r#"["community"]"#,
+            r#"["xila", "xila"]"#,
+            r#"["xila", "org.example"]"#,
+        ] {
+            let json = XILA_PROJECT.replace(r#"["xila"]"#, namespaces);
+            assert_eq!(
+                decode_developer_key(json.as_bytes()),
+                Err(Error::InvalidDeveloperKey),
+                "{namespaces}"
+            );
+        }
     }
 
     #[test]
@@ -265,19 +351,19 @@ mod tests {
 
         let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
         assert_eq!(key.kinds, None);
-        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1"));
-        assert!(!key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
+        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1", None));
+        assert!(!key.authorizes_package("xila.clock", "thumbv7em-none-eabi", None));
 
         key.kinds = Some(alloc::vec!["native".into()]);
         key.validate().unwrap();
-        assert!(!key.authorizes_package("xila.clock", "wasm32-wasip1"));
-        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
-        assert!(!key.authorizes_package("other.clock", "thumbv7em-none-eabi"));
+        assert!(!key.authorizes_package("xila.clock", "wasm32-wasip1", None));
+        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi", None));
+        assert!(!key.authorizes_package("other.clock", "thumbv7em-none-eabi", None));
 
         key.kinds = Some(alloc::vec!["wasm".into(), "native".into()]);
         key.validate().unwrap();
-        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1"));
-        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
+        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1", None));
+        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi", None));
     }
 
     #[test]
@@ -314,8 +400,9 @@ mod tests {
             |k: &mut DeveloperKey| {
                 k.public_key = "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcb!=".into()
             },
-            |k: &mut DeveloperKey| k.namespaces.clear(),
-            |k: &mut DeveloperKey| k.namespaces = alloc::vec!["Xila".into()],
+            |k: &mut DeveloperKey| k.namespaces = Some(Vec::new()),
+            |k: &mut DeveloperKey| k.namespaces = Some(alloc::vec!["Xila".into()]),
+            |k: &mut DeveloperKey| k.namespaces = Some(alloc::vec!["org.example".into()]),
             |k: &mut DeveloperKey| k.openssh = Some("ssh-rsa AAAA".into()),
             |k: &mut DeveloperKey| k.kinds = Some(Vec::new()),
             |k: &mut DeveloperKey| k.kinds = Some(alloc::vec!["arm".into()]),

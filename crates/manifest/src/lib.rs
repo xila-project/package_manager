@@ -7,6 +7,7 @@ extern crate alloc;
 pub mod developer;
 pub mod developer_key;
 pub mod metadata;
+pub mod namespace;
 pub mod registry;
 pub mod repository;
 pub mod transaction;
@@ -22,6 +23,12 @@ pub use developer_key::{
 };
 pub use metadata::Metadata;
 use miniserde::{Deserialize, Serialize};
+pub use namespace::{
+    LEGACY_NAMESPACE, NAMESPACE_FORMAT_VERSION, NAMESPACE_SCHEMA_URL, NAMESPACES_DIRECTORY,
+    Namespace, NamespaceOwner, decode_namespace, encode_namespace, identifier_namespace,
+    is_legacy_identifier, namespace_covers, namespace_path, namespace_paths, valid_identifier,
+    valid_namespace,
+};
 pub use registry::{
     Archive, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, RegistryEntry,
     decode_registry_entry, encode_registry_entry,
@@ -33,9 +40,9 @@ pub use repository::{
 };
 pub use trust::{
     DEVELOPER_KEY_DOMAIN, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH, INDEX_SCHEMA_URL, Index,
-    IndexFile, MAX_INDEX_BYTES, NamedKey, ROOT_DOMAIN, ROOT_PATH, ROOT_SCHEMA_URL, Root,
-    SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_index, decode_root, encode_index, encode_root,
-    signed_message,
+    IndexFile, MAX_INDEX_BYTES, NAMESPACE_DOMAIN, NamedKey, ROOT_DOMAIN, ROOT_PATH,
+    ROOT_SCHEMA_URL, Root, SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_index, decode_root,
+    encode_index, encode_root, signed_message,
 };
 
 pub use transaction::{
@@ -85,6 +92,8 @@ pub enum Error {
     /// A registry entry disagrees with the signed manifest of its archive.
     RegistryMismatch,
     InvalidDeveloperKey,
+    /// A namespace file is malformed, or its owner does not match its namespace.
+    InvalidNamespace,
     /// `root.json` is malformed (version, keys or role separation).
     InvalidRoot,
     /// `index.json` is malformed (version, expiry or file list).
@@ -206,18 +215,6 @@ pub fn validate_path(path: &str) -> Result<(), Error> {
         return Err(Error::InvalidPath);
     }
     Ok(())
-}
-
-fn valid_identifier(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 96
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
-        && value
-            .split('.')
-            .all(|part| !part.is_empty() && !part.starts_with('-') && !part.ends_with('-'))
-        && value.contains('.')
 }
 
 pub(crate) fn validate_identity(name: &str, version: &str, target: &str) -> Result<(), Error> {
