@@ -14,8 +14,8 @@ on:
       - "tests/test_signing_workflow.py"
       - "tests/test_unpack_signing_input.py"
       - "tests/fixtures/package-workflow-manifest.json"
-      - "tests/fixtures/package-workflow-developer.json"
-      - "tests/fixtures/package-workflow-shortcut.json"
+      - "crates/builder/tests/fixtures/package-workflow-developer.json"
+      - "crates/builder/tests/fixtures/package-workflow-shortcut.json"
       - "tests/test_package_wasm.py"
 
 permissions:
@@ -60,8 +60,8 @@ jobs:
     uses: ./.github/workflows/package-wasm.yml
     with:
       wasm-artifact: reusable-smoke-wasm
-      manifest-path: tests/fixtures/package-workflow-developer.json
-      shortcut-path: tests/fixtures/package-workflow-shortcut.json
+      manifest-path: crates/builder/tests/fixtures/package-workflow-developer.json
+      shortcut-path: crates/builder/tests/fixtures/package-workflow-shortcut.json
       builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
       artifact-name: reusable-smoke-xila-package
       upload-artifact: true
@@ -114,8 +114,8 @@ jobs:
     uses: ./.github/workflows/package-wasm.yml
     with:
       wasm-artifact: reusable-smoke-wasm
-      manifest-path: tests/fixtures/package-workflow-developer.json
-      shortcut-path: tests/fixtures/package-workflow-shortcut.json
+      manifest-path: crates/builder/tests/fixtures/package-workflow-developer.json
+      shortcut-path: crates/builder/tests/fixtures/package-workflow-shortcut.json
       builder-ref: ${{ github.event.pull_request.head.sha || github.sha }}
       builder-release: xila-package-builder-v0.4.0
       builder-sha256: 02905040ef0c241c0cb6b006b729a0ee255b66b7e38ff938c8c12dac5df18554
