@@ -35,21 +35,7 @@ pub fn encode_sha256(digest: &[u8; 32]) -> String {
 
 /// Strict lower-case, fixed-width decoding shared by host writer and guest reader.
 pub fn decode_sha256(hex: &str) -> Result<[u8; 32], Error> {
-    if hex.len() != 64 {
-        return Err(Error::InvalidDigest);
-    }
-    fn nibble(value: u8) -> Result<u8, Error> {
-        match value {
-            b'0'..=b'9' => Ok(value - b'0'),
-            b'a'..=b'f' => Ok(value - b'a' + 10),
-            _ => Err(Error::InvalidDigest),
-        }
-    }
-    let mut output = [0_u8; 32];
-    for (index, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        output[index] = (nibble(pair[0])? << 4) | nibble(pair[1])?;
-    }
-    Ok(output)
+    manifest::decode_sha256(hex).map_err(|_| Error::InvalidDigest)
 }
 
 /// Portable, incremental file inventory calculation. The caller supplies
