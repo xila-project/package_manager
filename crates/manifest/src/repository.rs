@@ -265,7 +265,9 @@ pub fn index_versions<'a>(index: &'a crate::Index, name: &str, prereleases: bool
 }
 
 /// Names of the packages listed in `index` with at least one semantic
-/// version (prereleases included), sorted and without duplicates. Use
+/// version (prereleases included), sorted and without duplicates. Paths whose
+/// name is not a valid identifier are skipped, so every name returned can be
+/// looked up with [`index_versions`] and installed. Use
 /// [`index_versions`] for the versions of each one. Only the signed index is
 /// read: no registry entry is fetched.
 pub fn index_packages(index: &crate::Index) -> Vec<String> {
@@ -275,7 +277,12 @@ pub fn index_packages(index: &crate::Index) -> Vec<String> {
         .filter_map(|file| {
             let (labels, version) = entry_parts(&file.path)?;
             SemanticVersion::parse(version)?;
-            Some(labels.replace('/', "."))
+            // A label containing `.` would not round-trip to this path.
+            if labels.contains('.') {
+                return None;
+            }
+            let name = labels.replace('/', ".");
+            crate::valid_identifier(&name).then_some(name)
         })
         .collect();
     names.sort();
@@ -418,6 +425,10 @@ mod tests {
             file("packages/xila/clockwork/1.0.0-rc.1.json"),
             file("packages/xila/nightly/latest.json"),
             file("packages/xila/notes/0.1.0.json.sig"),
+            file("packages/org/example/weather/2.0.0.json"),
+            file("packages/org/example.weather/1.0.0.json"),
+            file("packages/org//weather/1.0.0.json"),
+            file("packages/org/Example/weather/1.0.0.json"),
             file("packages/community/weather/2.0.0.json"),
         ];
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -431,7 +442,7 @@ mod tests {
         assert_eq!(
             index_packages(&index),
             [
-                "community.weather",
+                "org.example.weather",
                 "xila.clock",
                 "xila.clock.extra",
                 "xila.clockwork"
