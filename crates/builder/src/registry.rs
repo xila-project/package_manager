@@ -330,6 +330,26 @@ pub fn sign(
     expires_in_days: u64,
 ) -> Result<()> {
     check(registry, None)?;
+    write_signed_site(
+        registry,
+        root_public_key,
+        repository_seed,
+        output,
+        version,
+        expires_in_days,
+    )
+}
+
+/// The part of [`sign`] after `check`. It ends with `verify_signed`, which
+/// enforces the same publisher rules, so tests can reach that check alone.
+fn write_signed_site(
+    registry: &Path,
+    root_public_key: &Path,
+    repository_seed: &Path,
+    output: &Path,
+    version: Option<u64>,
+    expires_in_days: u64,
+) -> Result<()> {
     let pinned = [read_raw_public_key(root_public_key)?];
     let root_bytes = fs::read(registry.join(ROOT_PATH))?;
     let root_signature = fs::read(signature_path(&registry.join(ROOT_PATH)))?;
@@ -730,8 +750,9 @@ mod tests {
         .unwrap();
         check(&registry, None).unwrap();
 
-        // Signed metadata is verified with the same rule, so a key that loses
-        // the native grant cannot be used to verify a native entry.
+        // Signed metadata is verified with the same rule: a key without the
+        // native grant cannot be used to sign or verify a native entry.
+        fs::write(&key_path, &key).unwrap();
         root(
             &keys.root_seed,
             "root-test",
@@ -739,6 +760,41 @@ mod tests {
             "repository-test",
             1,
             &registry.join(ROOT_PATH),
+        )
+        .unwrap();
+        let denied = temp.path().join("denied");
+        let error = sign(
+            &registry,
+            &keys.root_public,
+            &keys.repository_seed,
+            &denied,
+            Some(1_000),
+            30,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("not authorized for native packages"),
+            "{error}"
+        );
+        let unchecked = temp.path().join("unchecked");
+        let error = write_signed_site(
+            &registry,
+            &keys.root_public,
+            &keys.repository_seed,
+            &unchecked,
+            Some(1_000),
+            30,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("may not publish this package"), "{error}");
+        fs::write(
+            &key_path,
+            key.replace(
+                r#""namespaces":["xila"]"#,
+                r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
+            ),
         )
         .unwrap();
         let site = temp.path().join("site");

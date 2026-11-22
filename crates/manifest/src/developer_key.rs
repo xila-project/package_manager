@@ -241,6 +241,27 @@ mod tests {
             PackageKind::Native
         );
         assert_eq!(PackageKind::of_target("unknown"), PackageKind::Native);
+        assert_eq!(
+            PackageKind::of_target("wasm64-unknown-unknown"),
+            PackageKind::Wasm
+        );
+        // Anything that is not exactly a Wasm prefix fails closed to native.
+        for target in [
+            "",
+            "wasm32",
+            "wasm",
+            "WASM32-wasip1",
+            "Wasm32-wasip1",
+            "wasm32_wasip1",
+            "xwasm32-wasip1",
+            "native",
+        ] {
+            assert_eq!(
+                PackageKind::of_target(target),
+                PackageKind::Native,
+                "{target}"
+            );
+        }
 
         let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
         assert_eq!(key.kinds, None);

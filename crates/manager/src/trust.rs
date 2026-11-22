@@ -634,6 +634,16 @@ mod tests {
             publisher_key(&native, &wasm_only).err(),
             Some(Error::Unauthorized)
         );
+        // Unknown, empty and differently cased targets count as native too.
+        for target in ["", "unknown", "WASM32-wasip1", "wasm32"] {
+            let mut other = entry();
+            other.target = target.into();
+            assert_eq!(
+                publisher_key(&other, &wasm_only).err(),
+                Some(Error::Unauthorized),
+                "{target}"
+            );
+        }
         let both = decode_developer_key(
             DEVELOPER
                 .replace(
