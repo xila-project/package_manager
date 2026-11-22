@@ -11,7 +11,7 @@
 
 [![Rust coverage](https://codecov.io/gh/Xila-Project/package_manager/graph/badge.svg)](https://codecov.io/gh/Xila-Project/package_manager) [![vulnerabilities](https://vulnerabilities.xila.dev/badges/5923a3a90dc8e7923e4941652aec7295.svg)](https://vulnerabilities.xila.dev/public/7ed98e8bb26a0399ff4974fa6da0743e)
 
-Shared Rust workspace for building, signing and validating Xila application bundles; installation and VFS integration are deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [package registry](https://github.com/xila-project/registry), without depending on either consumer.
+Shared Rust workspace for building, signing and validating Xila application bundles, and for the platform-independent part of installing them; VFS integration is deliberately out of scope. It is reused by [Xila Core](https://github.com/xila-project/core) and the [package registry](https://github.com/xila-project/registry), without depending on either consumer.
 
 ## Workspace
 
@@ -23,7 +23,7 @@ Shared Rust workspace for building, signing and validating Xila application bund
 | `xila-package-reader` | Full-buffer TAR inspection with `tar-no-std`, file hashes and optional signature verification |
 | `xila-package-writer` | Host-only deterministic USTAR writer |
 | `xila-package-builder` | Host-only `xila-package` executable to initialize source folders, build standalone bundles, sign and archive them; also a library, reused by the `xila package` subcommand of [`tools`](https://github.com/xila-project/tools) |
-| `xila-package-manager` | Initial platform-independent library scaffold; installer and repository components are not yet implemented |
+| `xila-package-manager` | `no_std + alloc` registry trust chain and crash-consistent installation transactions (install, upgrade, removal and recovery; see [installation transactions](docs/installation-transactions.md)) |
 
 The **experimental version 2 runtime JSON Schema** is maintained in
 [`schemas/package-manifest.schema.json`](schemas/package-manifest.schema.json).
@@ -94,8 +94,9 @@ manifest hashes, not only the Wasm. See
 
 The unpacked `.app` directory is the **bundle**; `.xpk` is merely its
 deterministic distribution archive. The existing `pack` command is retained
-for compatibility. This repository does not implement filesystem installation,
-VFS integration, Shell discovery, activation records or process spawning.
+for compatibility. This repository does not implement VFS integration, Shell
+discovery or process spawning; the device adapts `xila-package-manager`'s
+installation transactions to its file system.
 
 ## Development
 
