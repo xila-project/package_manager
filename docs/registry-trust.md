@@ -11,7 +11,7 @@ index use format version 1.
 |---|---|---|---|
 | Root | offline | `root.json` | pinned on the device (first version), then listed in the previous `root.json` |
 | Repository | registry publication CI | `index.json`, every entry, every developer key file | listed in the trusted `root.json` |
-| Developer | the publisher | each `.xpk` manifest and its file inventory | its key file is signed by a repository key, and its `namespaces` cover the package |
+| Developer | the publisher | each `.xpk` manifest and its file inventory | its key file is signed by a repository key, and its `namespaces` and `kinds` cover the package |
 
 A key may not be both a root key and a repository key, so the online key can
 never sign a new root. Up to 4 keys per role.
@@ -69,12 +69,26 @@ Schemas: [registry-root](../schemas/registry-root.schema.json),
    `check_listed` against the index (**mix-and-match**: every file must be the
    one listed in this snapshot).
 4. `publisher_key`: the entry's `publisher` is the key file's `id` and the key's
-   `namespaces` contain the package's first label. The returned key verifies
+   `namespaces` contain the package's first label and its `kinds` contain the
+   package's kind (below). The returned key verifies
    the archive's manifest signature; the entry's SHA-256 and size pin the
    archive bytes.
 
 A device too small to hold the index may skip step 2 and the `check_listed`
 part of step 3: the per-file signatures still prove origin, but not freshness.
+
+## Package kinds
+
+A package is **Wasm** when its target starts with `wasm32-` or `wasm64-` and
+**native** otherwise (an unknown target counts as native). Wasm runs confined
+by the runtime; native code on a microcontroller without a memory protection
+unit runs fully trusted, so authorizing a key for it is a separate decision.
+
+A developer key lists the kinds it may publish in `kinds` (`"wasm"`,
+`"native"`). An absent or null `kinds` means Wasm only, so existing key files
+keep their meaning and native publication always needs an explicit grant. A key
+that is not authorized for the kind of an entry's target fails `publisher_key`,
+`xila-package registry check` and `xila-package registry verify-signed`.
 
 ## Several repositories
 

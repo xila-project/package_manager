@@ -16,7 +16,7 @@ use std::{
 use xila_package_manager::trust::{self, TrustedRoot};
 use xila_package_manifest::{
     Archive, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH,
-    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NamedKey, ROOT_DOMAIN, ROOT_PATH,
+    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NamedKey, PackageKind, ROOT_DOMAIN, ROOT_PATH,
     ROOT_SCHEMA_URL, RegistryEntry, Root, SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION,
     decode_developer_key, decode_registry_entry, encode_index, encode_registry_entry, encode_root,
     signed_message,
@@ -179,6 +179,18 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
             return Err(failure(
                 path,
                 &format!("publisher {} may not publish {}", key.id, entry.name),
+            ));
+        }
+        let kind = PackageKind::of_target(&entry.target);
+        if !key.authorizes_kind(kind) {
+            return Err(failure(
+                path,
+                &format!(
+                    "publisher {} is not authorized for {} packages (target {})",
+                    key.id,
+                    kind.name(),
+                    entry.target
+                ),
             ));
         }
         if let Some(archives) = archives {
@@ -673,6 +685,73 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn native_entries_need_a_developer_key_authorized_for_native() {
+        let keys = new_keys();
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        write_registry(&registry);
+        let entry_path = registry.join("packages/xila/clock/0.1.0.json");
+        let entry = decode_registry_entry(fs::read(&entry_path).unwrap().as_slice()).unwrap();
+        let native = RegistryEntry {
+            target: "thumbv7em-none-eabi".into(),
+            ..entry
+        };
+        fs::write(&entry_path, encode_registry_entry(&native).unwrap()).unwrap();
+
+        // Without `kinds` a key may publish Wasm only.
+        let error = check(&registry, None).unwrap_err().to_string();
+        assert!(
+            error.contains("not authorized for native packages"),
+            "{error}"
+        );
+
+        let key_path = registry.join("keys/developers/xila-project.json");
+        let key = fs::read_to_string(&key_path).unwrap();
+        fs::write(
+            &key_path,
+            key.replace(
+                r#""namespaces":["xila"]"#,
+                r#""namespaces":["xila"],"kinds":["wasm"]"#,
+            ),
+        )
+        .unwrap();
+        assert!(check(&registry, None).is_err());
+
+        fs::write(
+            &key_path,
+            key.replace(
+                r#""namespaces":["xila"]"#,
+                r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
+            ),
+        )
+        .unwrap();
+        check(&registry, None).unwrap();
+
+        // Signed metadata is verified with the same rule, so a key that loses
+        // the native grant cannot be used to verify a native entry.
+        root(
+            &keys.root_seed,
+            "root-test",
+            &keys.repository_public,
+            "repository-test",
+            1,
+            &registry.join(ROOT_PATH),
+        )
+        .unwrap();
+        let site = temp.path().join("site");
+        sign(
+            &registry,
+            &keys.root_public,
+            &keys.repository_seed,
+            &site,
+            Some(1_000),
+            30,
+        )
+        .unwrap();
+        verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
     }
 
     #[test]

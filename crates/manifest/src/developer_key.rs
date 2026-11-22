@@ -12,6 +12,38 @@ pub const DEVELOPER_KEY_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xi
 /// The only supported signature algorithm.
 pub const ED25519: &str = "ed25519";
 
+/// What a package executes, which decides the developer authorization it needs.
+///
+/// WebAssembly runs confined by the Wasm runtime; native code on a
+/// microcontroller without a memory protection unit runs fully trusted, so a
+/// developer key must be authorized for it explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackageKind {
+    Wasm,
+    Native,
+}
+
+impl PackageKind {
+    /// The kind of a package target: `wasm32-*` and `wasm64-*` are Wasm and
+    /// everything else, including an unknown target, is native so that it
+    /// needs the stricter authorization.
+    pub fn of_target(target: &str) -> Self {
+        if target.starts_with("wasm32-") || target.starts_with("wasm64-") {
+            Self::Wasm
+        } else {
+            Self::Native
+        }
+    }
+
+    /// The name used in the `kinds` field of a developer key.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Wasm => "wasm",
+            Self::Native => "native",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeveloperKey {
     #[serde(rename = "$schema")]
@@ -27,6 +59,9 @@ pub struct DeveloperKey {
     pub openssh: Option<String>,
     /// First labels of package identifiers this key may publish (`xila` for `xila.clock`).
     pub namespaces: Vec<String>,
+    /// Package kinds this key may publish: `wasm` and/or `native`. Absent means
+    /// `wasm` only, so native executables always need an explicit grant.
+    pub kinds: Option<Vec<String>>,
 }
 
 fn base64_value(byte: u8) -> Option<u8> {
@@ -105,10 +140,22 @@ impl DeveloperKey {
                 .namespaces
                 .iter()
                 .all(|namespace| valid_namespace(namespace))
+            || !self.valid_kinds()
         {
             return Err(Error::InvalidDeveloperKey);
         }
         Ok(())
+    }
+
+    fn valid_kinds(&self) -> bool {
+        self.kinds.as_ref().is_none_or(|kinds| {
+            !kinds.is_empty()
+                && kinds.len() <= 2
+                && kinds.iter().all(|kind| {
+                    kind == PackageKind::Wasm.name() || kind == PackageKind::Native.name()
+                })
+                && (kinds.len() == 1 || kinds[0] != kinds[1])
+        })
     }
 
     /// The raw Ed25519 public key.
@@ -121,6 +168,22 @@ impl DeveloperKey {
         name.split_once('.').is_some_and(|(namespace, _)| {
             self.namespaces.iter().any(|allowed| allowed == namespace)
         })
+    }
+}
+
+impl DeveloperKey {
+    /// Whether this key may publish packages of `kind`.
+    pub fn authorizes_kind(&self, kind: PackageKind) -> bool {
+        match &self.kinds {
+            None => kind == PackageKind::Wasm,
+            Some(kinds) => kinds.iter().any(|allowed| allowed == kind.name()),
+        }
+    }
+
+    /// Whether this key may publish the package `name` built for `target`:
+    /// its namespace and its kind must both be authorized.
+    pub fn authorizes_package(&self, name: &str, target: &str) -> bool {
+        self.authorizes(name) && self.authorizes_kind(PackageKind::of_target(target))
     }
 }
 
@@ -163,6 +226,59 @@ mod tests {
     }
 
     #[test]
+    fn kinds_default_to_wasm_and_native_needs_an_explicit_grant() {
+        assert_eq!(PackageKind::of_target("wasm32-wasip1"), PackageKind::Wasm);
+        assert_eq!(
+            PackageKind::of_target("wasm32-unknown-unknown"),
+            PackageKind::Wasm
+        );
+        assert_eq!(
+            PackageKind::of_target("thumbv7em-none-eabi"),
+            PackageKind::Native
+        );
+        assert_eq!(
+            PackageKind::of_target("x86_64-unknown-linux-gnu"),
+            PackageKind::Native
+        );
+        assert_eq!(PackageKind::of_target("unknown"), PackageKind::Native);
+
+        let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+        assert_eq!(key.kinds, None);
+        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1"));
+        assert!(!key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
+
+        key.kinds = Some(alloc::vec!["native".into()]);
+        key.validate().unwrap();
+        assert!(!key.authorizes_package("xila.clock", "wasm32-wasip1"));
+        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
+        assert!(!key.authorizes_package("other.clock", "thumbv7em-none-eabi"));
+
+        key.kinds = Some(alloc::vec!["wasm".into(), "native".into()]);
+        key.validate().unwrap();
+        assert!(key.authorizes_package("xila.clock", "wasm32-wasip1"));
+        assert!(key.authorizes_package("xila.clock", "thumbv7em-none-eabi"));
+    }
+
+    #[test]
+    fn decodes_the_kinds_field() {
+        let json = XILA_PROJECT.replace(
+            r#""namespaces": ["xila"]"#,
+            r#""namespaces": ["xila"], "kinds": ["wasm", "native"]"#,
+        );
+        let key = decode_developer_key(json.as_bytes()).unwrap();
+        assert!(key.authorizes_kind(PackageKind::Native));
+        let json = XILA_PROJECT.replace(
+            r#""namespaces": ["xila"]"#,
+            r#""namespaces": ["xila"], "kinds": null"#,
+        );
+        assert!(
+            !decode_developer_key(json.as_bytes())
+                .unwrap()
+                .authorizes_kind(PackageKind::Native)
+        );
+    }
+
+    #[test]
     fn rejects_malformed_keys() {
         let base = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
         for change in [
@@ -180,6 +296,12 @@ mod tests {
             |k: &mut DeveloperKey| k.namespaces.clear(),
             |k: &mut DeveloperKey| k.namespaces = alloc::vec!["Xila".into()],
             |k: &mut DeveloperKey| k.openssh = Some("ssh-rsa AAAA".into()),
+            |k: &mut DeveloperKey| k.kinds = Some(Vec::new()),
+            |k: &mut DeveloperKey| k.kinds = Some(alloc::vec!["arm".into()]),
+            |k: &mut DeveloperKey| k.kinds = Some(alloc::vec!["wasm".into(), "wasm".into()]),
+            |k: &mut DeveloperKey| {
+                k.kinds = Some(alloc::vec!["wasm".into(), "native".into(), "wasm".into()])
+            },
         ] {
             let mut key = base.clone();
             change(&mut key);

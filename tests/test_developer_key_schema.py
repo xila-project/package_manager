@@ -18,6 +18,13 @@ class DeveloperKeySchemaTests(unittest.TestCase):
         Draft202012Validator.check_schema(SCHEMA)
         VALIDATOR.validate(KEY)
 
+    def test_accepts_kinds(self):
+        for kinds in (None, ["wasm"], ["native"], ["wasm", "native"]):
+            key = copy.deepcopy(KEY)
+            key["kinds"] = kinds
+            with self.subTest(kinds=kinds):
+                VALIDATOR.validate(key)
+
     def test_rejects_invalid_keys(self):
         for key, value in [
             ("id", "Xila Project"),
@@ -27,6 +34,10 @@ class DeveloperKeySchemaTests(unittest.TestCase):
             ("namespaces", []),
             ("namespaces", ["Xila"]),
             ("openssh", "ssh-rsa AAAA"),
+            ("kinds", []),
+            ("kinds", ["arm"]),
+            ("kinds", ["wasm", "wasm"]),
+            ("kinds", ["wasm", "native", "wasm"]),
         ]:
             broken = copy.deepcopy(KEY)
             broken[key] = value

@@ -16,7 +16,9 @@ pub use developer::{
     DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
     encode_developer,
 };
-pub use developer_key::{DEVELOPER_KEY_SCHEMA_URL, DeveloperKey, decode_developer_key};
+pub use developer_key::{
+    DEVELOPER_KEY_SCHEMA_URL, DeveloperKey, PackageKind, decode_developer_key,
+};
 pub use metadata::Metadata;
 use miniserde::{Deserialize, Serialize};
 pub use registry::{
