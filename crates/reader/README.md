@@ -8,6 +8,8 @@ The archive reader has two APIs:
 - **Incremental API:** `inspect_streaming(read_block, trusted_key)` or the
   push-oriented `StreamingVerifier::push(&[u8; 512])` / `finish()` use
   `TarStreamParser` from [tar-no-std](https://crates.io/crates/tar-no-std).
+  `extract_streaming(read_block, trusted_key, write)` and
+  `StreamingVerifier::extract` also return each file's bytes in the same pass.
 
 ## Streaming an authenticated package
 
@@ -51,9 +53,40 @@ PAX/GNU extensions) are rejected, despite the upstream parser's default of
 skipping them. Trailing zero padding is allowed; trailing nonzero blocks are
 rejected.
 
+## Extracting while verifying
+
+`StreamingVerifier::extract(&block)` returns `Some(FileChunk)` for blocks that
+belong to a declared file: `index` in `Manifest::files`, `first` (create the
+file; no bytes), the payload `bytes` borrowed from the block, and `last` (size
+and SHA-256 now verified). Files and their chunks arrive in manifest order, and
+nothing is returned before the header signature is verified.
+`extract_streaming` wraps this with a block source and a `write(file, chunk)`
+callback. Write chunks to non-executable staging only, and discard everything
+if any call or `finish()` fails.
+
+```rust,no_run
+use core::convert::Infallible;
+use xila_package_reader::extract_streaming;
+use xila_package_verification::PublicKey;
+
+fn install_from_blocks(
+    mut next: impl FnMut(&mut [u8; 512]) -> Result<bool, Infallible>,
+    trusted: &PublicKey,
+) {
+    let manifest = extract_streaming(&mut next, Some(trusted), |file, chunk| {
+        // Create `file.path` in staging when `chunk.first`, append
+        // `chunk.bytes`, close it when `chunk.last`.
+        let _ = (file, chunk);
+        Ok(())
+    })
+    .unwrap();
+    assert!(!manifest.files.is_empty());
+}
+```
+
 **Security boundary:** on-device extraction must write to a quarantined
 temporary location (not an executable/live path), check every hash and
-signature and reach EOF before atomically publishing the bundle. This PR
+signature and reach EOF before atomically publishing the bundle. This crate
 implements only the reader/verifier and no Xila VFS or installer integration.
 The caller must separately enforce publisher trust, deployment policy and
 atomic activation. Successful unsigned verification is only an integrity check.

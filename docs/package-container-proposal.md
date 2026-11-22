@@ -1,6 +1,31 @@
 # Proposal: Xila package container, manifest and signatures
 
-**Status: architectural proposal; NOT a frozen production format.** A development-only implementation now exists under `crates/xila-package-manifest`, `crates/xila-package-reader`, and `crates/xila-package-writer`. The installed version currently uses Miniserde JSON, not Postcard, and the reader requires an entire TAR archive in memory.
+**Status: architectural proposal; NOT a frozen production format.** A development-only implementation exists under `crates/manifest`, `crates/reader` and `crates/writer`. The manifest uses Miniserde JSON, not Postcard. The reader verifies and extracts archives in a single streaming pass (see below); the full-buffer API remains for compatibility.
+
+## Decision: streaming container (package_manager#27)
+
+`.xpk` stays **restricted, uncompressed USTAR**. It can be verified and extracted in one forward pass with bounded RAM:
+
+- `StreamingVerifier` consumes one caller-owned 512-byte block at a time. The raw manifest (at most 64 KiB plus the signing domain) is buffered only until the header signature is verified, then released. After that, memory is the parsed manifest (at most 128 files), one SHA-256 state and the Ed25519 verifier, independent of archive and file size.
+- `StreamingVerifier::extract` and `extract_streaming` return each declared file's bytes from the block that carries them, in manifest order. No file byte is returned before the header signature is verified. A file is proven when its `last` chunk is returned, and the package only when `finish` succeeds. The installer (xila-project/core#491) writes chunks to non-executable staging and discards them on any error. It does not parse TAR itself or read the archive twice.
+
+**Per-file LZ4 is not adopted for now**, and version 1 remains uncompressed. Measured on the six published `wasm32-wasip1` packages (xila.calculator, clock, pixel-painter, synth, text-editor and weather; 610,304 archive bytes, 580,301 payload bytes, Wasm already stripped of custom sections):
+
+| Encoding of each payload | Total bytes | Share of payload |
+|---|---:|---:|
+| Uncompressed (current) | 580,301 | 100 % |
+| LZ4, whole file | 345,717 | 59.6 % |
+| LZ4, independent 4 KiB blocks (what a bounded reader needs) | 393,079 | 67.7 % |
+| LZ4 HC level 12 | 286,861 | 49.4 % |
+| Deflate level 9 (reference only) | 237,158 | 40.9 % |
+
+Reasons:
+
+- Installed files are stored expanded, because the Wasm runtime loads them from the file system. A streaming install never keeps the archive, so compression saves only download bytes: about 25 to 50 KiB per package for bounded LZ4. It saves no flash space and no flash writes.
+- A bounded decoder adds a block buffer and a scratch buffer (about 8 KiB at 4 KiB blocks) and decoder code to every reader. It also needs format version 3, signed encoding and block lengths, and decompression-bomb limits. That cost is not justified by the savings.
+- A faster transport, or HTTP content encoding where the server supports it, reduces download time without changing the signed format.
+
+Revisit when packages routinely exceed about 512 KiB, or when a slow link (serial, BLE) becomes a primary install path. Measure on a constrained microcontroller at that point: peak heap and stack, reader code size, throughput. This evaluation did not run on hardware. If LZ4 is adopted, use independent blocks of at most 4 KiB, keep uncompressed entries valid, sign the encoding plus the stored and expanded lengths, and hash the expanded bytes.
 
 This document records the recommended architecture for review. [Xila Core issue #402](https://github.com/xila-project/core/issues/402) remains the authority for the final format decision and required comparison with CPIO, SWUpdate, Alpine package formats and a minimal custom container.
 
@@ -26,7 +51,7 @@ If restricted USTAR is selected, the suggested order of entries is:
 calculator-1.0.0.xpk            (ordinary uncompressed TAR container)
   .xila/manifest.json          (first regular file, provisional Miniserde JSON)
   .xila/manifest.sig           (second regular file, raw 64-byte signature in prototype)
-  executables/calculator.wasm          (regular file, raw or independently LZ4-block encoded)
+  executables/calculator.wasm  (regular file, raw)
   share/icon.png               (regular file, raw)
 ```
 
@@ -111,7 +136,7 @@ Also note that `tar-no-std` skips special and extension entries in ordinary iter
 1. Final TAR-versus-CPIO-versus-ADB comparison, parser footprint and streaming-read design.
 2. Canonical binary manifest encoding, exact versioned structure, path and size limits, and signature-covered byte definition.
 3. Signature envelope shape, publisher key identifiers, key rotation and trust separation between community packages and the official repository.
-4. Optional LZ4 block framing, block-size bound, decompressor buffer budget and whether uncompressed-only comes first.
+4. ~~Optional LZ4 block framing~~: uncompressed only for now; see the decision above.
 5. Rules for installation paths, compatibility, requested capabilities and declarative shortcuts.
 6. Target metadata preflight and crash-consistent activation on LittleFS and other filesystems.
 7. Separate signed static index format for direct package lookup, with rollback and freshness protection (search is out of first-release scope).
