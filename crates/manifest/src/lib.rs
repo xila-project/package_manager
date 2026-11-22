@@ -493,7 +493,7 @@ mod tests {
         let json = encode(&m).unwrap();
         assert!(json.contains(r#""$schema":"https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json""#));
         assert_eq!(decode(json.as_bytes()), Ok(m.clone()));
-        m.schema = Some("https://example.com/untrusted.json".to_string());
+        m.schema = Some("https://xila.example/untrusted.json".to_string());
         assert_eq!(validate(&m), Err(Error::InvalidSchema));
         m.schema = None;
         assert_eq!(validate(&m), Ok(()));

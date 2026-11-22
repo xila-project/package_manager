@@ -1,10 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-namespace.schema.json",
   "format_version": 1,
-  "namespace": "org.example",
+  "namespace": "example.xila",
   "owner": {
     "kind": "domain",
-    "name": "example.org"
+    "name": "xila.example"
   },
   "developer_keys": ["example-release", "alice"]
 }

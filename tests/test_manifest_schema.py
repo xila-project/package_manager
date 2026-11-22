@@ -78,7 +78,7 @@ class ManifestSchemaTests(unittest.TestCase):
             {"xila_version": "01.2"},
             {"xila_version": "+1.2"},
             {"xila_version": "1.2\n"},
-            {"$schema": "https://example.com/untrusted.schema.json"},
+            {"$schema": "https://xila.example/untrusted.schema.json"},
             {"application": []},
             {"files": []},
             {"extra": "field"},

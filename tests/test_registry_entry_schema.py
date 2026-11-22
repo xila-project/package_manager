@@ -27,7 +27,7 @@ class RegistryEntrySchemaTests(unittest.TestCase):
         for path, value in [
             (("format_version",), 1),
             (("xila_version",), "65536.0"),
-            (("archive", "url"), "http://example.com/a.xpk"),
+            (("archive", "url"), "http://xila.example/a.xpk"),
             (("archive", "sha256"), "A" * 64),
             (("archive", "size"), 0),
             (("publisher",), "Xila Project"),

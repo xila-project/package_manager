@@ -307,7 +307,7 @@ mod tests {
                     size: 300,
                 },
                 IndexFile {
-                    path: "namespaces/org.example.json".into(),
+                    path: "namespaces/example.xila.json".into(),
                     sha256: "c".repeat(64),
                     size: 200,
                 },
@@ -364,13 +364,13 @@ mod tests {
         index.files.insert(
             2,
             IndexFile {
-                path: "namespaces/org.example.tools.json".into(),
+                path: "namespaces/example.xila.tools.json".into(),
                 sha256: "d".repeat(64),
                 size: 200,
             },
         );
         assert_eq!(index.validate(), Err(Error::InvalidIndex));
-        index.files[2].path = "namespaces/org.examples.json".into();
+        index.files[2].path = "namespaces/example.xilas.json".into();
         assert_eq!(index.validate(), Ok(()));
     }
 
@@ -409,9 +409,9 @@ mod tests {
             },
             |i: &mut Index| i.files[0].path = "packages/../root.json".into(),
             |i: &mut Index| i.files[0].path = "root.json".into(),
-            |i: &mut Index| i.files[1].path = "namespaces/org/example.json".into(),
+            |i: &mut Index| i.files[1].path = "namespaces/example/xila.json".into(),
             |i: &mut Index| i.files[1].path = "namespaces/../root.json".into(),
-            |i: &mut Index| i.files[1].path = "namespaces/org.example.txt".into(),
+            |i: &mut Index| i.files[1].path = "namespaces/example.xila.txt".into(),
             |i: &mut Index| i.files[0].path = "/packages/xila/clock/0.1.0.json".into(),
             |i: &mut Index| i.files[0].sha256 = "A".repeat(64),
             |i: &mut Index| i.files[0].size = 0,

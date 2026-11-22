@@ -533,7 +533,7 @@ pub enum BundleOperation<'a> {
     Init {
         /// New directory to create (must not exist).
         directory: &'a str,
-        /// Reverse-DNS application/package identifier, e.g. org.example.weather.
+        /// Reverse-DNS application/package identifier, e.g. example.xila.weather.
         name: &'a str,
         /// Version string.
         version: &'a str,

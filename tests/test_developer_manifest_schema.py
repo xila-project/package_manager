@@ -16,7 +16,7 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 VALID_SOURCE = {
     "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/developer-manifest.schema.json",
     "format_version": 2,
-    "name": "org.example.weather",
+    "name": "example.xila.weather",
     "version": "1.0.0",
     "target": "wasm32-wasip1",
     "xila_version": "0.1",
@@ -62,7 +62,7 @@ class DeveloperManifestSchemaTests(unittest.TestCase):
             {"files": []},
             {"signature": "deadbeef"},
             {"sha256": "00" * 32},
-            {"$schema": "https://example.org/untrusted-schema"},
+            {"$schema": "https://xila.example/untrusted-schema"},
             {"name": "../escape"},
             {"application": {"entrypoint": "../escape"}},
             {"format_version": 1},

@@ -85,7 +85,7 @@ not supported.
 ```json
 {
   "format_version": 2,
-  "name": "org.example.weather",
+  "name": "example.xila.weather",
   "version": "1.0.0",
   "target": "wasm32-wasip1",
   "xila_version": "0.1",

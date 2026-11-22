@@ -840,7 +840,7 @@ mod tests {
             metadata: None,
             publisher: "xila-project".into(),
             archive: Archive {
-                url: format!("https://example.com/{name}-{version}.xpk"),
+                url: format!("https://xila.example/{name}-{version}.xpk"),
                 sha256: "a".repeat(64),
                 size: 1,
             },

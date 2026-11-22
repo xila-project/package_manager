@@ -740,7 +740,7 @@ mod tests {
             metadata: None,
             publisher: "xila-project".into(),
             archive: Archive {
-                url: "https://example.com/clock.xpk".into(),
+                url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),
                 size: 10,
             },
@@ -987,26 +987,26 @@ mod tests {
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
     }
 
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"org.example","owner":{"kind":"domain","name":"example.org"},"developer_keys":["xila-project"]}"#;
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila-project"]}"#;
 
-    /// A registry with one reverse-DNS entry, `org.example.weather`, covered
-    /// by `namespaces/org.example.json`.
+    /// A registry with one reverse-DNS entry, `example.xila.weather`, covered
+    /// by `namespaces/example.xila.json`.
     fn write_namespaced_registry(directory: &Path) {
         write_registry(directory);
         let legacy = directory.join("packages/xila/clock/0.1.0.json");
         let entry = decode_registry_entry(&fs::read(&legacy).unwrap()).unwrap();
         let weather = RegistryEntry {
-            name: "org.example.weather".into(),
+            name: "example.xila.weather".into(),
             ..entry
         };
-        fs::create_dir_all(directory.join("packages/org/example/weather")).unwrap();
+        fs::create_dir_all(directory.join("packages/example/xila/weather")).unwrap();
         fs::write(
-            directory.join("packages/org/example/weather/0.1.0.json"),
+            directory.join("packages/example/xila/weather/0.1.0.json"),
             encode_registry_entry(&weather).unwrap(),
         )
         .unwrap();
         fs::create_dir_all(directory.join("namespaces")).unwrap();
-        fs::write(directory.join("namespaces/org.example.json"), NAMESPACE).unwrap();
+        fs::write(directory.join("namespaces/example.xila.json"), NAMESPACE).unwrap();
     }
 
     fn check_error(registry: &Path) -> String {
@@ -1019,13 +1019,13 @@ mod tests {
         let registry = temp.path().join("registry");
         write_namespaced_registry(&registry);
         check(&registry, None).unwrap();
-        let namespace = registry.join("namespaces/org.example.json");
+        let namespace = registry.join("namespaces/example.xila.json");
 
         // Denied: no namespace file covers the entry.
         fs::remove_file(&namespace).unwrap();
         let error = check_error(&registry);
         assert!(
-            error.contains("no namespace file covers org.example.weather"),
+            error.contains("no namespace file covers example.xila.weather"),
             "{error}"
         );
 
@@ -1043,7 +1043,7 @@ mod tests {
         .unwrap();
         let error = check_error(&registry);
         assert!(
-            error.contains("not listed in namespace org.example"),
+            error.contains("not listed in namespace example.xila"),
             "{error}"
         );
 
@@ -1059,35 +1059,39 @@ mod tests {
         // Denied: a file name that is not its namespace, and an owner that
         // does not match the namespace.
         fs::remove_file(&namespace).unwrap();
-        fs::write(registry.join("namespaces/org.other.json"), NAMESPACE).unwrap();
+        fs::write(registry.join("namespaces/example.other.json"), NAMESPACE).unwrap();
         let error = check_error(&registry);
         assert!(
             error.contains("file name must be <namespace>.json"),
             "{error}"
         );
-        fs::remove_file(registry.join("namespaces/org.other.json")).unwrap();
-        fs::write(&namespace, NAMESPACE.replace("example.org", "example.com")).unwrap();
+        fs::remove_file(registry.join("namespaces/example.other.json")).unwrap();
+        fs::write(
+            &namespace,
+            NAMESPACE.replace("xila.example", "other.example"),
+        )
+        .unwrap();
         let error = check_error(&registry);
         assert!(error.contains("invalid namespace file"), "{error}");
 
         // Denied: overlapping namespace files.
         fs::write(&namespace, NAMESPACE).unwrap();
         fs::write(
-            registry.join("namespaces/org.example.tools.json"),
+            registry.join("namespaces/example.xila.tools.json"),
             NAMESPACE
-                .replace(r#""org.example""#, r#""org.example.tools""#)
-                .replace("example.org", "tools.example.org"),
+                .replace(r#""example.xila""#, r#""example.xila.tools""#)
+                .replace("xila.example", "tools.xila.example"),
         )
         .unwrap();
         let error = check_error(&registry);
-        assert!(error.contains("overlaps namespace org.example"), "{error}");
-        fs::remove_file(registry.join("namespaces/org.example.tools.json")).unwrap();
+        assert!(error.contains("overlaps namespace example.xila"), "{error}");
+        fs::remove_file(registry.join("namespaces/example.xila.tools.json")).unwrap();
 
         // Denied: a namespace file in a subdirectory.
-        fs::create_dir_all(registry.join("namespaces/org")).unwrap();
+        fs::create_dir_all(registry.join("namespaces/example")).unwrap();
         let error = check_error(&registry);
         assert!(error.contains("may not be in subdirectories"), "{error}");
-        fs::remove_dir(registry.join("namespaces/org")).unwrap();
+        fs::remove_dir(registry.join("namespaces/example")).unwrap();
         check(&registry, None).unwrap();
 
         // The legacy grant never covers reverse-DNS identifiers: with the
@@ -1110,7 +1114,7 @@ mod tests {
         fs::create_dir_all(registry.join("namespaces")).unwrap();
         fs::write(
             registry.join("namespaces/xila.json"),
-            NAMESPACE.replace(r#""org.example""#, r#""xila""#),
+            NAMESPACE.replace(r#""example.xila""#, r#""xila""#),
         )
         .unwrap();
         let error = check_error(&registry);
@@ -1142,17 +1146,17 @@ mod tests {
             30,
         )
         .unwrap();
-        assert!(site.join("namespaces/org.example.json.sig").is_file());
+        assert!(site.join("namespaces/example.xila.json.sig").is_file());
         let index = fs::read_to_string(site.join(INDEX_PATH)).unwrap();
         assert!(
-            index.contains(r#""path":"namespaces/org.example.json""#),
+            index.contains(r#""path":"namespaces/example.xila.json""#),
             "{index}"
         );
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
 
         // Denied: a namespace file altered after signing (index hash and
         // signature both break).
-        let namespace = site.join("namespaces/org.example.json");
+        let namespace = site.join("namespaces/example.xila.json");
         let original = fs::read(&namespace).unwrap();
         fs::write(&namespace, NAMESPACE.replace("xila-project", "alice")).unwrap();
         assert!(verify_signed(&site, &keys.root_public, None).is_err());
@@ -1181,12 +1185,12 @@ mod tests {
         fs::write(&signature, &original_signature).unwrap();
 
         // Denied: an unlisted namespace file.
-        fs::write(site.join("namespaces/org.other.json"), NAMESPACE).unwrap();
+        fs::write(site.join("namespaces/example.other.json"), NAMESPACE).unwrap();
         let error = verify_signed(&site, &keys.root_public, None)
             .unwrap_err()
             .to_string();
         assert!(error.contains("not listed"), "{error}");
-        fs::remove_file(site.join("namespaces/org.other.json")).unwrap();
+        fs::remove_file(site.join("namespaces/example.other.json")).unwrap();
         verify_signed(&site, &keys.root_public, None).unwrap();
 
         // Signed metadata follows the same rule as `check`: a namespace file
@@ -1198,7 +1202,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            registry.join("namespaces/org.example.json"),
+            registry.join("namespaces/example.xila.json"),
             NAMESPACE.replace(r#"["xila-project"]"#, r#"["alice"]"#),
         )
         .unwrap();

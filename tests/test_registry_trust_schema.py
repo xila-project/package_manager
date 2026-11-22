@@ -52,7 +52,7 @@ class RegistryTrustSchemaTests(unittest.TestCase):
 
     def test_accepts_namespace_files_in_the_index(self):
         index = copy.deepcopy(INDEX_FIXTURE)
-        index["files"].insert(1, {"path": "namespaces/org.example.json", "sha256": "a" * 64, "size": 200})
+        index["files"].insert(1, {"path": "namespaces/example.xila.json", "sha256": "a" * 64, "size": 200})
         INDEX_VALIDATOR.validate(index)
 
     def test_rejects_invalid_indexes(self):
@@ -60,7 +60,7 @@ class RegistryTrustSchemaTests(unittest.TestCase):
             lambda i: i.update(version=0),
             lambda i: i["files"][0].update(path="root.json"),
             lambda i: i["files"][0].update(path="packages/../keys/x.json"),
-            lambda i: i["files"][0].update(path="namespaces/org/example.json"),
+            lambda i: i["files"][0].update(path="namespaces/example/xila.json"),
             lambda i: i["files"][0].update(path="namespaces/../root.json"),
             lambda i: i["files"][0].update(sha256="A" * 64),
             lambda i: i["files"][0].update(size=0),
