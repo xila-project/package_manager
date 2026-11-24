@@ -221,11 +221,11 @@ mod tests {
     use super::*;
 
     const XILA_PROJECT: &str = r#"{
-  "id": "xila-project",
+  "id": "xila",
   "author": "Xila Project",
   "algorithm": "ed25519",
   "public_key": "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=",
-  "openssh": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOg9XL5RswgCE0K5pFoyYJ/ew1tbOqd87wzXvGvO6XG3 xila-project",
+  "openssh": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOg9XL5RswgCE0K5pFoyYJ/ew1tbOqd87wzXvGvO6XG3 xila",
   "namespaces": ["xila"]
 }"#;
 
@@ -265,7 +265,7 @@ mod tests {
         let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
         key.namespaces = None;
         key.validate().unwrap();
-        let listed = namespace(&["xila-project"]);
+        let listed = namespace(&["xila"]);
         listed.validate().unwrap();
         assert!(key.authorizes("example.xila.weather", Some(&listed)));
         assert!(key.authorizes("example.xila.tools.clock", Some(&listed)));

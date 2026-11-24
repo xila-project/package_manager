@@ -724,8 +724,8 @@ mod tests {
         fs::create_dir_all(directory.join("keys/developers")).unwrap();
         fs::create_dir_all(directory.join("packages/xila/clock")).unwrap();
         fs::write(
-            directory.join("keys/developers/xila-project.json"),
-            r#"{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#,
+            directory.join("keys/developers/xila.json"),
+            r#"{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#,
         )
         .unwrap();
         let entry = RegistryEntry {
@@ -738,7 +738,7 @@ mod tests {
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,
-            publisher: "xila-project".into(),
+            publisher: "xila".into(),
             archive: Archive {
                 url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),
@@ -813,7 +813,7 @@ mod tests {
         )
         .unwrap();
         assert!(site.join("packages/xila/clock/0.1.0.json.sig").is_file());
-        assert!(site.join("keys/developers/xila-project.json.sig").is_file());
+        assert!(site.join("keys/developers/xila.json.sig").is_file());
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
         assert!(verify_signed(&site, &keys.root_public, Some(1_000 + 30 * 86_400)).is_err());
         // The repository key is not the root of trust.
@@ -905,7 +905,7 @@ mod tests {
             "{error}"
         );
 
-        let key_path = registry.join("keys/developers/xila-project.json");
+        let key_path = registry.join("keys/developers/xila.json");
         let key = fs::read_to_string(&key_path).unwrap();
         fs::write(
             &key_path,
@@ -987,7 +987,7 @@ mod tests {
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
     }
 
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila-project"]}"#;
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila"]}"#;
 
     /// A registry with one reverse-DNS entry, `example.xila.weather`, covered
     /// by `namespaces/example.xila.json`.
@@ -1036,11 +1036,7 @@ mod tests {
             r#"{"id":"alice","author":"Alice","algorithm":"ed25519","public_key":"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=","openssh":null}"#,
         )
         .unwrap();
-        fs::write(
-            &namespace,
-            NAMESPACE.replace(r#"["xila-project"]"#, r#"["alice"]"#),
-        )
-        .unwrap();
+        fs::write(&namespace, NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#)).unwrap();
         let error = check_error(&registry);
         assert!(
             error.contains("not listed in namespace example.xila"),
@@ -1050,7 +1046,7 @@ mod tests {
         // Denied: a namespace file listing an unknown key.
         fs::write(
             &namespace,
-            NAMESPACE.replace(r#"["xila-project"]"#, r#"["mallory"]"#),
+            NAMESPACE.replace(r#"["xila"]"#, r#"["mallory"]"#),
         )
         .unwrap();
         let error = check_error(&registry);
@@ -1095,7 +1091,7 @@ mod tests {
         check(&registry, None).unwrap();
 
         // The legacy grant never covers reverse-DNS identifiers: with the
-        // namespace file removed, the xila-project key's ["xila"] is not enough.
+        // namespace file removed, the xila key's ["xila"] is not enough.
         fs::remove_file(&namespace).unwrap();
         assert!(check(&registry, None).is_err());
     }
@@ -1105,7 +1101,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let registry = temp.path().join("registry");
         write_registry(&registry);
-        let key_path = registry.join("keys/developers/xila-project.json");
+        let key_path = registry.join("keys/developers/xila.json");
         let key = fs::read_to_string(&key_path).unwrap();
         fs::write(&key_path, key.replace(r#","namespaces":["xila"]"#, "")).unwrap();
         let error = check_error(&registry);
@@ -1158,7 +1154,7 @@ mod tests {
         // signature both break).
         let namespace = site.join("namespaces/example.xila.json");
         let original = fs::read(&namespace).unwrap();
-        fs::write(&namespace, NAMESPACE.replace("xila-project", "alice")).unwrap();
+        fs::write(&namespace, NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#)).unwrap();
         assert!(verify_signed(&site, &keys.root_public, None).is_err());
         fs::write(&namespace, &original).unwrap();
 
@@ -1203,7 +1199,7 @@ mod tests {
         .unwrap();
         fs::write(
             registry.join("namespaces/example.xila.json"),
-            NAMESPACE.replace(r#"["xila-project"]"#, r#"["alice"]"#),
+            NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#),
         )
         .unwrap();
         let error = write_signed_site(

@@ -1,4 +1,4 @@
-"""Developer key schema regression tests (fixture: the published xila-project key)."""
+"""Developer key schema regression tests (fixture: the published xila key)."""
 
 import copy
 import json

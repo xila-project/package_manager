@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn entry_round_trips_and_matches_its_manifest() {
         let manifest = manifest();
-        let entry = RegistryEntry::from_manifest(&manifest, "xila-project", archive()).unwrap();
+        let entry = RegistryEntry::from_manifest(&manifest, "xila", archive()).unwrap();
         assert_eq!(entry.display_name.as_deref(), Some("Clock"));
         let encoded = encode_registry_entry(&entry).unwrap();
         assert!(encoded.contains(r#""xila_version":"0.1""#));
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn copied_fields_must_equal_the_signed_manifest() {
-        let entry = RegistryEntry::from_manifest(&manifest(), "xila-project", archive()).unwrap();
+        let entry = RegistryEntry::from_manifest(&manifest(), "xila", archive()).unwrap();
         let mut other = manifest();
         other.version = "0.2.0".into();
         assert_eq!(entry.check_manifest(&other), Err(Error::RegistryMismatch));
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_location_or_publisher() {
-        let base = RegistryEntry::from_manifest(&manifest(), "xila-project", archive()).unwrap();
+        let base = RegistryEntry::from_manifest(&manifest(), "xila", archive()).unwrap();
         for change in [
             |e: &mut RegistryEntry| e.archive.url = "http://xila.example/a.xpk".into(),
             |e: &mut RegistryEntry| e.archive.sha256 = "B".repeat(64),

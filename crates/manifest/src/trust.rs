@@ -302,7 +302,7 @@ mod tests {
             expires: 1_802_592_000,
             files: vec![
                 IndexFile {
-                    path: "keys/developers/xila-project.json".into(),
+                    path: "keys/developers/xila.json".into(),
                     sha256: "a".repeat(64),
                     size: 300,
                 },
