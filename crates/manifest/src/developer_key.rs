@@ -220,18 +220,18 @@ pub fn decode_developer_key(bytes: &[u8]) -> Result<DeveloperKey, Error> {
 mod tests {
     use super::*;
 
-    const XILA_PROJECT: &str = r#"{
-  "id": "xila-project",
+    const XILA: &str = r#"{
+  "id": "xila",
   "author": "Xila Project",
   "algorithm": "ed25519",
   "public_key": "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=",
-  "openssh": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOg9XL5RswgCE0K5pFoyYJ/ew1tbOqd87wzXvGvO6XG3 xila-project",
+  "openssh": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOg9XL5RswgCE0K5pFoyYJ/ew1tbOqd87wzXvGvO6XG3 xila",
   "namespaces": ["xila"]
 }"#;
 
     #[test]
-    fn decodes_the_published_xila_project_key() {
-        let key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+    fn decodes_the_published_xila_key() {
+        let key = decode_developer_key(XILA.as_bytes()).unwrap();
         // Same bytes as the OpenSSH blob's trailing 32-byte key.
         assert_eq!(
             key.public_key_bytes().unwrap()[..4],
@@ -262,10 +262,10 @@ mod tests {
 
     #[test]
     fn namespace_files_authorize_listed_keys_by_prefix() {
-        let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+        let mut key = decode_developer_key(XILA.as_bytes()).unwrap();
         key.namespaces = None;
         key.validate().unwrap();
-        let listed = namespace(&["xila-project"]);
+        let listed = namespace(&["xila"]);
         listed.validate().unwrap();
         assert!(key.authorizes("example.xila.weather", Some(&listed)));
         assert!(key.authorizes("example.xila.tools.clock", Some(&listed)));
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn namespaces_field_is_optional_and_legacy_only() {
-        let json = XILA_PROJECT.replace(
+        let json = XILA.replace(
             r#",
   "namespaces": ["xila"]"#,
             "",
@@ -302,7 +302,7 @@ mod tests {
             r#"["xila", "xila"]"#,
             r#"["xila", "example.xila"]"#,
         ] {
-            let json = XILA_PROJECT.replace(r#"["xila"]"#, namespaces);
+            let json = XILA.replace(r#"["xila"]"#, namespaces);
             assert_eq!(
                 decode_developer_key(json.as_bytes()),
                 Err(Error::InvalidDeveloperKey),
@@ -349,7 +349,7 @@ mod tests {
             );
         }
 
-        let mut key = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+        let mut key = decode_developer_key(XILA.as_bytes()).unwrap();
         assert_eq!(key.kinds, None);
         assert!(key.authorizes_package("xila.clock", "wasm32-wasip1", None));
         assert!(!key.authorizes_package("xila.clock", "thumbv7em-none-eabi", None));
@@ -368,13 +368,13 @@ mod tests {
 
     #[test]
     fn decodes_the_kinds_field() {
-        let json = XILA_PROJECT.replace(
+        let json = XILA.replace(
             r#""namespaces": ["xila"]"#,
             r#""namespaces": ["xila"], "kinds": ["wasm", "native"]"#,
         );
         let key = decode_developer_key(json.as_bytes()).unwrap();
         assert!(key.authorizes_kind(PackageKind::Native));
-        let json = XILA_PROJECT.replace(
+        let json = XILA.replace(
             r#""namespaces": ["xila"]"#,
             r#""namespaces": ["xila"], "kinds": null"#,
         );
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_keys() {
-        let base = decode_developer_key(XILA_PROJECT.as_bytes()).unwrap();
+        let base = decode_developer_key(XILA.as_bytes()).unwrap();
         for change in [
             |k: &mut DeveloperKey| k.id = "Xila Project".into(),
             |k: &mut DeveloperKey| k.author = " ".into(),

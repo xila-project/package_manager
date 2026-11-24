@@ -838,7 +838,7 @@ mod tests {
             capabilities: vec![],
             display_name: None,
             metadata: None,
-            publisher: "xila-project".into(),
+            publisher: "xila".into(),
             archive: Archive {
                 url: format!("https://xila.example/{name}-{version}.xpk"),
                 sha256: "a".repeat(64),

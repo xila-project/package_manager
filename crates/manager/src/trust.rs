@@ -313,8 +313,8 @@ mod tests {
         encode_registry_entry, encode_root,
     };
 
-    const DEVELOPER: &str = r#"{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#;
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila-project"]}"#;
+    const DEVELOPER: &str = r#"{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#;
+    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila"]}"#;
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -374,7 +374,7 @@ mod tests {
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,
-            publisher: "xila-project".into(),
+            publisher: "xila".into(),
             archive: Archive {
                 url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),

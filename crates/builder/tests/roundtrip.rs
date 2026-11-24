@@ -401,12 +401,12 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila-project",
+        "xila",
         url,
         &path("entry.json")
     ]));
     let entry = fs::read_to_string(path("entry.json")).unwrap();
-    assert!(entry.contains(r#""publisher":"xila-project""#), "{entry}");
+    assert!(entry.contains(r#""publisher":"xila""#), "{entry}");
     assert!(entry.contains(r#""summary":"Shows the time""#), "{entry}");
     assert!(entry.contains(r#""display_name":"Clock""#), "{entry}");
     assert!(run(&[
@@ -437,7 +437,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("other.pub"),
-        "xila-project",
+        "xila",
         url,
         &path("other.json")
     ]));
@@ -446,7 +446,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila-project",
+        "xila",
         url,
         &path("entry.json")
     ]));
@@ -455,7 +455,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila-project",
+        "xila",
         "http://insecure",
         &path("insecure.json")
     ]));
@@ -520,11 +520,11 @@ fn registry_check_validates_keys_placement_and_archives() {
     fs::create_dir_all(registry.join("packages/xila/clock")).unwrap();
     let key = |namespaces: &str| {
         format!(
-            r#"{{"id":"xila-project","author":"Xila Project","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":[{namespaces}]}}"#,
+            r#"{{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":[{namespaces}]}}"#,
             base64(&fs::read(path("dev.pub")).unwrap())
         )
     };
-    let key_file = registry.join("keys/developers/xila-project.json");
+    let key_file = registry.join("keys/developers/xila.json");
     fs::write(&key_file, key(r#""xila""#)).unwrap();
     let entry_file = registry.join("packages/xila/clock/0.1.0.json");
     assert!(
@@ -533,7 +533,7 @@ fn registry_check_validates_keys_placement_and_archives() {
             "entry",
             &archive,
             &path("dev.pub"),
-            "xila-project",
+            "xila",
             url,
             entry_file.to_str().unwrap()
         ])
@@ -577,11 +577,7 @@ fn registry_check_validates_keys_placement_and_archives() {
             .1
             .contains("not canonical")
     );
-    fs::write(
-        &entry_file,
-        entry.replace("\"xila-project\"", "\"someone\""),
-    )
-    .unwrap();
+    fs::write(&entry_file, entry.replace("\"xila\"", "\"someone\"")).unwrap();
     assert!(
         run(&["registry", "check", root])
             .1
