@@ -723,3 +723,106 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         .0
     );
 }
+
+#[test]
+fn registry_init_validates_before_creating_and_cleans_up_on_failure() {
+    let temp = tempdir().unwrap();
+    let cli = env!("CARGO_BIN_EXE_xila-package");
+    let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
+    let run = |items: &[&str]| {
+        let output = Command::new(cli).args(items).output().unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    #[cfg(unix)]
+    let mode = |name: &str| {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path(name)).unwrap().permissions().mode() & 0o777
+    };
+
+    // A key directory inside the registry is refused before anything is
+    // created, so the retry with a valid key directory succeeds.
+    let (success, _, stderr) = run(&[
+        "registry",
+        "init",
+        &path("registry"),
+        &path("registry/keys"),
+    ]);
+    assert!(!success);
+    assert!(stderr.contains("outside the registry"), "{stderr}");
+    assert!(!temp.path().join("registry").exists());
+    assert!(run(&["registry", "init", &path("registry"), &path("private")]).0);
+
+    // An existing key directory keeps its permissions: a directory that is not
+    // 0700 is refused untouched, and no registry is created.
+    fs::create_dir(path("loose")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path("loose"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (success, _, stderr) = run(&["registry", "init", &path("other"), &path("loose")]);
+    assert!(!success);
+    assert!(stderr.contains("0700"), "{stderr}");
+    #[cfg(unix)]
+    assert_eq!(mode("loose"), 0o755);
+    assert!(!temp.path().join("other").exists());
+
+    // An existing non-empty key directory is refused even at 0700.
+    fs::create_dir(path("full")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path("full"), fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    fs::write(path("full/existing.seed"), b"seed").unwrap();
+    let (success, _, stderr) = run(&["registry", "init", &path("third"), &path("full")]);
+    assert!(!success);
+    assert!(stderr.contains("not empty"), "{stderr}");
+    assert!(!temp.path().join("third").exists());
+
+    // An existing empty 0700 key directory is used as it is.
+    fs::create_dir(path("keys")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path("keys"), fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    assert!(run(&["registry", "init", &path("third"), &path("keys")]).0);
+    #[cfg(unix)]
+    assert_eq!(mode("keys"), 0o700);
+    assert!(temp.path().join("keys/root.seed").is_file());
+    assert!(temp.path().join("third/root.json").is_file());
+
+    // A failure after the keys were generated (an invalid root id fails when
+    // root.json is written) removes everything this run created.
+    let (success, _, stderr) = run(&[
+        "registry",
+        "init",
+        &path("fourth"),
+        &path("private2"),
+        "--root-id",
+        "Not A Valid Id",
+    ]);
+    assert!(!success);
+    assert!(stderr.contains("invalid root"), "{stderr}");
+    assert!(!temp.path().join("fourth").exists());
+    assert!(!temp.path().join("private2").exists());
+
+    // Relative paths are resolved against the working directory.
+    let output = Command::new(cli)
+        .args(["registry", "init", "relative", "relative-keys"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(temp.path().join("relative/root.json").is_file());
+    assert!(temp.path().join("relative-keys/root.seed").is_file());
+}
