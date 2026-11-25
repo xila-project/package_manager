@@ -523,7 +523,9 @@ fn write_signed_site(
 /// exists is resolved (symlinks included) as the path is rebuilt, and missing
 /// trailing components are appended as they are. `..` pops the previous
 /// component, so `a/missing/../b` resolves to `a/b`, exactly as the operating
-/// system would once `a/missing` exists.
+/// system would once `a/missing` exists; `/..` resolves to `/`. A symbolic
+/// link whose target does not exist is dangling and refused, because the
+/// operating system would refuse any path through it.
 fn canonicalize(path: &Path) -> Result<PathBuf> {
     use std::path::Component;
     let absolute = if path.is_absolute() {
@@ -535,14 +537,18 @@ fn canonicalize(path: &Path) -> Result<PathBuf> {
     for component in absolute.components() {
         match component {
             Component::ParentDir => {
-                if !resolved.pop() {
-                    return Err(invalid(".. above the root directory").into());
-                }
+                // The root has no parent: the operating system resolves /..
+                // to /, so a failed pop leaves the root in place.
+                resolved.pop();
             }
             Component::Normal(name) => {
                 resolved.push(name);
-                if let Ok(canonical) = resolved.canonicalize() {
-                    resolved = canonical;
+                match resolved.canonicalize() {
+                    Ok(canonical) => resolved = canonical,
+                    Err(_) if fs::symlink_metadata(&resolved).is_ok() => {
+                        return Err(invalid("a symbolic link in the path is dangling").into());
+                    }
+                    Err(_) => {}
                 }
             }
             _ => resolved.push(component.as_os_str()),
@@ -603,6 +609,8 @@ pub fn init(
     root_id: &str,
     repository_id: &str,
 ) -> Result<()> {
+    // A dangling symbolic link anywhere in either path is refused by
+    // canonicalize below, before anything is created.
     if let Ok(metadata) = fs::metadata(directory) {
         if !metadata.is_dir() {
             return Err(invalid("registry directory exists and is not a directory").into());
@@ -610,8 +618,6 @@ pub fn init(
         if fs::read_dir(directory)?.next().is_some() {
             return Err(invalid("registry directory exists and is not empty").into());
         }
-    } else if fs::symlink_metadata(directory).is_ok() {
-        return Err(invalid("the registry directory is a dangling symbolic link").into());
     }
     if let Ok(metadata) = fs::metadata(key_directory) {
         if !metadata.is_dir() {
@@ -629,8 +635,6 @@ pub fn init(
         if fs::read_dir(key_directory)?.next().is_some() {
             return Err(invalid("key directory exists and is not empty").into());
         }
-    } else if fs::symlink_metadata(key_directory).is_ok() {
-        return Err(invalid("the key directory is a dangling symbolic link").into());
     }
     let registry = canonicalize(directory)?;
     let keys = canonicalize(key_directory)?;
@@ -1382,8 +1386,12 @@ mod tests {
             canonicalize(&temp.path().join("missing/../x")).unwrap(),
             base.join("x")
         );
-        let error = canonicalize(Path::new("/..")).unwrap_err().to_string();
-        assert!(error.contains(".. above the root"), "{error}");
+        // The root has no parent: the operating system resolves /.. to /.
+        assert_eq!(canonicalize(Path::new("/..")).unwrap(), PathBuf::from("/"));
+        assert_eq!(
+            canonicalize(Path::new("/../..")).unwrap(),
+            PathBuf::from("/")
+        );
     }
 
     #[test]
@@ -1405,7 +1413,8 @@ mod tests {
         assert!(error.contains("not a directory"), "{error}");
         assert!(!registry.exists());
 
-        // A dangling symbolic link is refused with a clear message.
+        // A dangling symbolic link is refused with a clear message, as the
+        // last component of either path or anywhere inside it.
         #[cfg(unix)]
         {
             let dangling = temp.path().join("dangling");
@@ -1413,12 +1422,47 @@ mod tests {
             let error = init(&dangling, &keys, "root", "repository")
                 .unwrap_err()
                 .to_string();
-            assert!(error.contains("dangling symbolic link"), "{error}");
+            assert!(error.contains("dangling"), "{error}");
             let error = init(&registry, &dangling, "root", "repository")
                 .unwrap_err()
                 .to_string();
-            assert!(error.contains("dangling symbolic link"), "{error}");
+            assert!(error.contains("dangling"), "{error}");
             assert!(!registry.exists());
+
+            // a/dl/../keys with dl -> nowhere: the operating system refuses
+            // that path (ENOENT), so it must not be silently read as a/keys.
+            let linked = temp.path().join("linked");
+            fs::create_dir(&linked).unwrap();
+            std::os::unix::fs::symlink(linked.join("nowhere"), linked.join("dl")).unwrap();
+            let error = init(
+                &linked.join("reg"),
+                &linked.join("dl/../keys"),
+                "root",
+                "repository",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("dangling"), "{error}");
+            assert!(!linked.join("reg").exists());
+            assert!(!linked.join("keys").exists());
+
+            // a/link/reg with link -> keys (not yet existing): the link is
+            // dangling now, and creating the key directory would make it
+            // live, putting the registry inside the key directory.
+            let linked2 = temp.path().join("linked2");
+            fs::create_dir(&linked2).unwrap();
+            std::os::unix::fs::symlink(linked2.join("keys"), linked2.join("link")).unwrap();
+            let error = init(
+                &linked2.join("link/reg"),
+                &linked2.join("keys"),
+                "root",
+                "repository",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("dangling"), "{error}");
+            assert!(!linked2.join("keys").exists());
+            assert!(!linked2.join("reg").exists());
         }
 
         // A `..` after a missing component is resolved, not dropped:
