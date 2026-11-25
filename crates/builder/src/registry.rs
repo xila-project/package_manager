@@ -519,11 +519,83 @@ fn write_signed_site(
     verify_signed(output, root_public_key, Some(version))
 }
 
+/// Canonicalize `path` without requiring it to exist yet: every component that
+/// exists is resolved (symlinks included) as the path is rebuilt, and missing
+/// trailing components are appended as they are. `..` pops the previous
+/// component, so `a/missing/../b` resolves to `a/b`, exactly as the operating
+/// system would once `a/missing` exists.
+fn canonicalize(path: &Path) -> Result<PathBuf> {
+    use std::path::Component;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return Err(invalid(".. above the root directory").into());
+                }
+            }
+            Component::Normal(name) => {
+                resolved.push(name);
+                if let Ok(canonical) = resolved.canonicalize() {
+                    resolved = canonical;
+                }
+            }
+            _ => resolved.push(component.as_os_str()),
+        }
+    }
+    Ok(resolved)
+}
+
+/// Create `directory` and its missing parents; on Unix the leaf directory gets
+/// `leaf_mode`. Every directory created is recorded in `created`, so a later
+/// failure can remove exactly what this run made.
+fn create_directories(
+    directory: &Path,
+    leaf_mode: Option<u32>,
+    created: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut ancestor = directory;
+    while fs::symlink_metadata(ancestor).is_err() {
+        missing.push(ancestor.to_path_buf());
+        ancestor = ancestor.parent().unwrap_or(Path::new("/"));
+    }
+    for path in missing.iter().rev() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut builder = fs::DirBuilder::new();
+            if path.as_path() == directory
+                && let Some(mode) = leaf_mode
+            {
+                builder.mode(mode);
+            }
+            builder.create(path)?;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = leaf_mode;
+            fs::create_dir(path)?;
+        }
+        created.push(path.clone());
+    }
+    Ok(())
+}
+
 /// Create a new registry in `directory` with the layout of
 /// `xila-project/registry`: a root-signed `root.json`, `root.pub`, an empty
 /// `keys/developers` and an empty `packages`. A root key and a repository key
 /// are generated; their private seeds go to `key_directory`, which must be
-/// outside the registry (it is never published), created owner-only. The
+/// outside the registry (it is never published). Every validation runs before
+/// anything is created, so a rejected run leaves no trace and can simply be
+/// retried. An existing key directory is used as it is: it must already be
+/// empty and owner-only (0700), and its permissions are never changed. If a
+/// later step fails, only what this run created is removed again. The
 /// repository key is the one `root.json` lists for signing.
 pub fn init(
     directory: &Path,
@@ -531,39 +603,50 @@ pub fn init(
     root_id: &str,
     repository_id: &str,
 ) -> Result<()> {
-    if directory.exists() && fs::read_dir(directory)?.next().is_some() {
-        return Err(invalid("registry directory exists and is not empty").into());
+    if let Ok(metadata) = fs::metadata(directory) {
+        if !metadata.is_dir() {
+            return Err(invalid("registry directory exists and is not a directory").into());
+        }
+        if fs::read_dir(directory)?.next().is_some() {
+            return Err(invalid("registry directory exists and is not empty").into());
+        }
+    } else if fs::symlink_metadata(directory).is_ok() {
+        return Err(invalid("the registry directory is a dangling symbolic link").into());
     }
-    fs::create_dir_all(key_directory)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(key_directory, fs::Permissions::from_mode(0o700))?;
+    if let Ok(metadata) = fs::metadata(key_directory) {
+        if !metadata.is_dir() {
+            return Err(invalid("key directory exists and is not a directory").into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = metadata.permissions().mode() & 0o777;
+            if mode != 0o700 {
+                let message = format!("key directory exists with mode {mode:04o}; expected 0700");
+                return Err(invalid(&message).into());
+            }
+        }
+        if fs::read_dir(key_directory)?.next().is_some() {
+            return Err(invalid("key directory exists and is not empty").into());
+        }
+    } else if fs::symlink_metadata(key_directory).is_ok() {
+        return Err(invalid("the key directory is a dangling symbolic link").into());
     }
-    fs::create_dir_all(directory)?;
-    let registry = directory.canonicalize()?;
-    let keys = key_directory.canonicalize()?;
+    let registry = canonicalize(directory)?;
+    let keys = canonicalize(key_directory)?;
     if keys.starts_with(&registry) || registry.starts_with(&keys) {
         return Err(invalid("the key directory must be outside the registry").into());
     }
 
-    let root_seed = keys.join("root.seed");
-    let repository_seed = keys.join("repository.seed");
-    let repository_public = keys.join("repository.pub");
-    let root_public = registry.join("root.pub");
-    crate::key::generate(&root_seed, &root_public)?;
-    crate::key::generate(&repository_seed, &repository_public)?;
-    fs::create_dir_all(registry.join("keys/developers"))?;
-    fs::create_dir_all(registry.join("packages"))?;
-    root(
-        &root_seed,
-        root_id,
-        &repository_public,
-        repository_id,
-        1,
-        &registry.join(ROOT_PATH),
-    )?;
+    let mut created: Vec<PathBuf> = Vec::new();
+    let result = create_registry(&registry, &keys, root_id, repository_id, &mut created);
+    if result.is_err() {
+        remove_created(&created);
+    }
+    result?;
 
+    let root_seed = keys.join("root.seed");
+    let root_public = registry.join("root.pub");
     println!("Created registry {}", registry.display());
     println!(
         "Root key {}",
@@ -576,9 +659,73 @@ pub fn init(
     println!("  {} (root key: keep offline)", root_seed.display());
     println!(
         "  {} (repository key: signs publications)",
-        repository_seed.display()
+        keys.join("repository.seed").display()
     );
     Ok(())
+}
+
+/// Remove the paths a failed run created, deepest first. A path that cannot
+/// be removed is reported on stderr (it can hold a private key); the failure
+/// of the run itself is what the caller returns.
+fn remove_created(created: &[PathBuf]) {
+    for path in created.iter().rev() {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
+            continue;
+        };
+        let removed = if metadata.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        };
+        if let Err(error) = removed {
+            eprintln!("warning: could not remove {}: {error}", path.display());
+        }
+    }
+}
+
+/// The creating half of [`init`]: every file and directory it makes is
+/// recorded in `created`, in creation order.
+fn create_registry(
+    registry: &Path,
+    keys: &Path,
+    root_id: &str,
+    repository_id: &str,
+    created: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if fs::symlink_metadata(keys).is_err() {
+        create_directories(keys, Some(0o700), created)?;
+    }
+    if fs::symlink_metadata(registry).is_err() {
+        create_directories(registry, None, created)?;
+    }
+    let root_seed = keys.join("root.seed");
+    let repository_seed = keys.join("repository.seed");
+    let repository_public = keys.join("repository.pub");
+    let root_public = registry.join("root.pub");
+    // Record a key pair only once it exists: a failed generate may leave a
+    // pre-existing file untouched, and that file must not be removed.
+    crate::key::generate(&root_seed, &root_public)?;
+    created.push(root_seed.clone());
+    created.push(root_public.clone());
+    crate::key::generate(&repository_seed, &repository_public)?;
+    created.push(repository_seed.clone());
+    created.push(repository_public.clone());
+    create_directories(&registry.join("keys/developers"), None, created)?;
+    create_directories(&registry.join("packages"), None, created)?;
+    // root() writes these two files itself; record them beforehand so a
+    // partial write is removed again (create_new guarantees this run made
+    // them, so removing them is safe).
+    let root_json = registry.join(ROOT_PATH);
+    created.push(root_json.clone());
+    created.push(signature_path(&root_json));
+    root(
+        &root_seed,
+        root_id,
+        &repository_public,
+        repository_id,
+        1,
+        &root_json,
+    )
 }
 
 fn collect_site(root: &Path, directory: &Path, output: &mut Vec<String>) -> Result<()> {
@@ -1221,5 +1368,175 @@ mod tests {
             sha256_hex(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn canonicalize_resolves_dot_and_dotdot_components() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        assert_eq!(
+            canonicalize(&temp.path().join("a/./b/../c")).unwrap(),
+            base.join("a").join("c")
+        );
+        assert_eq!(
+            canonicalize(&temp.path().join("missing/../x")).unwrap(),
+            base.join("x")
+        );
+        let error = canonicalize(Path::new("/..")).unwrap_err().to_string();
+        assert!(error.contains(".. above the root"), "{error}");
+    }
+
+    #[test]
+    fn init_validates_before_creating_and_cleans_up_on_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        let keys = temp.path().join("keys");
+
+        // A path that exists but is not a directory is refused.
+        let file = temp.path().join("file");
+        fs::write(&file, b"").unwrap();
+        let error = init(&file, &keys, "root", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a directory"), "{error}");
+        let error = init(&registry, &file, "root", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a directory"), "{error}");
+        assert!(!registry.exists());
+
+        // A dangling symbolic link is refused with a clear message.
+        #[cfg(unix)]
+        {
+            let dangling = temp.path().join("dangling");
+            std::os::unix::fs::symlink(temp.path().join("absent"), &dangling).unwrap();
+            let error = init(&dangling, &keys, "root", "repository")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("dangling symbolic link"), "{error}");
+            let error = init(&registry, &dangling, "root", "repository")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("dangling symbolic link"), "{error}");
+            assert!(!registry.exists());
+        }
+
+        // A `..` after a missing component is resolved, not dropped:
+        // existing/missing/../registry/keys is existing/registry/keys, inside
+        // the registry, so the run is refused and nothing is created.
+        fs::create_dir(temp.path().join("existing")).unwrap();
+        let dotted_registry = temp.path().join("existing/registry");
+        let dotted_keys = temp.path().join("existing/missing/../registry/keys");
+        let error = init(&dotted_registry, &dotted_keys, "root", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("outside the registry"), "{error}");
+        assert!(!temp.path().join("existing/missing").exists());
+        assert!(!dotted_registry.exists());
+
+        // A key directory inside the registry is refused before anything is
+        // created, so a retry with a valid key directory succeeds.
+        let error = init(&registry, &registry.join("keys"), "root", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("outside the registry"), "{error}");
+        assert!(!registry.exists());
+        init(&registry, &keys, "root", "repository").unwrap();
+        assert!(registry.join(ROOT_PATH).is_file());
+        assert!(keys.join("root.seed").is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&keys).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+
+        // An already existing empty registry directory is used as it is.
+        let preexisting = temp.path().join("preexisting");
+        fs::create_dir(&preexisting).unwrap();
+        let preexisting_keys = temp.path().join("preexisting-keys");
+        init(&preexisting, &preexisting_keys, "root", "repository").unwrap();
+        assert!(preexisting.join(ROOT_PATH).is_file());
+        assert!(preexisting_keys.join("repository.seed").is_file());
+
+        // An existing key directory keeps its permissions: not 0700 is refused
+        // untouched (Unix), and a non-empty one is refused as well.
+        let other = temp.path().join("other");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&keys, fs::Permissions::from_mode(0o755)).unwrap();
+            let error = init(&other, &keys, "root", "repository")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("0700"), "{error}");
+            let mode = fs::metadata(&keys).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o755);
+            assert!(!other.exists());
+            fs::set_permissions(&keys, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let error = init(&other, &keys, "root", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not empty"), "{error}");
+        assert!(!other.exists());
+
+        // A failure after the keys were generated (an invalid root id fails
+        // when root.json is written) removes only what the run created: the
+        // directories it made are gone, a pre-existing key directory stays.
+        let fourth = temp.path().join("fourth");
+        let fresh = temp.path().join("fresh");
+        let error = init(&fourth, &fresh, "Not A Valid Id", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid root"), "{error}");
+        assert!(!fourth.exists());
+        assert!(!fresh.exists());
+
+        let kept = temp.path().join("kept");
+        fs::create_dir(&kept).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&kept, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let fifth = temp.path().join("fifth");
+        let error = init(&fifth, &kept, "Not A Valid Id", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid root"), "{error}");
+        assert!(!fifth.exists());
+        assert!(kept.is_dir());
+        assert!(fs::read_dir(&kept).unwrap().next().is_none());
+
+        // A pre-existing empty registry directory survives a failed run,
+        // still empty; only the key directory this run made is removed.
+        let kept_registry = temp.path().join("kept-registry");
+        fs::create_dir(&kept_registry).unwrap();
+        let kept_keys = temp.path().join("kept-keys");
+        let error = init(&kept_registry, &kept_keys, "Not A Valid Id", "repository")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid root"), "{error}");
+        assert!(kept_registry.is_dir());
+        assert!(fs::read_dir(&kept_registry).unwrap().next().is_none());
+        assert!(!kept_keys.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_warns_when_a_created_path_cannot_be_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("locked");
+        fs::create_dir(&directory).unwrap();
+        let file = directory.join("root.seed");
+        fs::write(&file, b"seed").unwrap();
+        // Without write permission on the parent, neither removal succeeds.
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o500)).unwrap();
+        remove_created(&[file.clone(), directory.clone()]);
+        assert!(file.exists());
+        assert!(directory.exists());
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
 }
