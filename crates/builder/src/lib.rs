@@ -435,8 +435,9 @@ pub enum RegistryOperation<'a> {
         /// New registry directory (must be absent or empty).
         directory: &'a str,
         /// Directory for the private seeds, outside the registry (created
-        /// owner-only if absent; an existing one must be empty and 0700 and is
-        /// left untouched).
+        /// owner-only if absent; an existing one must be empty and, on Unix,
+        /// 0700, and is left untouched; other platforms only check that it is
+        /// empty).
         key_directory: &'a str,
         /// Identifier of the root key (default root).
         #[arg(long)]

@@ -797,6 +797,21 @@ fn registry_init_validates_before_creating_and_cleans_up_on_failure() {
     assert!(temp.path().join("keys/root.seed").is_file());
     assert!(temp.path().join("third/root.json").is_file());
 
+    // A `..` after a missing component is resolved, not dropped:
+    // a/other/../reg/keys is a/reg/keys, inside the registry a/reg, so the
+    // run is refused and nothing is created.
+    fs::create_dir(path("a")).unwrap();
+    let (success, _, stderr) = run(&[
+        "registry",
+        "init",
+        &path("a/reg"),
+        &path("a/other/../reg/keys"),
+    ]);
+    assert!(!success);
+    assert!(stderr.contains("outside the registry"), "{stderr}");
+    assert!(!temp.path().join("a/other").exists());
+    assert!(!temp.path().join("a/reg").exists());
+
     // A failure after the keys were generated (an invalid root id fails when
     // root.json is written) removes everything this run created.
     let (success, _, stderr) = run(&[
@@ -811,6 +826,23 @@ fn registry_init_validates_before_creating_and_cleans_up_on_failure() {
     assert!(stderr.contains("invalid root"), "{stderr}");
     assert!(!temp.path().join("fourth").exists());
     assert!(!temp.path().join("private2").exists());
+
+    // A pre-existing empty registry directory is left in place, still empty,
+    // when a later step fails; only the key directory this run made is gone.
+    fs::create_dir(path("kept")).unwrap();
+    let (success, _, stderr) = run(&[
+        "registry",
+        "init",
+        &path("kept"),
+        &path("private3"),
+        "--root-id",
+        "Not A Valid Id",
+    ]);
+    assert!(!success);
+    assert!(stderr.contains("invalid root"), "{stderr}");
+    assert!(temp.path().join("kept").is_dir());
+    assert!(fs::read_dir(path("kept")).unwrap().next().is_none());
+    assert!(!temp.path().join("private3").exists());
 
     // Relative paths are resolved against the working directory.
     let output = Command::new(cli)
