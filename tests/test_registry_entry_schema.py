@@ -45,6 +45,25 @@ class RegistryEntrySchemaTests(unittest.TestCase):
         extra["files"] = []
         self.assertFalse(VALIDATOR.is_valid(extra), "inventories belong in the signed manifest")
 
+    def test_metadata_control_characters_and_byte_limits(self):
+        entry = copy.deepcopy(ENTRY)
+        with self.subTest(test="U+0085 in summary is rejected"):
+            broken = copy.deepcopy(entry)
+            broken["metadata"]["summary"] = "Shows\u0085weather"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+        with self.subTest(test="129 é in summary is accepted by schema"):
+            accepted = copy.deepcopy(entry)
+            accepted["metadata"]["summary"] = "é" * 129
+            VALIDATOR.validate(accepted)
+        with self.subTest(test="U+0085 in source URL is rejected"):
+            broken = copy.deepcopy(entry)
+            broken["metadata"]["source"] = "https://github.com\u0085example/weather"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+        with self.subTest(test="U+0085 in homepage URL is rejected"):
+            broken = copy.deepcopy(entry)
+            broken["metadata"]["homepage"] = "https://example.com\u0085page"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+
 
 if __name__ == "__main__":
     unittest.main()

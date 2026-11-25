@@ -87,4 +87,33 @@ mod tests {
             assert_eq!(value.validate(), Err(Error::InvalidMetadata));
         }
     }
+
+    #[test]
+    fn rejects_summary_with_129_e_acute_bytes() {
+        let mut value = metadata();
+        value.summary = "é".repeat(129);
+        assert_eq!(
+            value.validate(),
+            Err(Error::InvalidMetadata),
+            "129 'é' characters are 258 UTF-8 bytes, exceeding the 256 byte limit"
+        );
+    }
+
+    #[test]
+    fn rejects_control_characters_in_summary() {
+        let mut value = metadata();
+        value.summary = "Shows\u{0085}weather".into();
+        assert_eq!(
+            value.validate(),
+            Err(Error::InvalidMetadata),
+            "U+0085 is a control character"
+        );
+    }
+
+    #[test]
+    fn accepts_summary_at_byte_limit() {
+        let mut value = metadata();
+        value.summary = "a".repeat(256);
+        assert!(value.validate().is_ok());
+    }
 }

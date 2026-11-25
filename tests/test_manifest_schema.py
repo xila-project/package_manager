@@ -119,6 +119,32 @@ class ManifestSchemaTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.assertFalse(VALIDATOR.is_valid(package))
 
+    def test_metadata_control_characters_and_byte_limits(self):
+        package = copy.deepcopy(FIXTURE)
+        package["metadata"] = {
+            "summary": "Shows the current weather",
+            "license": "Apache-2.0 OR MIT",
+            "source": "https://github.com/example/weather",
+            "homepage": None,
+        }
+        VALIDATOR.validate(package)
+        with self.subTest(test="U+0085 in summary is rejected"):
+            broken = copy.deepcopy(package)
+            broken["metadata"]["summary"] = "Shows\u0085weather"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+        with self.subTest(test="129 é in summary is accepted by schema"):
+            accepted = copy.deepcopy(package)
+            accepted["metadata"]["summary"] = "é" * 129
+            VALIDATOR.validate(accepted)
+        with self.subTest(test="U+0085 in source URL is rejected"):
+            broken = copy.deepcopy(package)
+            broken["metadata"]["source"] = "https://github.com\u0085example/weather"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+        with self.subTest(test="U+0085 in homepage URL is rejected"):
+            broken = copy.deepcopy(package)
+            broken["metadata"]["homepage"] = "https://example.com\u0085page"
+            self.assertFalse(VALIDATOR.is_valid(broken))
+
 
 if __name__ == "__main__":
     unittest.main()
