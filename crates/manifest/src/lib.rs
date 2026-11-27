@@ -649,6 +649,11 @@ mod tests {
             check_nesting_depth(&"[".repeat(MAX_JSON_DEPTH + 1)),
             Err(Error::InvalidJson)
         );
-        assert_eq!(check_nesting_depth("{\"a\":\"\\\\\"[\"}"), Ok(()));
+        // An escaped quote does not end the string: brackets after it stay
+        // inside the string and must not count towards the depth, so this
+        // fails if escape handling breaks.
+        let mut escaped = alloc::format!("{{\"a\":\"\\\"{}", "[".repeat(MAX_JSON_DEPTH + 1));
+        escaped.push_str("\"}");
+        assert_eq!(check_nesting_depth(&escaped), Ok(()));
     }
 }

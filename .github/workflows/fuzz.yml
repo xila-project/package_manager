@@ -3,9 +3,12 @@ name: Fuzz
 on:
   pull_request:
     paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/**'
       - 'fuzz/**'
       - 'mise.toml'
+      - 'tests/fixtures/**'
       - '.github/workflows/fuzz.yml'
   schedule:
     # Weekly, Monday 06:00 UTC: the long runs.
@@ -15,20 +18,42 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   fuzz:
-    name: Fuzz the package and registry parsers
+    name: Fuzz ${{ matrix.target }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    # One job per target, each with its own timeout: the weekly 1800-second
+    # run per target finishes well inside it, far below the 360-minute job
+    # limit that a single sequential job would hit.
+    timeout-minutes: ${{ github.event_name == 'schedule' && 60 || 30 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - manifest
+          - developer_manifest
+          - archive
+          - archive_roundtrip
+          - file_inventory
+          - signature_key
+          - registry_entry
+          - developer_key
+          - namespace
+          - trust_root
+          - trust_index
+          - repository_origin
+          - transaction
+          - version
+          - trust_chain
     env:
       CARGO_TERM_COLOR: always
-      # Pull requests run every target briefly; the weekly schedule runs long.
+      # Pull requests run each target briefly; the weekly schedule runs long.
       FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '1800' || '120' }}
       FUZZ_JOBS: '4'
+      FUZZ_TARGET: ${{ matrix.target }}
       # Keep the libFuzzer build inside the cached target directory.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/fuzz
     steps:
@@ -41,7 +66,14 @@ jobs:
         with:
           cache-mode: target
           cache-generation: v1-package-manager-fuzz
-      - name: "Setup | Nightly fuzzing toolchain and cargo-fuzz"
+      - name: "Setup | Pinned nightly toolchain and cargo-fuzz"
         run: mise run fuzz:setup
-      - name: "Fuzz | Run every target"
+      - name: "Fuzz | Run the target"
         run: mise run fuzz:run
+      - name: "Report | Upload crash artifacts"
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: warn

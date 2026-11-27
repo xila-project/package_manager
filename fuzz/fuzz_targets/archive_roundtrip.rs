@@ -58,7 +58,12 @@ fuzz_target!(|data: &[u8]| {
         .collect();
     let signing = SigningKey::from_bytes(&[7_u8; 32]);
     let public = PublicKey::from_bytes(&signing.verifying_key().to_bytes()).unwrap();
-    let json = manifest::encode(&rebuilt).unwrap();
+    // A valid compact manifest just under the size limit can grow past it
+    // when optional fields are encoded as explicit null, so encoding can
+    // fail even though decoding succeeded.
+    let Ok(json) = manifest::encode(&rebuilt) else {
+        return;
+    };
     let signature = signing
         .sign(&signing_message(json.as_bytes()).unwrap())
         .to_bytes();
