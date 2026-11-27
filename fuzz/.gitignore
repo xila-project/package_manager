@@ -1,0 +1,6 @@
+# cargo-fuzz build artifacts, corpora and crash files are never committed.
+/target
+/corpus
+/artifacts
+/Cargo.lock
+fuzz-*.log

@@ -1,5 +1,8 @@
 [workspace]
 members = ["crates/*"]
+# The cargo-fuzz harnesses are a separate workspace: they build only with a
+# nightly toolchain in the fuzzing jobs and must not affect the crates' MSRV.
+exclude = ["fuzz"]
 resolver = "3"
 
 [workspace.package]

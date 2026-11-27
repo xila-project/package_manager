@@ -61,3 +61,37 @@ fi
 [tasks."release:package"]
 description = "Build and verify crates.io archives locally without uploading them"
 run = "cargo package --workspace --locked"
+
+[tasks."fuzz:setup"]
+description = "Install the nightly toolchain (with rust-src) and cargo-fuzz used only by the fuzzing jobs"
+run = '''
+set -eu
+rustup toolchain install nightly --profile minimal --component rust-src
+cargo install cargo-fuzz --locked
+'''
+
+[tasks."fuzz:run"]
+description = "Run every fuzz target for FUZZ_SECONDS seconds (default 120) with FUZZ_JOBS parallel workers (default 4)"
+run = '''
+set -eu
+cd fuzz
+seconds=${FUZZ_SECONDS:-120}
+jobs=${FUZZ_JOBS:-4}
+corpus=${FUZZ_CORPUS:-corpus}
+# Seed the JSON targets from the repository fixtures.
+for target in manifest developer_manifest registry_entry developer_key namespace trust_root trust_index repository_origin transaction trust_chain version; do
+  mkdir -p "$corpus/$target"
+  cp ../tests/fixtures/*.json "$corpus/$target/"
+  cp ../crates/builder/tests/fixtures/*.json "$corpus/$target/"
+done
+# Seed the archive targets with generated packages.
+for target in archive archive_roundtrip; do
+  mkdir -p "$corpus/$target"
+done
+cargo run --release --example make_seeds -- "$corpus"
+for target_file in fuzz_targets/*.rs; do
+  target=$(basename "$target_file" .rs)
+  echo "== fuzzing $target for ${seconds}s"
+  cargo +nightly fuzz run "$target" "$corpus/$target" -- -max_total_time="$seconds" -jobs="$jobs" -workers="$jobs" -timeout=25 -rss_limit_mb=2560 -max_len=1048576 -print_final_stats=1
+done
+'''

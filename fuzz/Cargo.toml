@@ -1,0 +1,84 @@
+[package]
+name = "xila-package-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: the fuzz harnesses and their nightly-only libFuzzer
+# build never affect the MSRV (1.97) or the default build of the crates.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+miniserde = { version = "0.1.46", default-features = false }
+ed25519-dalek = { version = "3.0", default-features = false }
+xila-package-manifest = { path = "../crates/manifest" }
+xila-package-bundle = { path = "../crates/bundle" }
+xila-package-reader = { path = "../crates/reader" }
+xila-package-writer = { path = "../crates/writer" }
+xila-package-verification = { path = "../crates/verification", features = ["sha256", "ed25519"] }
+xila-package-manager = { path = "../crates/manager" }
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+
+[[bin]]
+name = "developer_manifest"
+path = "fuzz_targets/developer_manifest.rs"
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+
+[[bin]]
+name = "archive_roundtrip"
+path = "fuzz_targets/archive_roundtrip.rs"
+
+[[bin]]
+name = "file_inventory"
+path = "fuzz_targets/file_inventory.rs"
+
+[[bin]]
+name = "signature_key"
+path = "fuzz_targets/signature_key.rs"
+
+[[bin]]
+name = "registry_entry"
+path = "fuzz_targets/registry_entry.rs"
+
+[[bin]]
+name = "developer_key"
+path = "fuzz_targets/developer_key.rs"
+
+[[bin]]
+name = "namespace"
+path = "fuzz_targets/namespace.rs"
+
+[[bin]]
+name = "trust_root"
+path = "fuzz_targets/trust_root.rs"
+
+[[bin]]
+name = "trust_index"
+path = "fuzz_targets/trust_index.rs"
+
+[[bin]]
+name = "repository_origin"
+path = "fuzz_targets/repository_origin.rs"
+
+[[bin]]
+name = "transaction"
+path = "fuzz_targets/transaction.rs"
+
+[[bin]]
+name = "version"
+path = "fuzz_targets/version.rs"
+
+[[bin]]
+name = "trust_chain"
+path = "fuzz_targets/trust_chain.rs"
