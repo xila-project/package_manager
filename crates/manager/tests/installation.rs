@@ -18,10 +18,10 @@ const LAYOUT: Layout<'static> = Layout {
     origins: "/configuration/system/packages/installed",
     journal: "/configuration/system/packages/transaction.json",
 };
-const NAME: &str = "xila.clock";
-const BUNDLE: &str = "/applications/bundles/xila.clock";
+const NAME: &str = "dev.xila.clock";
+const BUNDLE: &str = "/applications/bundles/dev.xila.clock";
 const STAGING: &str = ".incoming-1";
-const DATA: &str = "/users/administrator/.local/xila.clock/settings.json";
+const DATA: &str = "/users/administrator/.local/dev.xila.clock/settings.json";
 
 /// Poll a future that never waits (the memory storage is synchronous).
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -68,7 +68,7 @@ impl Memory {
             "/users",
             "/users/administrator",
             "/users/administrator/.local",
-            "/users/administrator/.local/xila.clock",
+            "/users/administrator/.local/dev.xila.clock",
         ] {
             memory.entries.insert(directory.into(), None);
         }

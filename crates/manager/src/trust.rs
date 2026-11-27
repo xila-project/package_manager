@@ -504,6 +504,7 @@ mod tests {
         let path = entry_path("xila.clock", "0.1.0");
         assert_eq!(path, "packages/xila/clock/0.1.0.json");
         let index = encode_index(&Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 100,
@@ -587,6 +588,7 @@ mod tests {
             size: 1,
         };
         let index = Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 1,
@@ -748,6 +750,7 @@ mod tests {
             size: 1,
         };
         let index = Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 1,

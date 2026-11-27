@@ -20,7 +20,10 @@ use miniserde::{Deserialize, Serialize};
 use crate::{
     Error, MAX_MANIFEST_BYTES,
     developer_key::decode_key,
-    namespace::{NAMESPACES_DIRECTORY, namespace_paths, valid_namespace},
+    namespace::{
+        NAMESPACES_DIRECTORY, is_legacy_identifier, namespace_paths, valid_identifier,
+        valid_namespace,
+    },
     registry::valid_publisher,
 };
 
@@ -33,6 +36,8 @@ pub const TRUST_FORMAT_VERSION: u32 = 1;
 /// Registry file names, relative to the registry root.
 pub const ROOT_PATH: &str = "root.json";
 pub const INDEX_PATH: &str = "index.json";
+/// Optional registry source file for package replacements.
+pub const REPLACEMENTS_PATH: &str = "replacements.json";
 /// Detached signatures live next to the signed file, with this suffix.
 pub const SIGNATURE_SUFFIX: &str = ".sig";
 
@@ -140,6 +145,34 @@ pub struct IndexFile {
     pub size: u64,
 }
 
+/// A legacy package identifier and the reverse-DNS package that replaces it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Replacement {
+    pub name: String,
+    pub replaced_by: String,
+}
+
+fn valid_replacements(replacements: &[Replacement]) -> bool {
+    replacements.len() <= MAX_INDEX_FILES
+        && replacements.iter().all(|replacement| {
+            is_legacy_identifier(&replacement.name)
+                && valid_identifier(&replacement.replaced_by)
+                && !is_legacy_identifier(&replacement.replaced_by)
+        })
+        && replacements
+            .windows(2)
+            .all(|pair| pair[0].name < pair[1].name)
+}
+
+/// Decode the registry source list. It can include targets awaiting publication.
+pub fn decode_replacements(bytes: &[u8]) -> Result<Vec<Replacement>, Error> {
+    let replacements: Vec<Replacement> = decode(bytes, MAX_INDEX_BYTES)?;
+    if !valid_replacements(&replacements) {
+        return Err(Error::InvalidIndex);
+    }
+    Ok(replacements)
+}
+
 /// `index.json`: a snapshot of every developer key and entry, signed by a
 /// repository key. Devices keep the highest version seen (rollback) and, when
 /// they have a trustworthy clock, refuse an expired index (freeze).
@@ -154,6 +187,8 @@ pub struct Index {
     pub expires: u64,
     /// Sorted by path, without duplicates.
     pub files: Vec<IndexFile>,
+    /// Replacements sorted by legacy identifier. Both packages must be listed.
+    pub replacements: Option<Vec<Replacement>>,
 }
 
 fn listed_namespace(path: &str) -> Option<&str> {
@@ -223,7 +258,41 @@ impl Index {
                 return Err(Error::InvalidIndex);
             }
         }
+        if let Some(replacements) = &self.replacements
+            && (!valid_replacements(replacements)
+                || replacements.iter().any(|replacement| {
+                    !self.has_package(&replacement.name)
+                        || !self.has_package(&replacement.replaced_by)
+                }))
+        {
+            return Err(Error::InvalidIndex);
+        }
         Ok(())
+    }
+
+    /// Whether the index lists at least one version of this identifier.
+    pub fn has_package(&self, name: &str) -> bool {
+        if !valid_identifier(name) {
+            return false;
+        }
+        let prefix = alloc::format!("packages/{}/", name.replace('.', "/"));
+        let start = self.files.partition_point(|file| file.path < prefix);
+        self.files[start..]
+            .iter()
+            .map_while(|file| file.path.strip_prefix(&prefix))
+            .any(|path| {
+                path.strip_suffix(".json")
+                    .is_some_and(|version| !version.is_empty() && !version.contains('/'))
+            })
+    }
+
+    /// Replacement for a published legacy identifier, if the index lists one.
+    pub fn replacement(&self, name: &str) -> Option<&str> {
+        let replacements = self.replacements.as_deref()?;
+        let position = replacements
+            .binary_search_by(|replacement| replacement.name.as_str().cmp(name))
+            .ok()?;
+        Some(&replacements[position].replaced_by)
     }
 
     /// The listed file at `path`, if any (binary search; files are sorted).
@@ -297,6 +366,7 @@ mod tests {
 
     fn index() -> Index {
         Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 1_800_000_000,
@@ -357,6 +427,40 @@ mod tests {
             700
         );
         assert!(decoded.file("packages/xila/clock/0.2.0.json").is_none());
+    }
+
+    #[test]
+    fn replacement_requires_two_listed_identifiers() {
+        let mut index = index();
+        let replacement = Replacement {
+            name: "xila.clock".into(),
+            replaced_by: "dev.xila.clock".into(),
+        };
+        index.replacements = Some(vec![replacement.clone()]);
+        assert_eq!(index.validate(), Err(Error::InvalidIndex));
+        index.files.insert(
+            2,
+            IndexFile {
+                path: "packages/dev/xila/clock/extra/0.1.0.json".into(),
+                sha256: "d".repeat(64),
+                size: 123,
+            },
+        );
+        assert_eq!(index.validate(), Err(Error::InvalidIndex));
+        index.files[2].path = "packages/dev/xila/clock/0.1.0.json".into();
+        let encoded = encode_index(&index).unwrap();
+        assert_eq!(
+            decode_index(encoded.as_bytes())
+                .unwrap()
+                .replacement("xila.clock"),
+            Some("dev.xila.clock")
+        );
+        index.replacements.as_mut().unwrap().push(replacement);
+        assert_eq!(index.validate(), Err(Error::InvalidIndex));
+        assert!(
+            decode_replacements(br#"[{"name":"xila.clock","replaced_by":"xila.weather"}]"#)
+                .is_err()
+        );
     }
 
     #[test]

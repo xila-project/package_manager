@@ -615,7 +615,7 @@ pub enum ManifestOperation<'a> {
         directory: &'a str,
         /// Output path for the manifest JSON file.
         manifest: &'a str,
-        /// Package identifier, for example xila.calculator.
+        /// Package identifier, for example dev.xila.calculator.
         name: &'a str,
         /// Package version.
         version: &'a str,

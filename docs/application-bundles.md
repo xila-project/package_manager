@@ -49,7 +49,7 @@ An example of the manifest's application metadata:
 {
   "$schema": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-manifest.schema.json",
   "format_version": 2,
-  "name": "xila.calculator",
+  "name": "dev.xila.calculator",
   "version": "1.0.0",
   "target": "wasm32-wasip1",
   "xila_version": "0.1",

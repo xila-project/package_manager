@@ -90,13 +90,13 @@ class RegistryTrustSchemaTests(unittest.TestCase):
         Draft202012Validator.check_schema(TRANSACTION_VALIDATOR.schema)
         TRANSACTION_VALIDATOR.validate(TRANSACTION_FIXTURE)
         TRANSACTION_VALIDATOR.validate(
-            dict(TRANSACTION_FIXTURE, operation="remove", staging=None, previous=".removing-xila.clock", origin=None)
+            dict(TRANSACTION_FIXTURE, operation="remove", staging=None, previous=".removing-dev.xila.clock", origin=None)
         )
         for key, value in [
             ("operation", "downgrade"),
             ("staging", "../system"),
             ("staging", ".incoming-a/b"),
-            ("previous", "/applications/bundles/xila.clock"),
+            ("previous", "/applications/bundles/dev.xila.clock"),
             ("origin", dict(ORIGIN_FIXTURE, archive_sha256="x")),
             ("format_version", 2),
         ]:

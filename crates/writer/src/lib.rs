@@ -80,7 +80,7 @@ mod tests {
         Manifest {
             schema: Some(xila_package_manifest::SCHEMA_URL.into()),
             format_version: xila_package_manifest::FORMAT_VERSION,
-            name: "xila.calculator".into(),
+            name: "dev.xila.calculator".into(),
             version: "1.0.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: xila_package_manifest::XilaVersion::new(0, 1),

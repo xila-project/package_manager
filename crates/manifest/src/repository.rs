@@ -328,7 +328,7 @@ mod tests {
             schema: Some(ORIGIN_SCHEMA_URL.into()),
             format_version: REPOSITORY_FORMAT_VERSION,
             repository: Some("xila".into()),
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             archive_sha256: "a".repeat(64),
         };
@@ -382,16 +382,17 @@ mod tests {
             size: 1,
         };
         let mut files = vec![
-            file("packages/xila/clock/0.1.0.json"),
-            file("packages/xila/clock/0.10.0.json"),
-            file("packages/xila/clock/0.2.0.json"),
-            file("packages/xila/clock/1.0.0-rc.1.json"),
-            file("packages/xila/clock/nightly.json"),
-            file("packages/xila/clock/extra/1.0.0.json"),
-            file("packages/xila/clockwork/9.0.0.json"),
+            file("packages/dev/xila/clock/0.1.0.json"),
+            file("packages/dev/xila/clock/0.10.0.json"),
+            file("packages/dev/xila/clock/0.2.0.json"),
+            file("packages/dev/xila/clock/1.0.0-rc.1.json"),
+            file("packages/dev/xila/clock/nightly.json"),
+            file("packages/dev/xila/clock/extra/1.0.0.json"),
+            file("packages/dev/xila/clockwork/9.0.0.json"),
         ];
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let index = Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 1,
@@ -399,15 +400,18 @@ mod tests {
             files,
         };
         assert_eq!(
-            index_versions(&index, "xila.clock", false),
+            index_versions(&index, "dev.xila.clock", false),
             ["0.10.0", "0.2.0", "0.1.0"]
         );
         assert_eq!(
-            index_versions(&index, "xila.clock", true),
+            index_versions(&index, "dev.xila.clock", true),
             ["1.0.0-rc.1", "0.10.0", "0.2.0", "0.1.0"]
         );
-        assert!(index_versions(&index, "xila.weather", true).is_empty());
-        assert_eq!(index_versions(&index, "xila.clock.extra", false), ["1.0.0"]);
+        assert!(index_versions(&index, "dev.xila.weather", true).is_empty());
+        assert_eq!(
+            index_versions(&index, "dev.xila.clock.extra", false),
+            ["1.0.0"]
+        );
     }
 
     #[test]
@@ -420,20 +424,21 @@ mod tests {
         let mut files = vec![
             file("keys/developers/xila.json"),
             file("packages/1.0.0.json"),
-            file("packages/xila/clock/0.1.0.json"),
-            file("packages/xila/clock/0.2.0.json"),
-            file("packages/xila/clock/extra/1.0.0.json"),
-            file("packages/xila/clockwork/1.0.0-rc.1.json"),
-            file("packages/xila/nightly/latest.json"),
-            file("packages/xila/notes/0.1.0.json.sig"),
+            file("packages/dev/xila/clock/0.1.0.json"),
+            file("packages/dev/xila/clock/0.2.0.json"),
+            file("packages/dev/xila/clock/extra/1.0.0.json"),
+            file("packages/dev/xila/clockwork/1.0.0-rc.1.json"),
+            file("packages/dev/xila/nightly/latest.json"),
+            file("packages/dev/xila/notes/0.1.0.json.sig"),
             file("packages/example/xila/weather/2.0.0.json"),
-            file("packages/example/xila.weather/1.0.0.json"),
+            file("packages/example/dev.xila.weather/1.0.0.json"),
             file("packages/example//weather/1.0.0.json"),
             file("packages/example/Xila/weather/1.0.0.json"),
             file("packages/community/weather/2.0.0.json"),
         ];
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let index = Index {
+            replacements: None,
             schema: Some(INDEX_SCHEMA_URL.into()),
             format_version: TRUST_FORMAT_VERSION,
             version: 1,
@@ -443,10 +448,10 @@ mod tests {
         assert_eq!(
             index_packages(&index),
             [
-                "example.xila.weather",
-                "xila.clock",
-                "xila.clock.extra",
-                "xila.clockwork"
+                "dev.xila.clock",
+                "dev.xila.clock.extra",
+                "dev.xila.clockwork",
+                "example.xila.weather"
             ]
         );
         let mut empty = index.clone();

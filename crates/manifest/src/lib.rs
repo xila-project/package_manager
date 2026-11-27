@@ -451,7 +451,7 @@ mod tests {
         Manifest {
             schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "xila.calculator".to_string(),
+            name: "dev.xila.calculator".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
             xila_version: XilaVersion::new(0, 1),
@@ -518,7 +518,7 @@ mod tests {
     }
     #[test]
     fn rejects_legacy_documents_with_an_unsupported_format_error() {
-        let legacy = br#"{"format_version":1,"name":"xila.calculator","version":"1.0.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"files":[{"path":"calculator.wasm","size":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+        let legacy = br#"{"format_version":1,"name":"dev.xila.calculator","version":"1.0.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"files":[{"path":"calculator.wasm","size":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
         assert_eq!(decode(legacy), Err(Error::UnsupportedVersion));
         assert_eq!(decode_developer(legacy), Err(Error::UnsupportedVersion));
         assert_eq!(

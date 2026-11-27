@@ -227,3 +227,16 @@ each Xila release it supports.
   devices with a fresh index will notice.
 - Signatures do not grant capabilities or permissions; installation policy is
   a separate decision.
+
+## Package replacements
+
+The optional registry source file `replacements.json` is an array of objects
+with `name` and `replaced_by`. Sort the objects by `name`. The source must be a
+published legacy identifier such as `xila.clock`. The replacement must be a
+reverse-DNS identifier such as `dev.xila.clock`.
+
+Publication copies a replacement to the signed index only when the registry
+lists the replacement package. The original entry and archive remain available.
+Clients can display the replacement after verifying the index. The replacement
+is a separate package with its own installation directory, data and upgrade
+origin.

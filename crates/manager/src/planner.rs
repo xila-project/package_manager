@@ -959,8 +959,8 @@ mod tests {
     #[test]
     fn installs_dependencies_first_and_prefers_new_versions() {
         let mut catalog = catalog(&[
-            "xila.clock 1.0.0 xila.time:^1.0.0 xila.font:*",
-            "xila.clock 1.1.0 xila.time:^1.1.0 xila.font:*",
+            "dev.xila.clock 1.0.0 xila.time:^1.0.0 xila.font:*",
+            "dev.xila.clock 1.1.0 xila.time:^1.1.0 xila.font:*",
             "xila.time 1.0.0",
             "xila.time 1.2.0 xila.font:>=0.1.0",
             "xila.time 2.0.0",
@@ -969,27 +969,27 @@ mod tests {
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &Options::default()
             ),
             Ok(installs(&[
                 ("xila.font", "0.1.0"),
                 ("xila.time", "1.2.0"),
-                ("xila.clock", "1.1.0"),
+                ("dev.xila.clock", "1.1.0"),
             ]))
         );
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "=1.0.0")],
+                &[request("dev.xila.clock", "=1.0.0")],
                 &[],
                 &Options::default()
             ),
             Ok(installs(&[
                 ("xila.font", "0.1.0"),
                 ("xila.time", "1.2.0"),
-                ("xila.clock", "1.0.0"),
+                ("dev.xila.clock", "1.0.0"),
             ]))
         );
     }
@@ -1031,69 +1031,69 @@ mod tests {
 
     #[test]
     fn skips_versions_for_other_targets_or_xila_releases() {
-        let mut other_target = candidate("xila.clock 1.2.0");
+        let mut other_target = candidate("dev.xila.clock 1.2.0");
         other_target.entry.target = "riscv32imc".into();
-        let mut newer_xila = candidate("xila.clock 1.1.0");
+        let mut newer_xila = candidate("dev.xila.clock 1.1.0");
         newer_xila.entry.xila_version = XilaVersion::new(0, 2);
         let mut catalog = MemoryCatalog::new(vec![
             other_target,
             newer_xila,
-            candidate("xila.clock 1.0.0"),
+            candidate("dev.xila.clock 1.0.0"),
         ]);
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &Options::default()
             ),
-            Ok(installs(&[("xila.clock", "1.0.0")]))
+            Ok(installs(&[("dev.xila.clock", "1.0.0")]))
         );
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", ">=1.1.0")],
+                &[request("dev.xila.clock", ">=1.1.0")],
                 &[],
                 &Options::default()
             ),
             Err(Error::Unsatisfiable {
-                name: "xila.clock".into()
+                name: "dev.xila.clock".into()
             })
         );
 
-        let mut only = candidate("xila.clock 1.0.0");
+        let mut only = candidate("dev.xila.clock 1.0.0");
         only.entry.target = "riscv32imc".into();
         assert_eq!(
             run(
                 &mut MemoryCatalog::new(vec![only]),
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &Options::default()
             ),
             Err(Error::Incompatible {
-                name: "xila.clock".into()
+                name: "dev.xila.clock".into()
             })
         );
     }
 
     #[test]
     fn reports_missing_and_unsatisfiable_packages() {
-        let mut catalog = catalog(&["xila.clock 1.0.0 xila.time:^2.0.0", "xila.time 1.0.0"]);
+        let mut catalog = catalog(&["dev.xila.clock 1.0.0 xila.time:^2.0.0", "xila.time 1.0.0"]);
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.weather", "*")],
+                &[request("dev.xila.weather", "*")],
                 &[],
                 &Options::default()
             ),
             Err(Error::Missing {
-                name: "xila.weather".into()
+                name: "dev.xila.weather".into()
             })
         );
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &Options::default()
             ),
@@ -1217,20 +1217,20 @@ mod tests {
     #[test]
     fn keeps_suitable_installed_packages_and_upgrades_others() {
         let mut catalog = catalog(&[
-            "xila.clock 1.0.0 xila.time:^1.0.0",
-            "xila.clock 1.1.0 xila.time:^1.1.0",
+            "dev.xila.clock 1.0.0 xila.time:^1.0.0",
+            "dev.xila.clock 1.1.0 xila.time:^1.1.0",
             "xila.time 1.0.0",
             "xila.time 1.1.0",
         ]);
         let device = [
-            installed("xila.clock", "1.0.0", &[("xila.time", "^1.0.0")]),
+            installed("dev.xila.clock", "1.0.0", &[("xila.time", "^1.0.0")]),
             installed("xila.time", "1.0.0", &[]),
         ];
         // Already satisfied: nothing to do.
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &device,
                 &Options::default()
             ),
@@ -1244,7 +1244,7 @@ mod tests {
         assert_eq!(
             run(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &device,
                 &upgrade
             ),
@@ -1257,7 +1257,7 @@ mod tests {
                     }
                 ),
                 (
-                    "xila.clock".into(),
+                    "dev.xila.clock".into(),
                     "1.1.0".into(),
                     Action::Upgrade {
                         from: "1.0.0".into()
@@ -1271,7 +1271,7 @@ mod tests {
     fn protects_installed_dependents_and_refuses_downgrades() {
         let mut catalog = catalog(&["xila.time 1.0.0", "xila.time 2.0.0"]);
         let device = [
-            installed("xila.clock", "1.0.0", &[("xila.time", "^1.0.0")]),
+            installed("dev.xila.clock", "1.0.0", &[("xila.time", "^1.0.0")]),
             installed("xila.time", "1.0.0", &[]),
         ];
         assert_eq!(
@@ -1284,7 +1284,7 @@ mod tests {
             Err(Error::Conflict {
                 name: "xila.time".into(),
                 version: "2.0.0".into(),
-                required_by: Some("xila.clock".into()),
+                required_by: Some("dev.xila.clock".into()),
             })
         );
 
@@ -1430,13 +1430,13 @@ mod tests {
         assert_eq!(
             plan(
                 &mut Substituting,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &ENVIRONMENT,
                 &Options::default()
             ),
             Err(Error::Substituted {
-                name: "xila.clock".into(),
+                name: "dev.xila.clock".into(),
                 version: "1.0.0".into()
             })
         );
@@ -1514,16 +1514,16 @@ mod tests {
             .unwrap()
         }
 
-        /// A registry with `xila.clock` 0.1.0 and 0.2.0, the latter built
+        /// A registry with `dev.xila.clock` 0.1.0 and 0.2.0, the latter built
         /// for a newer Xila release.
         fn registry() -> (Index, BTreeMap<String, Fetched>) {
             let mut files = Vec::new();
             let mut site = BTreeMap::new();
             for (version, xila_version) in [("0.1.0", RUNNING), ("0.2.0", XilaVersion::new(0, 2))] {
-                let mut entry = entry("xila.clock", version);
+                let mut entry = entry("dev.xila.clock", version);
                 entry.xila_version = xila_version;
                 let bytes = encode_registry_entry(&entry).unwrap().into_bytes();
-                let path = trust::entry_path("xila.clock", version);
+                let path = trust::entry_path("dev.xila.clock", version);
                 files.push(IndexFile {
                     path: path.clone(),
                     sha256: sha256_hex(&bytes),
@@ -1538,6 +1538,7 @@ mod tests {
                 );
             }
             let index = Index {
+                replacements: None,
                 schema: Some(INDEX_SCHEMA_URL.into()),
                 format_version: TRUST_FORMAT_VERSION,
                 version: 1,
@@ -1567,7 +1568,7 @@ mod tests {
             let mut catalog = IndexCatalog::new(&root, &index, fetch_from(&site));
             let plan = plan(
                 &mut catalog,
-                &[request("xila.clock", "*")],
+                &[request("dev.xila.clock", "*")],
                 &[],
                 &ENVIRONMENT,
                 &Options::default(),
@@ -1582,14 +1583,14 @@ mod tests {
         fn rejects_altered_or_forged_entries() {
             let root = trusted();
             let (index, mut site) = registry();
-            let path = trust::entry_path("xila.clock", "0.2.0");
+            let path = trust::entry_path("dev.xila.clock", "0.2.0");
             // Altered bytes no longer match the index.
             site.get_mut(&path).unwrap().bytes[0] = b' ';
             let mut catalog = IndexCatalog::new(&root, &index, fetch_from(&site));
             assert_eq!(
                 plan(
                     &mut catalog,
-                    &[request("xila.clock", "*")],
+                    &[request("dev.xila.clock", "*")],
                     &[],
                     &ENVIRONMENT,
                     &Options::default()
@@ -1607,7 +1608,7 @@ mod tests {
             assert_eq!(
                 plan(
                     &mut catalog,
-                    &[request("xila.clock", "*")],
+                    &[request("dev.xila.clock", "*")],
                     &[],
                     &ENVIRONMENT,
                     &Options::default()
@@ -1624,7 +1625,7 @@ mod tests {
             assert_eq!(
                 plan(
                     &mut catalog,
-                    &[request("xila.clock", "*")],
+                    &[request("dev.xila.clock", "*")],
                     &[],
                     &ENVIRONMENT,
                     &Options::default()

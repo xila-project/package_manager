@@ -6,7 +6,7 @@
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     fs,
     io::Write,
@@ -14,6 +14,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use xila_package_manager::trust::{self, TrustedRoot};
+use xila_package_manifest::trust::{REPLACEMENTS_PATH, Replacement, decode_replacements};
 use xila_package_manifest::{
     Archive, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH,
     INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NAMESPACE_DOMAIN, NAMESPACES_DIRECTORY, NamedKey,
@@ -239,6 +240,7 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
     let packages = root.join("packages");
     let mut files = Vec::new();
     collect_json(&packages, &mut files)?;
+    let mut identifiers = BTreeSet::new();
     for path in &files {
         let bytes = fs::read(path)?;
         let entry = decode_registry_entry(&bytes).map_err(|error| {
@@ -293,6 +295,17 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
             verify_archive(&entry, &fs::read(archives.join(name))?, &public)
                 .map_err(|error| failure(path, &error.to_string()))?;
         }
+        identifiers.insert(entry.name);
+    }
+    if let Some(replacements) = read_replacements(root)? {
+        for replacement in replacements {
+            if !identifiers.contains(&replacement.name) {
+                return Err(failure(
+                    &root.join(REPLACEMENTS_PATH),
+                    &format!("unknown legacy identifier {}", replacement.name),
+                ));
+            }
+        }
     }
     println!(
         "Checked {} developer key(s), {} namespace(s) and {} registry entr{}{}",
@@ -312,6 +325,20 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Repository signatures: root.json, index.json and detached .sig files.
 // ---------------------------------------------------------------------------
+
+fn read_replacements(root: &Path) -> Result<Option<Vec<Replacement>>> {
+    let path = root.join(REPLACEMENTS_PATH);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Err(failure(&path, "expected a regular file")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    let bytes = fs::read(&path)?;
+    decode_replacements(&bytes)
+        .map(Some)
+        .map_err(|_| failure(&path, "invalid package replacements"))
+}
 
 fn read_raw_public_key(path: &Path) -> Result<[u8; 32]> {
     Ok(fs::read(path)?
@@ -503,14 +530,19 @@ fn write_signed_site(
         });
     }
     files.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
-    let index = encode_index(&Index {
+    let mut index = Index {
         schema: Some(INDEX_SCHEMA_URL.into()),
         format_version: TRUST_FORMAT_VERSION,
         version,
         expires,
         files,
-    })
-    .map_err(|_| invalid("invalid index"))?;
+        replacements: None,
+    };
+    if let Some(mut replacements) = read_replacements(registry)? {
+        replacements.retain(|replacement| index.has_package(&replacement.replaced_by));
+        index.replacements = Some(replacements);
+    }
+    let index = encode_index(&index).map_err(|_| invalid("invalid index"))?;
     write_new_file(&output.join(INDEX_PATH), index.as_bytes())?;
     write_new_file(
         &signature_path(&output.join(INDEX_PATH)),
@@ -1158,6 +1190,60 @@ mod tests {
         .unwrap();
         fs::create_dir_all(directory.join("namespaces")).unwrap();
         fs::write(directory.join("namespaces/example.xila.json"), NAMESPACE).unwrap();
+    }
+
+    #[test]
+    fn publishes_replacements_when_the_target_exists() {
+        let keys = new_keys();
+        let temp = tempfile::tempdir().unwrap();
+        let registry = temp.path().join("registry");
+        write_namespaced_registry(&registry);
+        root(
+            &keys.root_seed,
+            "root-test",
+            &keys.repository_public,
+            "repository-test",
+            1,
+            &registry.join(ROOT_PATH),
+        )
+        .unwrap();
+        let replacements = registry.join(REPLACEMENTS_PATH);
+        fs::write(
+            &replacements,
+            r#"[{"name":"xila.clock","replaced_by":"example.xila.weather"}]"#,
+        )
+        .unwrap();
+        let legacy = "packages/xila/clock/0.1.0.json";
+        let sign_index = |directory| {
+            let site = temp.path().join(directory);
+            sign(
+                &registry,
+                &keys.root_public,
+                &keys.repository_seed,
+                &site,
+                Some(1_000),
+                1,
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read(site.join(legacy)).unwrap(),
+                fs::read(registry.join(legacy)).unwrap()
+            );
+            xila_package_manifest::decode_index(&fs::read(site.join(INDEX_PATH)).unwrap()).unwrap()
+        };
+        assert_eq!(
+            sign_index("published").replacement("xila.clock"),
+            Some("example.xila.weather")
+        );
+        fs::remove_dir_all(registry.join("packages/example")).unwrap();
+        assert_eq!(sign_index("pending").replacement("xila.clock"), None);
+
+        fs::write(
+            &replacements,
+            r#"[{"name":"xila.missing","replaced_by":"example.xila.weather"}]"#,
+        )
+        .unwrap();
+        assert!(check_error(&registry).contains("unknown legacy identifier xila.missing"));
     }
 
     fn check_error(registry: &Path) -> String {

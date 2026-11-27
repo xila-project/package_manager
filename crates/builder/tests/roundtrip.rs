@@ -17,7 +17,7 @@ fn command_generates_updates_and_packs() {
                 "generate",
                 source.to_str().unwrap(),
                 manifest.to_str().unwrap(),
-                "xila.calculator",
+                "dev.xila.calculator",
                 "1.0.0",
                 "wasm32-wasip1",
                 "--xila-version",
@@ -90,7 +90,7 @@ fn command_generates_updates_and_packs() {
     assert_eq!(app.entrypoint, "executables/calculator.wasm");
     assert_eq!(app.display_name, "Calculator");
     assert!(app.show_in_launcher);
-    assert_eq!(contents.name, "xila.calculator");
+    assert_eq!(contents.name, "dev.xila.calculator");
     assert_eq!(contents.files[0].path, "executables/calculator.wasm");
     let mutated = temp.path().join("mutated");
     fs::create_dir(&mutated).unwrap();
@@ -353,7 +353,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
     let cli = env!("CARGO_BIN_EXE_xila-package");
     let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
     let run = |items: &[&str]| Command::new(cli).args(items).status().unwrap().success();
-    let url = "https://github.com/xila-project/applications/releases/download/xila.clock-v0.1.0/xila.clock-0.1.0-wasm32-wasip1.xpk";
+    let url = "https://github.com/xila-project/applications/releases/download/dev.xila.clock-v0.1.0/dev.xila.clock-0.1.0-wasm32-wasip1.xpk";
 
     assert!(run(&[
         "key",
@@ -376,7 +376,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         .unwrap();
         fs::write(
             temp.path().join(source).join("xila-package.json"),
-            r#"{"format_version":2,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
+            r#"{"format_version":2,"name":"dev.xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
         )
         .unwrap();
         let bundle = path(&format!("{source}.app"));

@@ -167,6 +167,7 @@ fn trust_chain_seed() -> Vec<u8> {
         size: bytes.len() as u64,
     };
     let index = Index {
+        replacements: None,
         schema: Some(INDEX_SCHEMA_URL.into()),
         format_version: TRUST_FORMAT_VERSION,
         version: 1_800_000_000,

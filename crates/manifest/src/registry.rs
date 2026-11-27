@@ -170,7 +170,7 @@ mod tests {
         Manifest {
             schema: Some(SCHEMA_URL.into()),
             format_version: FORMAT_VERSION,
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: XilaVersion::new(0, 1),
