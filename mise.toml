@@ -1,5 +1,8 @@
 [vars]
 rust_version = "1.97.0"
+# Nightly toolchain used only by the fuzzing jobs; same pin as the workspace's
+# mise/shared.toml and Xila core.
+nightly_version = "nightly-2026-10-12"
 
 [tools]
 # Keep the compiler aligned with Xila core. Native mise integration makes Cargo
@@ -61,3 +64,47 @@ fi
 [tasks."release:package"]
 description = "Build and verify crates.io archives locally without uploading them"
 run = "cargo package --workspace --locked"
+
+[tasks."fuzz:setup"]
+description = "Install the pinned nightly toolchain (with rust-src) and the pinned cargo-fuzz used only by the fuzzing jobs"
+run = '''
+set -eu
+rustup toolchain install {{ vars.nightly_version }} --profile minimal --component rust-src
+cargo install cargo-fuzz --version 0.13.2 --locked
+'''
+
+[tasks."fuzz:run"]
+description = "Run fuzz targets for FUZZ_SECONDS seconds each (default 120) with FUZZ_JOBS parallel workers (default 4); FUZZ_TARGET runs a single target"
+run = '''
+set -eu
+cd fuzz
+seconds=${FUZZ_SECONDS:-120}
+jobs=${FUZZ_JOBS:-4}
+corpus=${FUZZ_CORPUS:-corpus}
+# Create a corpus directory per target and seed each from the repository
+# fixtures; make_seeds then adds the generated packages and the signed
+# trust-chain document.
+for target_file in fuzz_targets/*.rs; do
+  target=$(basename "$target_file" .rs)
+  if [ -n "${FUZZ_TARGET:-}" ] && [ "$FUZZ_TARGET" != "$target" ]; then
+    continue
+  fi
+  mkdir -p "$corpus/$target"
+  cp ../tests/fixtures/*.json "$corpus/$target/"
+  cp ../crates/builder/tests/fixtures/*.json "$corpus/$target/"
+done
+cargo run --release --example make_seeds -- "$corpus"
+# cargo-fuzz invokes plain `cargo` and `rustc` for the instrumented build, so
+# put the pinned nightly toolchain first on PATH: the mise-pinned cargo is
+# stable and rejects the -Z sanitizer flags.
+nightly_bin="$(dirname "$(rustup which --toolchain {{ vars.nightly_version }} cargo)")"
+export PATH="$nightly_bin:$PATH"
+for target_file in fuzz_targets/*.rs; do
+  target=$(basename "$target_file" .rs)
+  if [ -n "${FUZZ_TARGET:-}" ] && [ "$FUZZ_TARGET" != "$target" ]; then
+    continue
+  fi
+  echo "== fuzzing $target for ${seconds}s"
+  cargo fuzz run "$target" "$corpus/$target" -- -max_total_time="$seconds" -jobs="$jobs" -workers="$jobs" -timeout=25 -rss_limit_mb=2560 -max_len=1048576 -print_final_stats=1
+done
+'''

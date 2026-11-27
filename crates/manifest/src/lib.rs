@@ -335,6 +335,45 @@ pub fn decode(bytes: &[u8]) -> Result<Manifest, Error> {
     Ok(value)
 }
 
+/// Maximum accepted JSON nesting depth. The underlying parser keeps one heap
+/// layer per open bracket or brace, including inside ignored fields, so a
+/// malformed document of `[[[[…` would otherwise allocate about 40 bytes per
+/// input byte (a 1 MiB `index.json` would allocate about 40 MB and abort a
+/// device). Real documents nest a handful of levels.
+pub(crate) const MAX_JSON_DEPTH: usize = 64;
+
+/// Reject JSON nested deeper than [`MAX_JSON_DEPTH`] before parsing. Strings
+/// and their escapes are skipped so brackets inside them do not count.
+pub(crate) fn check_nesting_depth(source: &str) -> Result<(), Error> {
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in source.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > MAX_JSON_DEPTH {
+                    return Err(Error::InvalidJson);
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn decode_versioned<Document: Deserialize>(
     bytes: &[u8],
     expected_version: u32,
@@ -343,6 +382,7 @@ fn decode_versioned<Document: Deserialize>(
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
+    check_nesting_depth(source)?;
     miniserde::json::from_str(source).map_err(|_| {
         // Older documents can lack fields required by the current format.
         // Read only the version when the full document cannot be decoded.
@@ -569,5 +609,51 @@ mod tests {
             decode(&vec![b' '; MAX_MANIFEST_BYTES + 1]),
             Err(Error::TooLarge)
         );
+    }
+
+    #[test]
+    fn rejects_deeply_nested_json_before_parsing() {
+        // The parser keeps one heap layer per nesting level, even inside
+        // ignored fields, so unbounded nesting would allocate about 40 bytes
+        // per input byte. This is the regression test for the input found by
+        // the manifest fuzz target: 65 530 open brackets behind one field.
+        let deep = alloc::format!("{{\"ignored\":{}", "[".repeat(MAX_JSON_DEPTH + 1));
+        assert_eq!(decode(deep.as_bytes()), Err(Error::InvalidJson));
+        assert_eq!(decode_developer(deep.as_bytes()), Err(Error::InvalidJson));
+        assert_eq!(
+            decode_registry_entry(deep.as_bytes()),
+            Err(Error::InvalidJson)
+        );
+        assert_eq!(decode_namespace(deep.as_bytes()), Err(Error::InvalidJson));
+        // A valid manifest with an ignored field nested up to the limit still
+        // decodes; one level more is rejected before parsing.
+        let json = encode(&example()).unwrap();
+        for (brackets, expected) in [
+            (MAX_JSON_DEPTH - 1, Ok(())),
+            (MAX_JSON_DEPTH, Err(Error::InvalidJson)),
+        ] {
+            let mut input = alloc::format!("{{\"ignored\":{}", "[".repeat(brackets));
+            input.push_str(&"]".repeat(brackets));
+            input.push(',');
+            input.push_str(&json[1..]);
+            assert_eq!(decode(input.as_bytes()).map(|_| ()), expected, "{brackets}");
+        }
+        // Brackets inside strings do not count towards the depth, and the
+        // limit itself is accepted by the depth check.
+        assert_eq!(
+            check_nesting_depth(&alloc::format!("\"{}\"", "[".repeat(MAX_JSON_DEPTH * 4))),
+            Ok(())
+        );
+        assert_eq!(check_nesting_depth(&"[".repeat(MAX_JSON_DEPTH)), Ok(()));
+        assert_eq!(
+            check_nesting_depth(&"[".repeat(MAX_JSON_DEPTH + 1)),
+            Err(Error::InvalidJson)
+        );
+        // An escaped quote does not end the string: brackets after it stay
+        // inside the string and must not count towards the depth, so this
+        // fails if escape handling breaks.
+        let mut escaped = alloc::format!("{{\"a\":\"\\\"{}", "[".repeat(MAX_JSON_DEPTH + 1));
+        escaped.push_str("\"}");
+        assert_eq!(check_nesting_depth(&escaped), Ok(()));
     }
 }

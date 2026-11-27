@@ -211,6 +211,7 @@ pub fn decode_developer_key(bytes: &[u8]) -> Result<DeveloperKey, Error> {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
+    crate::check_nesting_depth(source)?;
     let key: DeveloperKey = miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
     key.validate()?;
     Ok(key)

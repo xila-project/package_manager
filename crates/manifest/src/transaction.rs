@@ -138,6 +138,7 @@ pub fn decode_transaction(bytes: &[u8]) -> Result<Transaction, Error> {
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
+    crate::check_nesting_depth(source)?;
     let transaction: Transaction =
         miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)?;
     transaction.validate()?;
