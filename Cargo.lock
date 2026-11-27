@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-builder"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ed25519-dalek",
  "getargs",
@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-bundle"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "xila-package-manifest",
  "xila-package-verification",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-manager"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ed25519-dalek",
  "xila-package-manifest",
@@ -450,14 +450,14 @@ dependencies = [
 
 [[package]]
 name = "xila-package-manifest"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "miniserde",
 ]
 
 [[package]]
 name = "xila-package-reader"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ed25519-dalek",
  "tar-no-std",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "xila-package-writer"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "tar",
  "xila-package-bundle",

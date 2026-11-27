@@ -8,5 +8,5 @@ repository.workspace = true
 description = "Portable no_std bundle inventory, SHA-256 and Ed25519 signing-message primitives"
 
 [dependencies]
-xila-package-manifest = { version = "0.4.0", path = "../manifest" }
+xila-package-manifest = { version = "0.5.0", path = "../manifest" }
 xila-package-verification = { version = "0.1.0", path = "../verification", default-features = false, features = ["sha256", "ed25519"] }

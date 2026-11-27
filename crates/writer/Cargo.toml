@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Write Xila application bundles"
 
 [dependencies]
-xila-package-manifest = { version = "0.4.0", path = "../manifest" }
-xila-package-bundle = { version = "0.4.0", path = "../bundle" }
+xila-package-manifest = { version = "0.5.0", path = "../manifest" }
+xila-package-bundle = { version = "0.5.0", path = "../bundle" }
 xila-package-verification = { version = "0.1.0", path = "../verification", default-features = false, features = ["sha256"] }
 tar = "0.4.46"
