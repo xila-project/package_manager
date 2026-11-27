@@ -78,20 +78,24 @@ cd fuzz
 seconds=${FUZZ_SECONDS:-120}
 jobs=${FUZZ_JOBS:-4}
 corpus=${FUZZ_CORPUS:-corpus}
-# Seed the JSON targets from the repository fixtures.
-for target in manifest developer_manifest registry_entry developer_key namespace trust_root trust_index repository_origin transaction trust_chain version; do
+# Create a corpus directory per target and seed each from the repository
+# fixtures; make_seeds then adds the generated packages and the signed
+# trust-chain document.
+for target_file in fuzz_targets/*.rs; do
+  target=$(basename "$target_file" .rs)
   mkdir -p "$corpus/$target"
   cp ../tests/fixtures/*.json "$corpus/$target/"
   cp ../crates/builder/tests/fixtures/*.json "$corpus/$target/"
 done
-# Seed the archive targets with generated packages.
-for target in archive archive_roundtrip; do
-  mkdir -p "$corpus/$target"
-done
 cargo run --release --example make_seeds -- "$corpus"
+# cargo-fuzz invokes plain `cargo` and `rustc` for the instrumented build, so
+# put the nightly toolchain first on PATH: the mise-pinned cargo is stable
+# 1.97 and rejects the -Z sanitizer flags.
+nightly_bin="$(dirname "$(rustup which --toolchain nightly cargo)")"
+export PATH="$nightly_bin:$PATH"
 for target_file in fuzz_targets/*.rs; do
   target=$(basename "$target_file" .rs)
   echo "== fuzzing $target for ${seconds}s"
-  cargo +nightly fuzz run "$target" "$corpus/$target" -- -max_total_time="$seconds" -jobs="$jobs" -workers="$jobs" -timeout=25 -rss_limit_mb=2560 -max_len=1048576 -print_final_stats=1
+  cargo fuzz run "$target" "$corpus/$target" -- -max_total_time="$seconds" -jobs="$jobs" -workers="$jobs" -timeout=25 -rss_limit_mb=2560 -max_len=1048576 -print_final_stats=1
 done
 '''
