@@ -240,6 +240,7 @@ fn decode<T: miniserde::Deserialize>(bytes: &[u8], limit: usize) -> Result<T, Er
         return Err(Error::TooLarge);
     }
     let source = core::str::from_utf8(bytes).map_err(|_| Error::InvalidJson)?;
+    crate::check_nesting_depth(source)?;
     miniserde::json::from_str(source).map_err(|_| Error::InvalidJson)
 }
 
@@ -372,6 +373,17 @@ mod tests {
         assert_eq!(index.validate(), Err(Error::InvalidIndex));
         index.files[2].path = "namespaces/example.xilas.json".into();
         assert_eq!(index.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_deeply_nested_documents_before_parsing() {
+        // Regression test for the input found by the trust_index fuzz target:
+        // a full-size index.json of open brackets behind an ignored field
+        // made the parser allocate about 40 MB (one heap layer per level).
+        let deep = alloc::format!("{{\"ignored\":{}", "[".repeat(MAX_INDEX_BYTES - 16));
+        assert_eq!(decode_index(deep.as_bytes()), Err(Error::InvalidJson));
+        let deep = alloc::format!("{{\"ignored\":{}", "[".repeat(MAX_MANIFEST_BYTES - 16));
+        assert_eq!(decode_root(deep.as_bytes()), Err(Error::InvalidJson));
     }
 
     #[test]
