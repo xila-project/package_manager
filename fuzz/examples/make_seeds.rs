@@ -8,12 +8,12 @@ use std::path::Path;
 use ed25519_dalek::{Signer, SigningKey};
 use xila_package_bundle::{FileHasher, encode_sha256, signing_message};
 use xila_package_manifest::{
-    Application, Archive, DEVELOPER_KEY_DOMAIN, DEVELOPER_KEY_SCHEMA_URL, DeveloperKey,
-    ENTRY_DOMAIN, FORMAT_VERSION, INDEX_DOMAIN, INDEX_SCHEMA_URL, Index, IndexFile, Manifest,
-    NAMESPACE_DOMAIN, NAMESPACE_FORMAT_VERSION, NAMESPACE_SCHEMA_URL, NamedKey, Namespace,
-    NamespaceOwner, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, ROOT_DOMAIN,
-    ROOT_SCHEMA_URL, RegistryEntry, Root, SCHEMA_URL, TRUST_FORMAT_VERSION, XilaVersion,
-    encode_index, encode_namespace, encode_registry_entry, encode_root, signed_message,
+    Application, Archive, ENTRY_DOMAIN, FORMAT_VERSION, INDEX_DOMAIN, INDEX_FORMAT_VERSION,
+    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NamedKey, PackageKey, REGISTRY_ENTRY_SCHEMA_URL,
+    REGISTRY_FORMAT_VERSION, ROOT_DOMAIN, ROOT_SCHEMA_URL, ROTATION_DOMAIN,
+    ROTATION_FORMAT_VERSION, RegistryEntry, Root, Rotation, SCHEMA_URL, TRUST_FORMAT_VERSION,
+    XilaVersion, encode_index, encode_public_key, encode_registry_entry, encode_root,
+    encode_rotation, signed_message,
 };
 use xila_package_verification::{PublicKey, Sha256Verifier};
 use xila_package_writer::{SourceFile, write_package};
@@ -49,43 +49,17 @@ fn write(directory: &Path, name: &str, bytes: &[u8]) {
     std::fs::write(directory.join(name), bytes).unwrap();
 }
 
-/// Canonical base64 (with padding) of a 32-byte key, as used in key files.
-fn base64_key(bytes: &[u8; 32]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(44);
-    for chunk in bytes.chunks(3) {
-        let mut block = [0_u8; 3];
-        block[..chunk.len()].copy_from_slice(chunk);
-        let value = u32::from_be_bytes([0, block[0], block[1], block[2]]);
-        output.push(TABLE[(value >> 18) as usize & 63] as char);
-        output.push(TABLE[(value >> 12) as usize & 63] as char);
-        output.push(if chunk.len() > 1 {
-            TABLE[(value >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        output.push(if chunk.len() > 2 {
-            TABLE[value as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    output
-}
-
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256Verifier::new();
     hasher.update(bytes).unwrap();
     encode_sha256(&hasher.finalize().unwrap())
 }
 
-/// A complete, correctly signed trust chain as one NUL-separated document:
-/// root, root signature, index, index signature, entry, entry signature,
-/// developer key, key signature, namespace, namespace signature.
+/// A signed root, index, entry and rotation, with their signatures first.
 fn trust_chain_seed() -> Vec<u8> {
     let root_key = SigningKey::from_bytes(&[1_u8; 32]);
     let repository_key = SigningKey::from_bytes(&[2_u8; 32]);
-    let developer_key = SigningKey::from_bytes(&[3_u8; 32]);
+    let package_key = SigningKey::from_bytes(&[3_u8; 32]);
     let sign = |key: &SigningKey, domain: &[u8], bytes: &[u8]| {
         key.sign(&signed_message(domain, bytes).unwrap()).to_bytes()
     };
@@ -96,50 +70,28 @@ fn trust_chain_seed() -> Vec<u8> {
         version: 1,
         root_keys: vec![NamedKey {
             id: "root-next".into(),
-            public_key: base64_key(&root_key.verifying_key().to_bytes()),
+            public_key: encode_public_key(&root_key.verifying_key().to_bytes()),
         }],
         repository_keys: vec![NamedKey {
             id: "repository".into(),
-            public_key: base64_key(&repository_key.verifying_key().to_bytes()),
+            public_key: encode_public_key(&repository_key.verifying_key().to_bytes()),
         }],
     };
     let root_bytes = encode_root(&root).unwrap();
     let root_signature = sign(&root_key, ROOT_DOMAIN, root_bytes.as_bytes());
 
-    let developer = DeveloperKey {
-        schema: Some(DEVELOPER_KEY_SCHEMA_URL.into()),
-        id: "xila".into(),
-        author: "Xila Project".into(),
-        algorithm: "ed25519".into(),
-        public_key: base64_key(&developer_key.verifying_key().to_bytes()),
-        openssh: None,
-        namespaces: Some(vec!["xila".into()]),
-        kinds: Some(vec!["wasm".into(), "native".into()]),
+    let pin = PackageKey::new(1, &package_key.verifying_key().to_bytes()).unwrap();
+    let next = SigningKey::from_bytes(&[4_u8; 32]);
+    let rotation = Rotation {
+        schema: None,
+        format_version: ROTATION_FORMAT_VERSION,
+        name: "example.xila.seed".into(),
+        generation: 2,
+        previous_key: pin.public_key.clone(),
+        new_key: encode_public_key(&next.verifying_key().to_bytes()),
     };
-    developer.validate().unwrap();
-    let developer_bytes = miniserde::json::to_string(&developer);
-    let developer_signature = sign(
-        &repository_key,
-        DEVELOPER_KEY_DOMAIN,
-        developer_bytes.as_bytes(),
-    );
-
-    let namespace = Namespace {
-        schema: Some(NAMESPACE_SCHEMA_URL.into()),
-        format_version: NAMESPACE_FORMAT_VERSION,
-        namespace: "example.xila".into(),
-        owner: NamespaceOwner {
-            kind: "domain".into(),
-            name: "xila.example".into(),
-        },
-        developer_keys: vec!["xila".into()],
-    };
-    let namespace_bytes = encode_namespace(&namespace).unwrap();
-    let namespace_signature = sign(
-        &repository_key,
-        NAMESPACE_DOMAIN,
-        namespace_bytes.as_bytes(),
-    );
+    let rotation_bytes = encode_rotation(&rotation).unwrap();
+    let rotation_signature = sign(&package_key, ROTATION_DOMAIN, rotation_bytes.as_bytes());
 
     let entry = RegistryEntry {
         schema: Some(REGISTRY_ENTRY_SCHEMA_URL.into()),
@@ -151,7 +103,7 @@ fn trust_chain_seed() -> Vec<u8> {
         capabilities: vec![],
         display_name: Some("Seed".into()),
         metadata: None,
-        publisher: "xila".into(),
+        package_key: pin,
         archive: Archive {
             url: "https://releases.example.com/example.xila.seed-0.1.0.xpk".into(),
             sha256: "a".repeat(64),
@@ -168,34 +120,31 @@ fn trust_chain_seed() -> Vec<u8> {
     };
     let index = Index {
         schema: Some(INDEX_SCHEMA_URL.into()),
-        format_version: TRUST_FORMAT_VERSION,
+        format_version: INDEX_FORMAT_VERSION,
         version: 1_800_000_000,
         expires: 1_802_592_000,
         files: vec![
-            listed("keys/developers/xila.json", &developer_bytes),
-            listed("namespaces/example.xila.json", &namespace_bytes),
             listed("packages/example/xila/seed/0.1.0.json", &entry_bytes),
+            listed("rotations/example/xila/seed/2.json", &rotation_bytes),
         ],
     };
     let index_bytes = encode_index(&index).unwrap();
     let index_signature = sign(&repository_key, INDEX_DOMAIN, index_bytes.as_bytes());
 
     let mut seed = Vec::new();
-    for part in [
-        root_bytes.into_bytes(),
-        root_signature.to_vec(),
-        index_bytes.into_bytes(),
-        index_signature.to_vec(),
-        entry_bytes.into_bytes(),
-        entry_signature.to_vec(),
-        developer_bytes.into_bytes(),
-        developer_signature.to_vec(),
-        namespace_bytes.into_bytes(),
-        namespace_signature.to_vec(),
+    for signature in [
+        root_signature,
+        index_signature,
+        entry_signature,
+        rotation_signature,
     ] {
-        seed.extend_from_slice(&part);
+        seed.extend_from_slice(&signature);
+    }
+    for part in [root_bytes, index_bytes, entry_bytes] {
+        seed.extend_from_slice(part.as_bytes());
         seed.push(0);
     }
+    seed.extend_from_slice(rotation_bytes.as_bytes());
     seed
 }
 

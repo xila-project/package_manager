@@ -103,9 +103,7 @@ xila-package key public ./signing/private.seed ./signing/public.key  # re-derive
 
 `key` commands are stateless: they only write the paths given, never
 overwrite an existing file, and create the seed owner-only (`0600`) on Unix.
-Use `base64 -w0 ./signing/public.key` for the `public_key` field of a
-`registry` developer-key file, and `base64 -w0 ./signing/private.seed | gh
-secret set …` to provide a CI signing seed.
+Generate a separate key pair for each package identifier. Store the private seed as a secret in the repository that builds that package.
 
 For a hardware signer, KMS or separate signing job, export the exact
 domain-separated signing message and attach the returned detached signature:
@@ -133,58 +131,54 @@ Verification **without** `--public-key` checks file integrity, not publisher
 identity. Only verification with a caller-trusted public key authenticates
 a signature. No trust policy or key-distribution service is implemented here.
 
-### 4. Describe the release for a registry
+### 4. Publish a package entry
 
-Descriptive information lives in the developer manifest and travels in the
-signed runtime manifest, so it is written once:
-
-```json
-"metadata": {
-  "summary": "Shows the current weather",
-  "license": "Apache-2.0 OR MIT",
-  "source": "https://github.com/example/weather",
-  "homepage": null
-}
-```
-
-A registry entry (one released version, see
-[registry-entry.schema.json](../../schemas/registry-entry.schema.json)) is
-generated from the published archive, never written by hand:
+Generate the entry from the signed archive and its raw public key.
 
 ```sh
-xila-package registry entry ./Weather.xpk ./signing/public.key community "https://…/Weather.xpk" ./1.0.0.json
-xila-package registry verify ./1.0.0.json ./Weather.xpk ./signing/public.key
+xila-package registry entry ./Weather.xpk ./signing/public.key https://xila.example/Weather.xpk ./1.0.0.json
+xila-package registry verify ./1.0.0.json ./Weather.xpk
 ```
 
-`entry` verifies the archive signature against the developer key, then records
-the archive URL, SHA-256 and size, the publishing key identifier, and copies
-identity, compatibility, capabilities, display name and metadata from the
-signed manifest. `verify` checks the archive's size and hash, its signature,
-and that every copied field still equals the signed manifest. The registry
-then signs entries with its repository key (section 5).
+The entry pins the package key, archive URL, SHA-256 and size. It copies the
+identity, compatibility, capabilities and optional catalog metadata from the
+signed manifest. Set `metadata.author` in the developer manifest to display
+the author. `registry verify` uses the key in the entry to check the archive
+signature and file hashes and compares the signed manifest with the entry.
 
-To check a whole registry checkout (as `xila-project/registry` CI does):
+For first publication, submit the namespace ownership claim for the
+identifier. Check the claim's structure locally.
 
 ```sh
-xila-package registry check ./registry                       # keys, entry placement, namespaces, kinds
-xila-package registry check ./registry --archives ./downloads  # also every archive and signature
+xila-package registry check-owner ./1.0.0.json ./claim.json
 ```
 
-Developer keys live in `keys/developers/<id>.json`
-([developer-key.schema.json](../../schemas/developer-key.schema.json)), namespace
-files in `namespaces/<namespace>.json`
-([registry-namespace.schema.json](../../schemas/registry-namespace.schema.json))
-and entries in `packages/<identifier with dots as />/<version>.json`, e.g.
-`packages/example/xila/weather/0.1.0.json`. `check` requires namespace files not
-to overlap and to list only existing keys, and each entry to be canonical
-(exactly as `registry entry` writes it), to sit at its own path, and to name a
-publisher listed in the namespace file covering its identifier (for a legacy
-`xila.<name>` identifier, a key whose `namespaces` is `["xila"]`) and whose
-`kinds` contain the package's kind (`wasm` for `wasm32-*` and `wasm64-*`
-targets, `native` for every other target; a key without `kinds` may publish
-Wasm only). See
-[identifiers and namespaces](../../docs/registry-trust.md#identifiers-and-namespaces). `--archives` takes the downloaded `.xpk` files, named after
-their URLs; the command itself never accesses the network.
+The registry submission process checks control of the domain or account.
+Continue to use the same package key for later versions. To rotate it,
+generate a new key and sign the next generation with the previous seed.
+
+```sh
+xila-package key generate ./signing/next.seed ./signing/next.pub
+mkdir -p ./registry/rotations/example/xila/weather
+xila-package registry rotate example.xila.weather 2 ./signing/private.seed ./signing/next.pub ./registry/rotations/example/xila/weather/2.json
+xila-package bundle build ./weather ./Weather-next.app --signing-key ./signing/next.seed
+xila-package bundle archive ./Weather-next.app ./Weather-next.xpk
+xila-package registry entry ./Weather-next.xpk ./signing/next.pub https://xila.example/Weather-next.xpk ./1.1.0.json --generation 2
+xila-package registry check-rotation ./registry ./1.0.0.json ./1.1.0.json
+```
+
+Set the developer manifest's version to `1.1.0` before building the new
+archive. Submit the rotation JSON and its `.sig` together. Store entries in
+`packages/<identifier with dots as slashes>/<version>.json`.
+
+```sh
+xila-package registry check ./registry --previous ./approved-registry --archives ./downloads
+```
+
+`check` validates the entries and rotation histories. With `--previous`, it
+preserves the approved entries and rotations and checks that new versions use
+the current key. `--archives` takes the downloaded archives, named after their
+URLs. The command reads these files locally.
 
 ### 5. Sign the registry (registry maintainers)
 
@@ -192,7 +186,7 @@ Devices pin a **root** key and trust nothing else; see
 [registry-trust.md](../../docs/registry-trust.md) for the model and file formats.
 
 To start a new registry from scratch, `registry init` creates the layout
-(`root.json`, `root.json.sig`, `root.pub`, `keys/developers/`, `packages/`),
+(`root.json`, `root.json.sig`, `root.pub`, `rotations/`, `packages/`),
 generates the root and repository keys, and lists the repository key in
 `root.json`. The private seeds go to a directory you choose, outside the
 registry, created owner-only (`0600` files); keep the root seed offline:
@@ -214,14 +208,12 @@ xila-package registry sign ./registry ./root.pub ./repository.seed ./_site --exp
 xila-package registry verify-signed ./_site ./root.pub
 ```
 
-`registry root` writes `root.json` and `root.json.sig`. `registry sign` first
-runs `registry check`, then copies `root.json`, writes every developer key and
-entry with its own `.sig`, and a signed `index.json` (version = signing time,
-unless `--version`). It ends with `verify-signed`, which checks everything from
-the pinned root key as a device would: root, index signature and expiry
-(`--now`, default the current time; `--now 0` skips it), every listed file's
-hash and signature, publisher authorization, and that no unlisted file is
-present.
+`registry root` writes `root.json` and `root.json.sig`. `registry sign`
+checks the registry, signs its entries, copies the package-signed rotations
+and creates the signed index. The index uses the signing time unless you
+supply `--version`. `verify-signed` checks the published files and rotation
+chains from the pinned root. It checks expiry with the current time by
+default. Pass `--now 0` to skip the expiry check.
 
 ## Compatibility and scope
 

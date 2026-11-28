@@ -50,9 +50,9 @@ class RegistryTrustSchemaTests(unittest.TestCase):
             change(broken)
             self.assertFalse(ROOT_VALIDATOR.is_valid(broken), broken)
 
-    def test_accepts_namespace_files_in_the_index(self):
+    def test_accepts_rotation_files_in_the_index(self):
         index = copy.deepcopy(INDEX_FIXTURE)
-        index["files"].insert(1, {"path": "namespaces/example.xila.json", "sha256": "a" * 64, "size": 200})
+        index["files"].append({"path": "rotations/dev/xila/clock/2.json", "sha256": "a" * 64, "size": 200})
         INDEX_VALIDATOR.validate(index)
 
     def test_rejects_invalid_indexes(self):
@@ -85,20 +85,36 @@ class RegistryTrustSchemaTests(unittest.TestCase):
             with self.subTest(key=key, value=value):
                 self.assertFalse(REPOSITORY_VALIDATOR.is_valid(dict(REPOSITORY_FIXTURE, **{key: value})))
         self.assertFalse(ORIGIN_VALIDATOR.is_valid(dict(ORIGIN_FIXTURE, archive_sha256="x")))
+        self.assertFalse(ORIGIN_VALIDATOR.is_valid(dict(ORIGIN_FIXTURE, package_key=None)))
+
+    def test_rotation(self):
+        schema = load("schemas/registry-rotation.schema.json")
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        rotation = load("tests/fixtures/registry-rotation.json")
+        validator.validate(rotation)
+        for field, value in [
+            ("generation", 1),
+            ("generation", 34),
+            ("name", "xila.clock"),
+            ("previous_key", "AAAA"),
+            ("new_key", "AAAA"),
+        ]:
+            self.assertFalse(validator.is_valid(dict(rotation, **{field: value})))
 
     def test_transaction(self):
         Draft202012Validator.check_schema(TRANSACTION_VALIDATOR.schema)
         TRANSACTION_VALIDATOR.validate(TRANSACTION_FIXTURE)
         TRANSACTION_VALIDATOR.validate(
-            dict(TRANSACTION_FIXTURE, operation="remove", staging=None, previous=".removing-xila.clock", origin=None)
+            dict(TRANSACTION_FIXTURE, operation="remove", staging=None, previous=".removing-dev.xila.clock", origin=None)
         )
         for key, value in [
             ("operation", "downgrade"),
             ("staging", "../system"),
             ("staging", ".incoming-a/b"),
-            ("previous", "/applications/bundles/xila.clock"),
+            ("previous", "/applications/bundles/dev.xila.clock"),
             ("origin", dict(ORIGIN_FIXTURE, archive_sha256="x")),
-            ("format_version", 2),
+            ("format_version", 1),
         ]:
             with self.subTest(key=key, value=value):
                 self.assertFalse(TRANSACTION_VALIDATOR.is_valid(dict(TRANSACTION_FIXTURE, **{key: value})))

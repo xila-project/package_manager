@@ -4,31 +4,26 @@
 //!
 //! - the **root** key (kept offline) signs `root.json`, which names the keys
 //!   allowed to sign the next root version and the online repository keys;
-//! - a **repository** key signs `index.json`, every registry entry, every
-//!   developer key file and every namespace file;
-//! - a **developer** key signs package manifests (see [`crate::DeveloperKey`]).
+//! - a **repository** key signs `index.json` and every registry entry;
+//! - a **package** key signs package manifests and its own rotation record.
 //!
 //! Every signature is a detached raw 64-byte Ed25519 signature over
 //! [`signed_message`]: a per-document domain separator, the little-endian
 //! 32-bit length and the exact file bytes. Devices pin the root key and verify
-//! root → repository key → index/entry/developer key → package signature →
+//! root → repository key → entry → package key → package signature →
 //! file hashes.
 
 use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
-use crate::{
-    Error, MAX_MANIFEST_BYTES,
-    developer_key::decode_key,
-    namespace::{NAMESPACES_DIRECTORY, namespace_paths, valid_namespace},
-    registry::valid_publisher,
-};
+use crate::{Error, MAX_MANIFEST_BYTES, public_key::decode_key, registry::valid_key_identifier};
 
 /// Editor-facing JSON Schemas; tooling hints, never trust anchors.
 pub const ROOT_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-root.schema.json";
 pub const INDEX_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-index.schema.json";
-/// Current experimental format version of `root.json` and `index.json`.
+/// Current experimental format version of `root.json`.
 pub const TRUST_FORMAT_VERSION: u32 = 1;
+pub const INDEX_FORMAT_VERSION: u32 = 2;
 
 /// Registry file names, relative to the registry root.
 pub const ROOT_PATH: &str = "root.json";
@@ -38,10 +33,8 @@ pub const SIGNATURE_SUFFIX: &str = ".sig";
 
 /// Domain separators: a signature for one document kind never verifies as another.
 pub const ROOT_DOMAIN: &[u8] = b"XILA-REGISTRY-ROOT-V1\0";
-pub const INDEX_DOMAIN: &[u8] = b"XILA-REGISTRY-INDEX-V1\0";
-pub const ENTRY_DOMAIN: &[u8] = b"XILA-REGISTRY-ENTRY-V1\0";
-pub const DEVELOPER_KEY_DOMAIN: &[u8] = b"XILA-REGISTRY-DEVELOPER-KEY-V1\0";
-pub const NAMESPACE_DOMAIN: &[u8] = b"XILA-REGISTRY-NAMESPACE-V1\0";
+pub const INDEX_DOMAIN: &[u8] = b"XILA-REGISTRY-INDEX-V2\0";
+pub const ENTRY_DOMAIN: &[u8] = b"XILA-REGISTRY-ENTRY-V3\0";
 
 /// Maximum keys per role in `root.json`; verifiers try each, so keep it small.
 pub const MAX_ROLE_KEYS: usize = 4;
@@ -84,7 +77,7 @@ pub struct Root {
     pub version: u64,
     /// Keys allowed to sign the **next** root version (rotation and revocation).
     pub root_keys: Vec<NamedKey>,
-    /// Online keys allowed to sign the index, entries and developer keys.
+    /// Online keys allowed to sign the index and entries.
     pub repository_keys: Vec<NamedKey>,
 }
 
@@ -92,11 +85,12 @@ fn valid_keys(keys: &[NamedKey]) -> bool {
     !keys.is_empty()
         && keys.len() <= MAX_ROLE_KEYS
         && keys.iter().enumerate().all(|(index, key)| {
-            valid_publisher(&key.id)
-                && decode_key(&key.public_key).is_some()
-                && keys[..index]
-                    .iter()
-                    .all(|other| other.id != key.id && other.public_key != key.public_key)
+            valid_key_identifier(&key.id)
+                && key.public_key_bytes().is_ok_and(|public_key| {
+                    keys[..index].iter().all(|other| {
+                        other.id != key.id && other.public_key_bytes() != Ok(public_key)
+                    })
+                })
         })
 }
 
@@ -117,7 +111,7 @@ impl Root {
         let shared = self.root_keys.iter().any(|root| {
             self.repository_keys
                 .iter()
-                .any(|repository| repository.public_key == root.public_key)
+                .any(|repository| repository.public_key_bytes() == root.public_key_bytes())
         });
         if self.version == 0
             || !valid_keys(&self.root_keys)
@@ -133,14 +127,14 @@ impl Root {
 /// One file listed in the index.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndexFile {
-    /// Path relative to the registry root, e.g. `packages/xila/clock/0.1.0.json`.
+    /// Path relative to the registry root, e.g. `packages/dev/xila/clock/0.1.0.json`.
     pub path: String,
     /// Lowercase hexadecimal SHA-256 of the exact file bytes.
     pub sha256: String,
     pub size: u64,
 }
 
-/// `index.json`: a snapshot of every developer key and entry, signed by a
+/// `index.json`: a snapshot of entries and rotations, signed by a
 /// repository key. Devices keep the highest version seen (rollback) and, when
 /// they have a trustworthy clock, refuse an expired index (freeze).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -156,28 +150,19 @@ pub struct Index {
     pub files: Vec<IndexFile>,
 }
 
-fn listed_namespace(path: &str) -> Option<&str> {
-    path.strip_prefix(NAMESPACES_DIRECTORY)?
-        .strip_prefix('/')?
-        .strip_suffix(".json")
-}
-
-/// Registry-relative path of a key, namespace or entry file:
-/// `keys/developers/<id>.json`, `namespaces/<namespace>.json` or
-/// `packages/<labels…>/<version>.json`, without `.`/`..` segments.
+/// Registry-relative path of an entry or a package key rotation.
 pub fn valid_listed_path(path: &str) -> bool {
     let segment = |value: &str| {
         !value.is_empty()
             && value != "."
             && value != ".."
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
+            && value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+')
+            })
     };
-    let namespace = listed_namespace(path).is_some_and(valid_namespace);
     path.len() <= 512
         && path.ends_with(".json")
-        && (path.starts_with("keys/developers/") || path.starts_with("packages/") || namespace)
+        && (path.starts_with("packages/") || path.starts_with("rotations/"))
         && path.split('/').all(segment)
 }
 
@@ -197,7 +182,7 @@ impl Index {
         {
             return Err(Error::InvalidSchema);
         }
-        if self.format_version != TRUST_FORMAT_VERSION {
+        if self.format_version != INDEX_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion);
         }
         let files = self.files.len() <= MAX_INDEX_FILES
@@ -213,15 +198,6 @@ impl Index {
                 .all(|pair| pair[0].path.as_bytes() < pair[1].path.as_bytes());
         if self.version == 0 || self.expires <= self.version || !files {
             return Err(Error::InvalidIndex);
-        }
-        for file in &self.files {
-            if let Some(namespace) = listed_namespace(&file.path)
-                && namespace_paths(namespace)
-                    .iter()
-                    .any(|ancestor| self.file(ancestor).is_some())
-            {
-                return Err(Error::InvalidIndex);
-            }
         }
         Ok(())
     }
@@ -298,22 +274,22 @@ mod tests {
     fn index() -> Index {
         Index {
             schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
+            format_version: INDEX_FORMAT_VERSION,
             version: 1_800_000_000,
             expires: 1_802_592_000,
             files: vec![
                 IndexFile {
-                    path: "keys/developers/xila.json".into(),
+                    path: "packages/dev/xila/calculator/0.1.0.json".into(),
                     sha256: "a".repeat(64),
                     size: 300,
                 },
                 IndexFile {
-                    path: "namespaces/example.xila.json".into(),
+                    path: "packages/dev/xila/calculator/0.2.0.json".into(),
                     sha256: "c".repeat(64),
                     size: 200,
                 },
                 IndexFile {
-                    path: "packages/xila/clock/0.1.0.json".into(),
+                    path: "packages/dev/xila/clock/0.1.0.json".into(),
                     sha256: "b".repeat(64),
                     size: 700,
                 },
@@ -335,8 +311,7 @@ mod tests {
             ROOT_DOMAIN,
             INDEX_DOMAIN,
             ENTRY_DOMAIN,
-            DEVELOPER_KEY_DOMAIN,
-            NAMESPACE_DOMAIN,
+            crate::ROTATION_DOMAIN,
         ];
         for (i, a) in domains.iter().enumerate() {
             for b in &domains[i + 1..] {
@@ -353,26 +328,13 @@ mod tests {
         let decoded = decode_index(encoded.as_bytes()).unwrap();
         assert_eq!(decoded, index());
         assert_eq!(
-            decoded.file("packages/xila/clock/0.1.0.json").unwrap().size,
+            decoded
+                .file("packages/dev/xila/clock/0.1.0.json")
+                .unwrap()
+                .size,
             700
         );
-        assert!(decoded.file("packages/xila/clock/0.2.0.json").is_none());
-    }
-
-    #[test]
-    fn rejects_overlapping_namespaces_in_an_index() {
-        let mut index = index();
-        index.files.insert(
-            2,
-            IndexFile {
-                path: "namespaces/example.xila.tools.json".into(),
-                sha256: "d".repeat(64),
-                size: 200,
-            },
-        );
-        assert_eq!(index.validate(), Err(Error::InvalidIndex));
-        index.files[2].path = "namespaces/example.xilas.json".into();
-        assert_eq!(index.validate(), Ok(()));
+        assert!(decoded.file("packages/dev/xila/clock/0.2.0.json").is_none());
     }
 
     #[test]
@@ -424,7 +386,7 @@ mod tests {
             |i: &mut Index| i.files[1].path = "namespaces/example/xila.json".into(),
             |i: &mut Index| i.files[1].path = "namespaces/../root.json".into(),
             |i: &mut Index| i.files[1].path = "namespaces/example.xila.txt".into(),
-            |i: &mut Index| i.files[0].path = "/packages/xila/clock/0.1.0.json".into(),
+            |i: &mut Index| i.files[0].path = "/packages/dev/xila/clock/0.1.0.json".into(),
             |i: &mut Index| i.files[0].sha256 = "A".repeat(64),
             |i: &mut Index| i.files[0].size = 0,
         ] {

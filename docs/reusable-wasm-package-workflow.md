@@ -142,13 +142,9 @@ that secret is rotated. The Actions artifact contains:
 - `<name>-<version>-<target>.xpk.pub`
 
 Verify locally with `xila-package verify archive.xpk archive.xpk.pub`.
-The private seed is not stored in Git or uploaded with the package; configure it
-once with `openssl rand -base64 32 | gh secret set XILA_DEV_SIGNING_SEED_B64
---repo xila-project/applications` and explicitly forward the secret to the
-reusable workflow. Missing or malformed secrets fail the signing job.
-The public key is **not trusted** simply because it is shipped beside the archive.
-An installer must independently decide whether to allow unrecognized
-signers. Pull-request artifacts remain unsigned. Releases are signed with the
-same key; trust comes from the repository key in `xila-project/registry`, which
-authorizes developer keys, not from the key shipped beside an archive.
-
+Generate a key with `xila-package key generate` for each release package.
+Store the base64-encoded 32-byte private seed as `XILA_DEV_SIGNING_SEED_B64`
+in the repository that calls the workflow. Forward the secret explicitly.
+Pull request artifacts remain unsigned. Devices obtain the package public key
+from the signed registry entry and check it against their installed key on an
+upgrade. See the [registry trust model](registry-trust.md).

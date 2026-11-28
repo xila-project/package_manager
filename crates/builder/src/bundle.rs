@@ -557,7 +557,7 @@ mod tests {
         let source = temp.path().join("tool");
         init(InitOptions {
             directory: &source,
-            name: "xila.tool",
+            name: "dev.xila.tool",
             version: "1.0.0",
             target: "wasm32-wasip1",
             xila_version: XilaVersion::new(0, 1),

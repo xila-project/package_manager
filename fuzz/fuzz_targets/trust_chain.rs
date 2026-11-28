@@ -2,58 +2,50 @@
 
 use libfuzzer_sys::fuzz_target;
 use xila_package_manager::trust::{
-    TrustedRoot, check_listed, namespace_publisher_key, publisher_key,
+    SignedRotation, TrustedRoot, check_listed, package_key, verify_rotation,
 };
 use xila_package_manifest::index_packages;
 
-// Registry trust chain on untrusted bytes. The input is NUL-separated
-// segments: root, root signature, index, index signature, entry, entry
-// signature, developer key, key signature, namespace, namespace signature.
+// Signatures have a fixed length and can contain any byte. Read them from
+// the prefix so a zero in a signature does not truncate the seed.
 fuzz_target!(|data: &[u8]| {
-    let segments: Vec<&[u8]> = data.split(|&byte| byte == 0).collect();
-    let Ok(
-        [
-            root,
-            root_signature,
-            index,
-            index_signature,
-            entry,
-            entry_signature,
-            developer_key,
-            key_signature,
-            namespace,
-            namespace_signature,
-        ],
-    ) = <[&[u8]; 10]>::try_from(segments.as_slice())
-    else {
+    let Some((signatures, documents)) = data.split_at_checked(64 * 4) else {
         return;
     };
+    let mut signatures = signatures.chunks_exact(64);
+    let mut documents = documents.splitn(4, |&byte| byte == 0);
+    let (Some(root), Some(index), Some(entry), Some(rotation)) = (
+        documents.next(),
+        documents.next(),
+        documents.next(),
+        documents.next(),
+    ) else {
+        return;
+    };
+    let root_signature = signatures.next().unwrap();
+    let index_signature = signatures.next().unwrap();
+    let entry_signature = signatures.next().unwrap();
+    let rotation_signature = signatures.next().unwrap();
+    let signing = ed25519_dalek::SigningKey::from_bytes(&[1_u8; 32]);
+    let pinned = signing.verifying_key().to_bytes();
 
-    let signing = ed25519_dalek::SigningKey::from_bytes(&[7_u8; 32]);
-    let pinned_bytes = signing.verifying_key().to_bytes();
-
-    if let Ok((trusted, _)) = TrustedRoot::first_use(root, root_signature) {
-        // A repeated root is a rollback, never a crash.
+    if let Ok(trusted) = TrustedRoot::bootstrap(root, root_signature, &[pinned], 0) {
         let _ = trusted.update(root, root_signature);
-
         if let Ok(index) = trusted.verify_index(index, index_signature, 0, None) {
-            let _ = check_listed(&index, "root.json", root);
+            let _ = check_listed(&index, "packages/example/xila/seed/0.1.0.json", entry);
             let _ = index_packages(&index);
         }
-
-        if let (Ok(entry), Ok(key)) = (
-            trusted.verify_entry(entry, entry_signature),
-            trusted.verify_developer_key(developer_key, key_signature),
-        ) {
-            let _ = publisher_key(&entry, &key);
-            if let Ok(namespace) = trusted.verify_namespace(namespace, namespace_signature) {
-                let _ = namespace_publisher_key(&entry, &key, Some(&namespace));
-                let _ = namespace_publisher_key(&entry, &key, None);
-            }
+        if let Ok(entry) = trusted.verify_entry(entry, entry_signature) {
+            let _ = package_key(&entry);
+            let _ = verify_rotation(
+                &entry.name,
+                &entry.package_key,
+                SignedRotation {
+                    bytes: rotation,
+                    signature: rotation_signature,
+                },
+            );
         }
-        let _ = trusted.verify_developer_key(developer_key, key_signature);
-        let _ = trusted.verify_namespace(namespace, namespace_signature);
     }
-
-    let _ = TrustedRoot::bootstrap(root, root_signature, &[pinned_bytes], 0);
+    let _ = TrustedRoot::first_use(root, root_signature);
 });

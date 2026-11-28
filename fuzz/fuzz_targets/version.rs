@@ -2,11 +2,10 @@
 
 use libfuzzer_sys::fuzz_target;
 use xila_package_manager::planner::VersionRequirement;
-use xila_package_manifest as manifest;
 use xila_package_manifest::metadata::is_https_url;
 use xila_package_manifest::{
-    SemanticVersion, XilaVersion, compatible, is_legacy_identifier, namespace_covers,
-    namespace_paths, target_compatible, valid_identifier,
+    SemanticVersion, XilaVersion, compatible, identifier_namespace, target_compatible,
+    valid_identifier, valid_namespace,
 };
 
 // Version and identifier parsing: XilaVersion, SemanticVersion ordering,
@@ -52,10 +51,8 @@ fuzz_target!(|data: &[u8]| {
     }
 
     let _ = valid_identifier(text);
-    let _ = is_legacy_identifier(text);
-    let _ = manifest::identifier_namespace(text);
-    let _ = namespace_covers(text, "example.xila");
-    let _ = namespace_paths(text);
+    let _ = identifier_namespace(text);
+    let _ = valid_namespace(text);
     let _ = target_compatible(text, "wasm32-wasip1");
     let _ = target_compatible("riscv32imc-unknown-none-elf", text);
     let _ = is_https_url(text);

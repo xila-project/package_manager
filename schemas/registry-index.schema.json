@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-index.schema.json",
-  "title": "Xila registry index (experimental v1)",
-  "description": "index.json in the published registry, signed (index.json.sig) by a repository key: a snapshot of every developer key and entry with its SHA-256 and size. Devices keep the highest version seen and refuse an expired index when they have a trustworthy clock. Files must be sorted by path without duplicates (checked by xila-package, not by this schema).",
+  "title": "Xila registry index (experimental v2)",
+  "description": "Signed snapshot of registry entries and package key rotation records. The file list is sorted by path without duplicates.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,7 +24,7 @@
       ]
     },
     "format_version": {
-      "const": 1
+      "const": 2
     },
     "version": {
       "type": "integer",
@@ -51,7 +51,7 @@
           "path": {
             "type": "string",
             "maxLength": 512,
-            "pattern": "^(?:(keys/developers|packages)(/[A-Za-z0-9._+-]+)+|namespaces/[A-Za-z0-9._+-]+)\\.json$",
+            "pattern": "^(packages|rotations)(/[A-Za-z0-9._+-]+)+\\.json$",
             "not": {
               "pattern": "(^|/)\\.\\.?(/|$)"
             }

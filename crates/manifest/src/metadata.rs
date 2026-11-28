@@ -21,6 +21,8 @@ pub struct Metadata {
     pub source: String,
     /// Optional HTTPS project homepage.
     pub homepage: Option<String>,
+    /// Optional author shown in catalogs.
+    pub author: Option<String>,
 }
 
 /// Whether `value` is a bounded `https://` URL without whitespace or controls.
@@ -43,7 +45,10 @@ impl Metadata {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b".+-() ".contains(&b));
         let homepage = self.homepage.as_deref().is_none_or(is_https_url);
-        if summary && license && is_https_url(&self.source) && homepage {
+        let author = self.author.as_deref().is_none_or(|name| {
+            !name.trim().is_empty() && name.len() <= 128 && !name.chars().any(char::is_control)
+        });
+        if summary && license && is_https_url(&self.source) && homepage && author {
             Ok(())
         } else {
             Err(Error::InvalidMetadata)
@@ -61,6 +66,7 @@ mod tests {
             license: "Apache-2.0 OR MIT".into(),
             source: "https://github.com/xila-project/applications".into(),
             homepage: None,
+            author: None,
         }
     }
 

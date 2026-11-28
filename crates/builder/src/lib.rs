@@ -368,23 +368,26 @@ pub enum RegistryOperation<'a> {
     Entry {
         /// Signed .xpk archive.
         archive: &'a str,
-        /// Raw 32-byte public key of the publishing developer.
+        /// Raw 32-byte public key of the package.
         public_key: &'a str,
-        /// Developer key identifier (`keys/developers/<id>.json` in xila-project/registry).
-        publisher: &'a str,
         /// HTTPS download URL of the archive.
         url: &'a str,
         /// New registry entry JSON file.
         output: &'a str,
+        /// Package key generation (default 1).
+        #[arg(long)]
+        generation: Option<&'a str>,
     },
-    /// Check a registry checkout: keys, entry placement, canonical form and
-    /// namespace authorization; with --archives, also every archive.
+    /// Check registry entries and rotation chains. With --archives, also check the archives.
     Check {
-        /// Registry root containing keys/developers and packages.
+        /// Registry root containing packages and rotations.
         root: &'a str,
         /// Directory of downloaded .xpk archives, named after their URLs.
         #[arg(long)]
         archives: Option<&'a str>,
+        /// Approved registry checkout for validating publication changes.
+        #[arg(long)]
+        previous: Option<&'a str>,
     },
     /// Check that a registry entry describes exactly a signed archive.
     Verify {
@@ -392,8 +395,35 @@ pub enum RegistryOperation<'a> {
         entry: &'a str,
         /// Signed .xpk archive.
         archive: &'a str,
-        /// Raw 32-byte public key of the publishing developer.
-        public_key: &'a str,
+    },
+    /// Create a rotation record and sign it with the previous package key.
+    Rotate {
+        /// Package identifier.
+        name: &'a str,
+        /// New package key generation.
+        generation: u32,
+        /// Raw 32-byte private seed of the previous package key.
+        previous_seed: &'a str,
+        /// Raw 32-byte public key of the new package key.
+        new_public_key: &'a str,
+        /// New rotation JSON file. The signature goes next to it.
+        output: &'a str,
+    },
+    /// Verify the chain from a trusted entry to an offered entry.
+    CheckRotation {
+        /// Registry root containing rotations.
+        root: &'a str,
+        /// Trusted entry JSON file.
+        previous: &'a str,
+        /// Offered entry JSON file.
+        offered: &'a str,
+    },
+    /// Check that an ownership claim names the exact namespace for a first entry.
+    CheckOwner {
+        /// First registry entry JSON file.
+        entry: &'a str,
+        /// Namespace ownership claim JSON file.
+        claim: &'a str,
     },
     /// Write a root-signed root.json (and root.json.sig) naming the root and
     /// repository keys. Run offline with the root key; never overwrites.
@@ -412,9 +442,9 @@ pub enum RegistryOperation<'a> {
         output: &'a str,
     },
     /// Check a registry, then write it signed by the repository key into a
-    /// new directory: every key and entry with its .sig, and a signed index.
+    /// new directory with signed entries and index, and the existing signed rotations.
     Sign {
-        /// Registry root containing root.json, keys/developers and packages.
+        /// Registry root containing root.json, packages and rotations.
         registry: &'a str,
         /// Raw 32-byte public key of the root key (as pinned on devices).
         root_public_key: &'a str,
@@ -508,7 +538,7 @@ pub struct KeyCommand<'a> {
 
 #[derive(Debug, Subcommand)]
 pub enum KeyOperation<'a> {
-    /// Generate a new key pair; never overwrites existing files.
+    /// Generate a new Ed25519 key pair for a package or registry role.
     Generate {
         /// New raw 32-byte private seed file (created owner-only).
         seed: &'a str,
@@ -584,7 +614,7 @@ pub enum BundleOperation<'a> {
         /// Raw 32-byte Ed25519 public key for signature verification.
         public_key: &'a str,
     },
-    /// Verify every payload hash and optionally the publisher's signature.
+    /// Verify every payload hash and optionally the package signature.
     Verify {
         /// Previously built bundle directory.
         directory: &'a str,
@@ -615,7 +645,7 @@ pub enum ManifestOperation<'a> {
         directory: &'a str,
         /// Output path for the manifest JSON file.
         manifest: &'a str,
-        /// Package identifier, for example xila.calculator.
+        /// Package identifier, for example dev.xila.calculator.
         name: &'a str,
         /// Package version.
         version: &'a str,
@@ -769,24 +799,54 @@ pub fn execute(command_line: CommandLine<'_>) -> Result<()> {
             RegistryOperation::Entry {
                 archive,
                 public_key,
-                publisher,
                 url,
                 output,
-            } => registry::entry(
-                Path::new(archive),
-                Path::new(public_key),
-                publisher,
-                url,
+                generation,
+            } => (|| {
+                let generation = parse_number(generation, "generation")?.unwrap_or(1);
+                let generation =
+                    u32::try_from(generation).map_err(|_| invalid("invalid key generation"))?;
+                registry::entry(
+                    Path::new(archive),
+                    Path::new(public_key),
+                    generation,
+                    url,
+                    Path::new(output),
+                )
+            })(),
+            RegistryOperation::Verify { entry, archive } => {
+                registry::verify(Path::new(entry), Path::new(archive))
+            }
+            RegistryOperation::Rotate {
+                name,
+                generation,
+                previous_seed,
+                new_public_key,
+                output,
+            } => registry::rotate(
+                name,
+                generation,
+                Path::new(previous_seed),
+                Path::new(new_public_key),
                 Path::new(output),
             ),
-            RegistryOperation::Verify {
-                entry,
-                archive,
-                public_key,
-            } => registry::verify(Path::new(entry), Path::new(archive), Path::new(public_key)),
-            RegistryOperation::Check { root, archives } => {
-                registry::check(Path::new(root), archives.map(Path::new))
+            RegistryOperation::CheckRotation {
+                root,
+                previous,
+                offered,
+            } => registry::check_rotation(Path::new(root), Path::new(previous), Path::new(offered)),
+            RegistryOperation::CheckOwner { entry, claim } => {
+                registry::check_owner(Path::new(entry), Path::new(claim))
             }
+            RegistryOperation::Check {
+                root,
+                archives,
+                previous,
+            } => registry::check(
+                Path::new(root),
+                archives.map(Path::new),
+                previous.map(Path::new),
+            ),
             RegistryOperation::Root {
                 root_seed,
                 root_id,

@@ -1,7 +1,7 @@
 <h1>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/brand/header-dark.svg">
-  <img src=".github/brand/header-light.svg" alt="Xila Package manager — Build, sign and verify application packages." width="1280">
+  <img src=".github/brand/header-light.svg" alt="Xila Package manager - Build, sign and verify application packages." width="1280">
 </picture>
 </h1>
 
@@ -91,6 +91,15 @@ and `bundle attach-signature`. Every resource is covered through the signed
 manifest hashes, not only the Wasm. See
 [complete builder workflow](crates/builder/README.md) and the
 [developer manifest JSON Schema](schemas/developer-manifest.schema.json).
+
+### Registry signing
+
+Generate one Ed25519 key pair per package identifier with
+`xila-package key generate`. The first registry entry pins the public key
+after namespace ownership verification. Use the same key for later releases
+or sign a rotation with the previous key. The installer saves the verified
+key with the package origin and checks continuity before activating an
+upgrade. See the [registry trust model](docs/registry-trust.md).
 
 The unpacked `.app` directory is the **bundle**; `.xpk` is merely its
 deterministic distribution archive. The existing `pack` command is retained

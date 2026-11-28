@@ -1,15 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-namespace.schema.json",
-  "title": "Xila registry namespace (experimental v1)",
-  "description": "namespaces/<namespace>.json in xila-project/registry, signed (.sig) by a repository key. Records the owner of a reverse-DNS namespace and the developer keys allowed to publish in it: a listed key may publish every identifier that starts with the namespace's components (example.xila covers example.xila.weather and example.xila.tools.clock). Namespace files may not overlap, and every listed key must exist in keys/developers. The owner must match the namespace: a domain is the namespace reversed (example.xila is owned by xila.example), and io.github.<account> or io.gitlab.<account> is owned by that account. Registry CI proves the ownership: a domain by a token file under https://<domain>/.well-known/, an account by the account itself.",
+  "title": "Xila namespace ownership claim (experimental version 2)",
+  "description": "Ownership claim checked at first package publication. The registry submission process must verify the domain or account independently.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "format_version",
     "namespace",
-    "owner",
-    "developer_keys"
+    "owner"
   ],
   "properties": {
     "$schema": {
@@ -24,14 +23,13 @@
       ]
     },
     "format_version": {
-      "const": 1,
-      "description": "Experimental namespace file format version 1."
+      "const": 2
     },
     "namespace": {
       "type": "string",
       "maxLength": 94,
       "pattern": "^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?)+$",
-      "description": "Reverse-DNS namespace with at least two lowercase components; also the file name. The legacy xila namespace has no namespace file."
+      "description": "Exact namespace of the package identifier, excluding its final component."
     },
     "owner": {
       "type": "object",
@@ -56,19 +54,6 @@
           "description": "The domain (xila.example for example.xila) or the account (alice for io.github.alice)."
         }
       }
-    },
-    "developer_keys": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 32,
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 64,
-        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-      },
-      "description": "Identifiers of the developer keys (keys/developers/<id>.json) allowed to publish in this namespace."
     }
   },
   "allOf": [

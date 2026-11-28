@@ -72,6 +72,7 @@ let manifest = Manifest {
         license: "MIT".into(),
         source: "https://github.com/example/weather".into(),
         homepage: None,
+        author: Some("Example Weather".into()),
     }),
 };
 let json = encode(&manifest).unwrap();
@@ -87,3 +88,8 @@ and signature over the exact stored bytes. The signature protocol and
 schema compatibility still require review before production use.
 
 See [the format discussion](https://github.com/xila-project/core/issues/402).
+
+Registry entries pin a package signing key and generation. Rotation records
+bind the next generation and both keys to the package identifier. The
+installed origin stores the verified generation for subsequent upgrades.
+See the [registry trust model](../../docs/registry-trust.md).
