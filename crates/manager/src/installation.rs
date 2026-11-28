@@ -30,6 +30,8 @@
 use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
+use crate::trust::{SignedRotation, verify_key_continuity};
+
 use xila_package_manifest::{
     self as manifest, MAX_MANIFEST_BYTES, Operation, Origin, PREVIOUS_PREFIX, REMOVING_PREFIX,
     STAGING_PREFIX, SemanticVersion, TRANSACTION_FORMAT_VERSION, TRANSACTION_SCHEMA_URL,
@@ -117,6 +119,8 @@ pub enum Error<E> {
         installed: Option<String>,
         offered: Option<String>,
     },
+    /// The offered key does not continue the installed package key.
+    PackageKey(crate::trust::Error),
 }
 
 impl<E> From<manifest::Error> for Error<E> {
@@ -147,6 +151,7 @@ impl<E: fmt::Debug> fmt::Display for Error<E> {
                 f,
                 "version {offered} is not newer than the installed {installed}"
             ),
+            Self::PackageKey(error) => write!(f, "package key continuity failed: {error}"),
             Self::OtherRepository { installed, offered } => write!(
                 f,
                 "it was installed from {}, not from {}",
@@ -272,11 +277,14 @@ pub async fn origin<S: Storage>(
 pub fn check_upgrade<E>(
     installed: Option<&Origin>,
     offered: &Origin,
+    rotations: &[SignedRotation<'_>],
 ) -> core::result::Result<(), Error<E>> {
+    offered.validate()?;
     let Some(installed) = installed else {
         // A bundle seeded without an origin may take any verified version.
         return Ok(());
     };
+    installed.validate()?;
     if installed.repository != offered.repository {
         return Err(Error::OtherRepository {
             installed: installed.repository.clone(),
@@ -295,6 +303,17 @@ pub fn check_upgrade<E>(
             installed: installed.version.clone(),
             offered: offered.version.clone(),
         });
+    }
+    if installed.name != offered.name {
+        return Err(Error::Record(manifest::Error::InvalidIdentifier));
+    }
+    if let Some(installed_key) = &installed.package_key {
+        let offered_key = offered
+            .package_key
+            .as_ref()
+            .ok_or(Error::PackageKey(crate::trust::Error::Unauthorized))?;
+        verify_key_continuity(&offered.name, installed_key, offered_key, rotations)
+            .map_err(Error::PackageKey)?;
     }
     Ok(())
 }
@@ -428,13 +447,16 @@ fn transaction(operation: Operation, name: &str) -> Transaction {
 }
 
 /// Make the verified, sealed bundle in `staging` (a name inside the bundles
-/// directory) the installed version of `origin.name`.
+/// directory) the installed version of `origin.name`. The origin must record
+/// the key that verified the staged archive. For an upgrade that changes the
+/// key, pass the signed rotation records since the installed generation.
 pub async fn activate<S: Storage>(
     storage: &mut S,
     layout: &Layout<'_>,
     staging: &str,
     origin: Origin,
     mode: Mode,
+    rotations: &[SignedRotation<'_>],
 ) -> Result<Activated, S::Error> {
     origin.validate()?;
     if !is_temporary_name(staging, STAGING_PREFIX)
@@ -465,7 +487,7 @@ pub async fn activate<S: Storage>(
         }
         (Mode::Upgrade, false) => return Err(Error::NotInstalled),
         (Mode::Upgrade, true) => {
-            check_upgrade(previous_origin.as_ref(), &origin)?;
+            check_upgrade(previous_origin.as_ref(), &origin, rotations)?;
             let mut journal = transaction(Operation::Upgrade, &name);
             journal.previous = Some(format!("{PREVIOUS_PREFIX}{name}"));
             journal.previous_origin = previous_origin.clone();

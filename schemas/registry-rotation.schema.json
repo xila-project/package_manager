@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-rotation.schema.json",
+  "title": "Xila package key rotation (experimental version 1)",
+  "description": "A change of package key signed by the previous package key. The detached signature is stored next to this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "name",
+    "generation",
+    "previous_key",
+    "new_key"
+  ],
+  "properties": {
+    "$schema": {
+      "anyOf": [
+        {
+          "const": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-rotation.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "format_version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 96,
+      "pattern": "^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?){2,}$",
+      "description": "Stable reverse-DNS package identifier with at least three lowercase components."
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 33
+    },
+    "previous_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "description": "Canonical base64 encoding of a raw 32-byte Ed25519 public key."
+    },
+    "new_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "description": "Canonical base64 encoding of a raw 32-byte Ed25519 public key."
+    }
+  }
+}

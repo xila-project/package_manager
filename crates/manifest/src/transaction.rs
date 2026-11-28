@@ -14,7 +14,7 @@ use miniserde::{Deserialize, Serialize};
 use crate::{Error, MAX_MANIFEST_BYTES, Origin, valid_identifier};
 
 pub const TRANSACTION_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-transaction.schema.json";
-pub const TRANSACTION_FORMAT_VERSION: u32 = 1;
+pub const TRANSACTION_FORMAT_VERSION: u32 = 2;
 
 /// Prefix of a verified, sealed bundle waiting to be activated.
 pub const STAGING_PREFIX: &str = ".incoming-";
@@ -153,18 +153,22 @@ pub fn encode_transaction(transaction: &Transaction) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ORIGIN_SCHEMA_URL, REPOSITORY_FORMAT_VERSION};
+    use crate::{ORIGIN_FORMAT_VERSION, ORIGIN_SCHEMA_URL};
     use alloc::format;
 
     fn origin(version: &str) -> Origin {
         Origin {
             schema: Some(ORIGIN_SCHEMA_URL.into()),
-            format_version: REPOSITORY_FORMAT_VERSION,
+            format_version: ORIGIN_FORMAT_VERSION,
             repository: Some("xila".into()),
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: version.into(),
             archive_sha256: "6976f8d118066b7294ac051160505b2c410fa9213cffa6a7c889946cf6fdbfcd"
                 .into(),
+            package_key: Some(crate::PackageKey {
+                generation: 1,
+                public_key: "6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=".into(),
+            }),
         }
     }
 
@@ -173,9 +177,9 @@ mod tests {
             schema: Some(TRANSACTION_SCHEMA_URL.into()),
             format_version: TRANSACTION_FORMAT_VERSION,
             operation: Operation::Upgrade,
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             staging: Some(format!("{STAGING_PREFIX}1")),
-            previous: Some(format!("{PREVIOUS_PREFIX}xila.clock")),
+            previous: Some(format!("{PREVIOUS_PREFIX}dev.xila.clock")),
             origin: Some(origin("0.2.0")),
             previous_origin: Some(origin("0.1.0")),
         }
@@ -210,7 +214,7 @@ mod tests {
             assert_eq!(transaction.validate(), Err(Error::InvalidTransaction));
         }
         let mut transaction = upgrade();
-        transaction.previous = Some("/applications/bundles/xila.clock".into());
+        transaction.previous = Some("/applications/bundles/dev.xila.clock".into());
         assert_eq!(transaction.validate(), Err(Error::InvalidTransaction));
     }
 
@@ -220,12 +224,12 @@ mod tests {
         transaction.operation = Operation::Install;
         assert_eq!(transaction.validate(), Err(Error::InvalidTransaction));
         let mut transaction = upgrade();
-        transaction.origin.as_mut().unwrap().name = "xila.other".into();
+        transaction.origin.as_mut().unwrap().name = "dev.xila.other".into();
         assert_eq!(transaction.validate(), Err(Error::InvalidTransaction));
         let removal = Transaction {
             operation: Operation::Remove,
             staging: None,
-            previous: Some(format!("{REMOVING_PREFIX}xila.clock")),
+            previous: Some(format!("{REMOVING_PREFIX}dev.xila.clock")),
             origin: None,
             ..upgrade()
         };
@@ -237,8 +241,8 @@ mod tests {
     fn recognizes_temporary_entries() {
         assert!(is_temporary_entry(".incoming-1f"));
         assert!(is_temporary_entry(".download-3.xpk"));
-        assert!(is_temporary_entry(".previous-xila.clock"));
-        assert!(!is_temporary_entry("xila.clock"));
+        assert!(is_temporary_entry(".previous-dev.xila.clock"));
+        assert!(!is_temporary_entry("dev.xila.clock"));
         assert!(!is_temporary_entry(".hidden"));
         assert!(!is_temporary_entry(".incoming-"));
     }

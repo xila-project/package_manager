@@ -10,7 +10,7 @@ use std::{
 
 use xila_package_manager::installation::{self, Activated, Error, Layout, Mode, Outcome, Storage};
 use xila_package_manifest::{
-    ORIGIN_SCHEMA_URL, Operation, Origin, REPOSITORY_FORMAT_VERSION, is_temporary_entry,
+    ORIGIN_FORMAT_VERSION, ORIGIN_SCHEMA_URL, Operation, Origin, is_temporary_entry,
 };
 
 const LAYOUT: Layout<'static> = Layout {
@@ -18,10 +18,10 @@ const LAYOUT: Layout<'static> = Layout {
     origins: "/configuration/system/packages/installed",
     journal: "/configuration/system/packages/transaction.json",
 };
-const NAME: &str = "xila.clock";
-const BUNDLE: &str = "/applications/bundles/xila.clock";
+const NAME: &str = "dev.xila.clock";
+const BUNDLE: &str = "/applications/bundles/dev.xila.clock";
 const STAGING: &str = ".incoming-1";
-const DATA: &str = "/users/administrator/.local/xila.clock/settings.json";
+const DATA: &str = "/users/administrator/.local/dev.xila.clock/settings.json";
 
 /// Poll a future that never waits (the memory storage is synchronous).
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -68,7 +68,7 @@ impl Memory {
             "/users",
             "/users/administrator",
             "/users/administrator/.local",
-            "/users/administrator/.local/xila.clock",
+            "/users/administrator/.local/dev.xila.clock",
         ] {
             memory.entries.insert(directory.into(), None);
         }
@@ -237,11 +237,20 @@ impl Storage for Memory {
 fn origin(version: &str, repository: Option<&str>) -> Origin {
     Origin {
         schema: Some(ORIGIN_SCHEMA_URL.into()),
-        format_version: REPOSITORY_FORMAT_VERSION,
+        format_version: ORIGIN_FORMAT_VERSION,
         repository: repository.map(Into::into),
         name: NAME.into(),
         version: version.into(),
         archive_sha256: "a".repeat(64),
+        package_key: repository.map(|_| {
+            xila_package_manifest::PackageKey::new(
+                1,
+                &ed25519_dalek::SigningKey::from_bytes(&[42; 32])
+                    .verifying_key()
+                    .to_bytes(),
+            )
+            .unwrap()
+        }),
     }
 }
 
@@ -256,6 +265,7 @@ fn activate(memory: &mut Memory, version: &str, mode: Mode) -> Result<Activated,
         STAGING,
         origin(version, Some("xila")),
         mode,
+        &[],
     ))
 }
 
@@ -388,6 +398,7 @@ fn rejects_invalid_staging_directories() {
         "elsewhere",
         origin("0.1.0", None),
         Mode::Install,
+        &[],
     ));
     assert_eq!(result, Err(Error::InvalidStaging));
     assert_eq!(
@@ -432,6 +443,7 @@ fn upgrade_requires_a_newer_version_from_the_same_repository() {
         STAGING,
         origin("0.3.0", Some("community")),
         Mode::Upgrade,
+        &[],
     ));
     assert_eq!(
         other,
@@ -446,6 +458,7 @@ fn upgrade_requires_a_newer_version_from_the_same_repository() {
         STAGING,
         origin("0.3.0", None),
         Mode::Upgrade,
+        &[],
     ));
     assert!(matches!(local, Err(Error::OtherRepository { .. })));
     assert_eq!(
@@ -500,12 +513,12 @@ fn recovery_removes_abandoned_temporary_entries_only() {
     let mut memory = installed("0.1.0");
     memory.bundle("/applications/bundles/.incoming-7", "0.9.0");
     memory.file("/applications/bundles/.download-3.xpk", b"partial");
-    memory.bundle("/applications/bundles/.removing-xila.other", "0.1.0");
+    memory.bundle("/applications/bundles/.removing-dev.xila.other", "0.1.0");
     memory.directory("/applications/bundles/.hidden");
     let recovery = block_on(installation::recover(&mut memory, &LAYOUT)).unwrap();
     assert_eq!(
         recovery.removed,
-        [".download-3.xpk", ".incoming-7", ".removing-xila.other"]
+        [".download-3.xpk", ".incoming-7", ".removing-dev.xila.other"]
     );
     assert!(memory.entries.contains_key("/applications/bundles/.hidden"));
     assert_eq!(assert_consistent(&mut memory).as_deref(), Some("0.1.0"));
@@ -609,4 +622,121 @@ fn recovery_reports_the_interrupted_transaction() {
     let recovery = block_on(installation::recover(&mut memory, &LAYOUT)).unwrap();
     assert_eq!(recovery.transaction.unwrap().1, Outcome::RolledBack);
     assert_eq!(assert_consistent(&mut memory).as_deref(), Some("0.1.0"));
+}
+
+#[test]
+fn upgrade_persists_the_key_only_after_a_valid_rotation_chain() {
+    use ed25519_dalek::{Signer, SigningKey};
+    use xila_package_manager::trust::{self, SignedRotation};
+    use xila_package_manifest::{
+        PackageKey, ROTATION_DOMAIN, ROTATION_FORMAT_VERSION, Rotation, encode_public_key,
+        encode_rotation, signed_message,
+    };
+
+    let first = SigningKey::from_bytes(&[42; 32]);
+    let second = SigningKey::from_bytes(&[43; 32]);
+    let third = SigningKey::from_bytes(&[44; 32]);
+    let pin = |generation, key: &SigningKey| {
+        PackageKey::new(generation, &key.verifying_key().to_bytes()).unwrap()
+    };
+    let record = |generation, previous: &SigningKey, new: &SigningKey| {
+        encode_rotation(&Rotation {
+            schema: None,
+            format_version: ROTATION_FORMAT_VERSION,
+            name: NAME.into(),
+            generation,
+            previous_key: encode_public_key(&previous.verifying_key().to_bytes()),
+            new_key: encode_public_key(&new.verifying_key().to_bytes()),
+        })
+        .unwrap()
+    };
+    let sign = |key: &SigningKey, document: &str| {
+        key.sign(&signed_message(ROTATION_DOMAIN, document.as_bytes()).unwrap())
+            .to_bytes()
+    };
+    let second_record = record(2, &first, &second);
+    let third_record = record(3, &second, &third);
+    let second_signature = sign(&first, &second_record);
+    let third_signature = sign(&second, &third_record);
+    let forged_signature = sign(&third, &second_record);
+    let second_rotation = SignedRotation {
+        bytes: second_record.as_bytes(),
+        signature: &second_signature,
+    };
+    let third_rotation = SignedRotation {
+        bytes: third_record.as_bytes(),
+        signature: &third_signature,
+    };
+    let forged_rotation = SignedRotation {
+        bytes: second_record.as_bytes(),
+        signature: &forged_signature,
+    };
+    let mut memory = installed("0.1.0");
+    assert_eq!(
+        installed_origin(&mut memory).unwrap().package_key,
+        Some(pin(1, &first))
+    );
+    memory.staged("0.2.0");
+    activate(&mut memory, "0.2.0", Mode::Upgrade).unwrap();
+
+    let upgrade = |memory: &mut Memory, version, package_key, rotations: &[SignedRotation<'_>]| {
+        let mut origin = origin(version, Some("xila"));
+        origin.package_key = Some(package_key);
+        block_on(installation::activate(
+            memory,
+            &LAYOUT,
+            STAGING,
+            origin,
+            Mode::Upgrade,
+            rotations,
+        ))
+    };
+    memory.staged("0.3.0");
+    assert_eq!(
+        upgrade(&mut memory, "0.3.0", pin(1, &second), &[]),
+        Err(Error::PackageKey(trust::Error::Unauthorized))
+    );
+    assert_eq!(
+        upgrade(&mut memory, "0.3.0", pin(2, &second), &[forged_rotation]),
+        Err(Error::PackageKey(trust::Error::InvalidSignature))
+    );
+    assert_eq!(
+        installed_origin(&mut memory).unwrap().package_key,
+        Some(pin(1, &first))
+    );
+
+    let mut one_rotation = memory.clone();
+    upgrade(
+        &mut one_rotation,
+        "0.3.0",
+        pin(2, &second),
+        &[second_rotation],
+    )
+    .unwrap();
+    assert_eq!(
+        installed_origin(&mut one_rotation).unwrap().package_key,
+        Some(pin(2, &second))
+    );
+
+    assert_eq!(
+        upgrade(&mut memory, "0.3.0", pin(3, &third), &[third_rotation]),
+        Err(Error::PackageKey(trust::Error::Unauthorized))
+    );
+    upgrade(
+        &mut memory,
+        "0.3.0",
+        pin(3, &third),
+        &[second_rotation, third_rotation],
+    )
+    .unwrap();
+    assert_eq!(
+        installed_origin(&mut memory).unwrap().package_key,
+        Some(pin(3, &third))
+    );
+
+    memory.staged("0.4.0");
+    assert_eq!(
+        upgrade(&mut memory, "0.4.0", pin(1, &first), &[]),
+        Err(Error::PackageKey(trust::Error::Unauthorized))
+    );
 }

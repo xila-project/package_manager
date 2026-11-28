@@ -23,14 +23,17 @@ class RegistryEntrySchemaTests(unittest.TestCase):
         library["metadata"] = None
         VALIDATOR.validate(library)
 
-    def test_rejects_unpinned_or_insecure_archives_and_bad_publishers(self):
+    def test_rejects_unpinned_or_insecure_archives_and_invalid_package_keys(self):
         for path, value in [
             (("format_version",), 1),
             (("xila_version",), "65536.0"),
             (("archive", "url"), "http://xila.example/a.xpk"),
             (("archive", "sha256"), "A" * 64),
             (("archive", "size"), 0),
-            (("publisher",), "Xila Project"),
+            (("package_key", "public_key"), "AAAA"),
+            (("package_key", "generation"), 0),
+            (("package_key", "generation"), 34),
+            (("metadata", "author"), " "),
             (("metadata", "license"), "MIT; rm"),
             (("metadata", "source"), "git@github.com:x/y"),
         ]:

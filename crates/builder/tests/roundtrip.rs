@@ -17,7 +17,7 @@ fn command_generates_updates_and_packs() {
                 "generate",
                 source.to_str().unwrap(),
                 manifest.to_str().unwrap(),
-                "xila.calculator",
+                "dev.xila.calculator",
                 "1.0.0",
                 "wasm32-wasip1",
                 "--xila-version",
@@ -90,7 +90,7 @@ fn command_generates_updates_and_packs() {
     assert_eq!(app.entrypoint, "executables/calculator.wasm");
     assert_eq!(app.display_name, "Calculator");
     assert!(app.show_in_launcher);
-    assert_eq!(contents.name, "xila.calculator");
+    assert_eq!(contents.name, "dev.xila.calculator");
     assert_eq!(contents.files[0].path, "executables/calculator.wasm");
     let mutated = temp.path().join("mutated");
     fs::create_dir(&mutated).unwrap();
@@ -191,7 +191,7 @@ fn external_signing_authenticates_manifest_and_payload() {
         "generate",
         source.to_str().unwrap(),
         manifest.to_str().unwrap(),
-        "xila.test",
+        "dev.xila.test",
         "1.0.0",
         "wasm32-wasip1",
         "--xila-version",
@@ -353,7 +353,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
     let cli = env!("CARGO_BIN_EXE_xila-package");
     let path = |name: &str| temp.path().join(name).to_str().unwrap().to_owned();
     let run = |items: &[&str]| Command::new(cli).args(items).status().unwrap().success();
-    let url = "https://github.com/xila-project/applications/releases/download/xila.clock-v0.1.0/xila.clock-0.1.0-wasm32-wasip1.xpk";
+    let url = "https://github.com/xila-project/applications/releases/download/dev.xila.clock-v0.1.0/dev.xila.clock-0.1.0-wasm32-wasip1.xpk";
 
     assert!(run(&[
         "key",
@@ -376,7 +376,7 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         .unwrap();
         fs::write(
             temp.path().join(source).join("xila-package.json"),
-            r#"{"format_version":2,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
+            r#"{"format_version":2,"name":"dev.xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":{"summary":"Shows the time","license":"Apache-2.0","source":"https://github.com/xila-project/applications","homepage":null}}"#,
         )
         .unwrap();
         let bundle = path(&format!("{source}.app"));
@@ -401,20 +401,36 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila",
         url,
         &path("entry.json")
     ]));
     let entry = fs::read_to_string(path("entry.json")).unwrap();
-    assert!(entry.contains(r#""publisher":"xila""#), "{entry}");
+    assert!(
+        entry.contains(r#""package_key":{"generation":1,"public_key":"#),
+        "{entry}"
+    );
     assert!(entry.contains(r#""summary":"Shows the time""#), "{entry}");
     assert!(entry.contains(r#""display_name":"Clock""#), "{entry}");
     assert!(run(&[
         "registry",
         "verify",
         &path("entry.json"),
-        &path("source.xpk"),
-        &path("dev.pub")
+        &path("source.xpk")
+    ]));
+
+    let mut foreign_pin = xila_package_manifest::decode_registry_entry(entry.as_bytes()).unwrap();
+    let foreign_key = fs::read(path("other.pub")).unwrap().try_into().unwrap();
+    foreign_pin.package_key = xila_package_manifest::PackageKey::new(1, &foreign_key).unwrap();
+    fs::write(
+        path("foreign.json"),
+        xila_package_manifest::encode_registry_entry(&foreign_pin).unwrap(),
+    )
+    .unwrap();
+    assert!(!run(&[
+        "registry",
+        "verify",
+        &path("foreign.json"),
+        &path("source.xpk")
     ]));
 
     // A different archive, a different signer, or overwriting must all fail.
@@ -422,22 +438,13 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "registry",
         "verify",
         &path("entry.json"),
-        &path("changed.xpk"),
-        &path("dev.pub")
-    ]));
-    assert!(!run(&[
-        "registry",
-        "verify",
-        &path("entry.json"),
-        &path("source.xpk"),
-        &path("other.pub")
+        &path("changed.xpk")
     ]));
     assert!(!run(&[
         "registry",
         "entry",
         &path("source.xpk"),
         &path("other.pub"),
-        "xila",
         url,
         &path("other.json")
     ]));
@@ -446,7 +453,6 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila",
         url,
         &path("entry.json")
     ]));
@@ -455,27 +461,9 @@ fn registry_entry_is_generated_from_and_checked_against_a_signed_bundle() {
         "entry",
         &path("source.xpk"),
         &path("dev.pub"),
-        "xila",
         "http://insecure",
         &path("insecure.json")
     ]));
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::new();
-    for chunk in bytes.chunks(3) {
-        let value =
-            chunk.iter().fold(0u32, |acc, &b| (acc << 8) | u32::from(b)) << (8 * (3 - chunk.len()));
-        for index in 0..4 {
-            output.push(if index <= chunk.len() {
-                TABLE[((value >> (18 - 6 * index)) & 63) as usize] as char
-            } else {
-                '='
-            });
-        }
-    }
-    output
 }
 
 #[test]
@@ -490,14 +478,14 @@ fn registry_check_validates_keys_placement_and_archives() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
-    let url = "https://xila.example/releases/xila.clock-0.1.0-wasm32-wasip1.xpk";
+    let url = "https://xila.example/releases/dev.xila.clock-0.1.0-wasm32-wasip1.xpk";
 
     assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
     fs::create_dir_all(temp.path().join("src/executables")).unwrap();
     fs::write(temp.path().join("src/executables/clock.wasm"), b"clock").unwrap();
     fs::write(
         temp.path().join("src/xila-package.json"),
-        r#"{"format_version":2,"name":"xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
+        r#"{"format_version":2,"name":"dev.xila.clock","version":"0.1.0","target":"wasm32-wasip1","xila_version":"0.1","capabilities":[],"application":{"entrypoint":"executables/clock.wasm","display_name":"Clock","icon":"","show_in_launcher":true},"metadata":null}"#,
     )
     .unwrap();
     assert!(
@@ -512,28 +500,18 @@ fn registry_check_validates_keys_placement_and_archives() {
         .0
     );
     fs::create_dir(temp.path().join("archives")).unwrap();
-    let archive = path("archives/xila.clock-0.1.0-wasm32-wasip1.xpk");
+    let archive = path("archives/dev.xila.clock-0.1.0-wasm32-wasip1.xpk");
     assert!(run(&["bundle", "archive", &path("Clock.app"), &archive]).0);
 
     let registry = temp.path().join("registry");
-    fs::create_dir_all(registry.join("keys/developers")).unwrap();
-    fs::create_dir_all(registry.join("packages/xila/clock")).unwrap();
-    let key = |namespaces: &str| {
-        format!(
-            r#"{{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"{}","openssh":null,"namespaces":[{namespaces}]}}"#,
-            base64(&fs::read(path("dev.pub")).unwrap())
-        )
-    };
-    let key_file = registry.join("keys/developers/xila.json");
-    fs::write(&key_file, key(r#""xila""#)).unwrap();
-    let entry_file = registry.join("packages/xila/clock/0.1.0.json");
+    fs::create_dir_all(registry.join("packages/dev/xila/clock")).unwrap();
+    let entry_file = registry.join("packages/dev/xila/clock/0.1.0.json");
     assert!(
         run(&[
             "registry",
             "entry",
             &archive,
             &path("dev.pub"),
-            "xila",
             url,
             entry_file.to_str().unwrap()
         ])
@@ -545,43 +523,24 @@ fn registry_check_validates_keys_placement_and_archives() {
     assert!(run(&["registry", "check", root]).0);
     assert!(run(&["registry", "check", root, "--archives", &archives]).0);
 
-    // A key without the legacy grant may not publish xila.<name>.
-    fs::write(
-        &key_file,
-        key(r#""xila""#).replace(r#","namespaces":["xila"]"#, ""),
+    let entry = fs::read_to_string(&entry_file).unwrap();
+    fs::create_dir_all(registry.join("packages/dev/xila/other")).unwrap();
+    fs::rename(
+        &entry_file,
+        registry.join("packages/dev/xila/other/0.1.0.json"),
     )
     .unwrap();
     assert!(
         run(&["registry", "check", root])
             .1
-            .contains("may not publish xila.clock")
+            .contains("not at its own path")
     );
-    // Key files grant no namespace other than the legacy one.
-    fs::write(&key_file, key(r#""community""#)).unwrap();
-    assert!(
-        run(&["registry", "check", root])
-            .1
-            .contains("invalid developer key")
-    );
-    fs::write(&key_file, key(r#""xila""#)).unwrap();
-
-    // Misplaced, non-canonical and unknown-publisher entries.
-    let entry = fs::read_to_string(&entry_file).unwrap();
-    fs::create_dir_all(registry.join("packages/xila/other")).unwrap();
-    fs::rename(&entry_file, registry.join("packages/xila/other/0.1.0.json")).unwrap();
-    assert!(run(&["registry", "check", root]).1.contains("must be at"));
-    fs::remove_dir_all(registry.join("packages/xila/other")).unwrap();
+    fs::remove_dir_all(registry.join("packages/dev/xila/other")).unwrap();
     fs::write(&entry_file, format!("{entry}\n")).unwrap();
     assert!(
         run(&["registry", "check", root])
             .1
             .contains("not canonical")
-    );
-    fs::write(&entry_file, entry.replace("\"xila\"", "\"someone\"")).unwrap();
-    assert!(
-        run(&["registry", "check", root])
-            .1
-            .contains("unknown publisher someone")
     );
     fs::write(&entry_file, &entry).unwrap();
 
@@ -618,11 +577,19 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
     for file in ["root.json", "root.json.sig", "root.pub"] {
         assert!(temp.path().join("registry").join(file).is_file(), "{file}");
     }
-    assert!(temp.path().join("registry/keys/developers").is_dir());
+    assert!(temp.path().join("registry/rotations").is_dir());
     assert!(temp.path().join("registry/packages").is_dir());
     let root = fs::read_to_string(path("registry/root.json")).unwrap();
-    let repository_public = fs::read(path("private/repository.pub")).unwrap();
-    assert!(root.contains(&base64(&repository_public)), "{root}");
+    let repository_public = fs::read(path("private/repository.pub"))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert!(
+        root.contains(&xila_package_manifest::encode_public_key(
+            &repository_public
+        )),
+        "{root}"
+    );
     assert!(root.contains(r#""id":"repository""#), "{root}");
     #[cfg(unix)]
     {
@@ -643,20 +610,6 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
 
     // Add a developer key and one entry for a test package.
     assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
-    fs::write(
-        path("registry/keys/developers/tester.json"),
-        format!(
-            r#"{{"id":"tester","author":"Tester","algorithm":"ed25519","public_key":"{}","openssh":null}}"#,
-            base64(&fs::read(path("dev.pub")).unwrap())
-        ),
-    )
-    .unwrap();
-    fs::create_dir(temp.path().join("registry/namespaces")).unwrap();
-    fs::write(
-        path("registry/namespaces/example.xila.json"),
-        r#"{"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["tester"]}"#,
-    )
-    .unwrap();
     fs::create_dir_all(temp.path().join("source/executables")).unwrap();
     fs::write(temp.path().join("source/executables/clock.wasm"), b"clock").unwrap();
     fs::write(
@@ -682,7 +635,6 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
         "entry",
         &path("Clock.xpk"),
         &path("dev.pub"),
-        "tester",
         "https://xila.example/releases/Clock.xpk",
         &path("registry/packages/example/xila/clock/0.1.0.json"),
     ]);
@@ -706,7 +658,7 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
     ]);
     assert!(success, "{stderr}");
     assert!(
-        stdout.contains("1 developer key(s), 1 namespace(s), 1 entry"),
+        stdout.contains("1 package entries and key rotations"),
         "{stdout}"
     );
 
@@ -857,4 +809,220 @@ fn registry_init_validates_before_creating_and_cleans_up_on_failure() {
     );
     assert!(temp.path().join("relative/root.json").is_file());
     assert!(temp.path().join("relative-keys/root.seed").is_file());
+}
+
+#[test]
+fn registry_publication_checks_ownership_and_key_rotations() {
+    use xila_package_manifest::{
+        PackageKey, RegistryEntry, decode_registry_entry, encode_registry_entry,
+    };
+
+    let temporary = tempdir().unwrap();
+    let path = |name: &str| temporary.path().join(name).to_str().unwrap().to_owned();
+    let run = |arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_xila-package"))
+            .args(arguments)
+            .output()
+            .unwrap()
+    };
+    let succeeds = |arguments: &[&str]| {
+        let output = run(arguments);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let rejects = |arguments: &[&str], message: &str| {
+        let output = run(arguments);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains(message),
+            "{stderr}"
+        );
+    };
+
+    succeeds(&["registry", "init", &path("registry"), &path("private")]);
+    for key in ["first", "second", "third"] {
+        succeeds(&[
+            "key",
+            "generate",
+            &path(&format!("{key}.seed")),
+            &path(&format!("{key}.pub")),
+        ]);
+    }
+
+    let package = "packages/dev/xila/clock";
+    let rotations = "rotations/dev/xila/clock";
+    for directory in [
+        format!("registry/{package}"),
+        format!("previous/{package}"),
+        format!("previous/{rotations}"),
+        format!("registry/{rotations}"),
+    ] {
+        fs::create_dir_all(path(&directory)).unwrap();
+    }
+    let first_path = path(&format!("registry/{package}/0.1.0.json"));
+    let later_path = path(&format!("registry/{package}/0.2.0.json"));
+    let second_path = path(&format!("registry/{package}/0.3.0.json"));
+    let third_path = path(&format!("registry/{package}/0.4.0.json"));
+    let second_rotation = path(&format!("registry/{rotations}/2.json"));
+    let third_rotation = path(&format!("registry/{rotations}/3.json"));
+
+    let mut entry = decode_registry_entry(include_bytes!(
+        "../../../tests/fixtures/registry-entry.json"
+    ))
+    .unwrap();
+    let pin = |generation, key| {
+        let bytes = fs::read(path(&format!("{key}.pub")))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        PackageKey::new(generation, &bytes).unwrap()
+    };
+    let write = |entry: &RegistryEntry, destination: &str| {
+        fs::write(destination, encode_registry_entry(entry).unwrap()).unwrap()
+    };
+    entry.package_key = pin(1, "first");
+    write(&entry, &first_path);
+
+    let claim = path("claim.json");
+    fs::write(&claim, r#"{"format_version":2,"namespace":"dev.xila","owner":{"kind":"domain","name":"xila.dev"}}"#).unwrap();
+    succeeds(&["registry", "check-owner", &first_path, &claim]);
+    fs::write(&claim, r#"{"format_version":2,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"}}"#).unwrap();
+    rejects(
+        &["registry", "check-owner", &first_path, &claim],
+        "exact namespace",
+    );
+    succeeds(&["registry", "check", &path("registry")]);
+
+    entry.version = "0.2.0".into();
+    entry.package_key = pin(1, "second");
+    write(&entry, &later_path);
+    rejects(
+        &["registry", "check", &path("registry")],
+        "does not use the pinned package key",
+    );
+    entry.package_key = pin(1, "first");
+    write(&entry, &later_path);
+    succeeds(&["registry", "check", &path("registry")]);
+    for version in ["0.1.0", "0.2.0"] {
+        fs::copy(
+            path(&format!("registry/{package}/{version}.json")),
+            path(&format!("previous/{package}/{version}.json")),
+        )
+        .unwrap();
+    }
+
+    succeeds(&[
+        "registry",
+        "rotate",
+        "dev.xila.clock",
+        "2",
+        &path("first.seed"),
+        &path("second.pub"),
+        &second_rotation,
+    ]);
+    entry.version = "0.3.0".into();
+    write(&entry, &second_path);
+    rejects(
+        &[
+            "registry",
+            "check",
+            &path("registry"),
+            "--previous",
+            &path("previous"),
+        ],
+        "current package key",
+    );
+
+    entry.package_key = pin(2, "second");
+    write(&entry, &second_path);
+    succeeds(&[
+        "registry",
+        "check-rotation",
+        &path("registry"),
+        &first_path,
+        &second_path,
+    ]);
+    let signature_path = format!("{second_rotation}.sig");
+    let signature = fs::read(&signature_path).unwrap();
+    fs::write(&signature_path, [0; 64]).unwrap();
+    rejects(
+        &["registry", "check", &path("registry")],
+        "signature not made by a trusted key",
+    );
+    fs::write(&signature_path, signature).unwrap();
+    fs::copy(
+        &second_rotation,
+        path(&format!("previous/{rotations}/2.json")),
+    )
+    .unwrap();
+    fs::copy(
+        &signature_path,
+        path(&format!("previous/{rotations}/2.json.sig")),
+    )
+    .unwrap();
+
+    succeeds(&[
+        "registry",
+        "rotate",
+        "dev.xila.clock",
+        "3",
+        &path("second.seed"),
+        &path("third.pub"),
+        &third_rotation,
+    ]);
+    entry.version = "0.4.0".into();
+    entry.package_key = pin(3, "third");
+    write(&entry, &third_path);
+    succeeds(&[
+        "registry",
+        "check-rotation",
+        &path("registry"),
+        &first_path,
+        &third_path,
+    ]);
+    fs::copy(
+        &second_path,
+        path(&format!("previous/{package}/0.3.0.json")),
+    )
+    .unwrap();
+    succeeds(&[
+        "registry",
+        "check",
+        &path("registry"),
+        "--previous",
+        &path("previous"),
+    ]);
+
+    succeeds(&[
+        "registry",
+        "sign",
+        &path("registry"),
+        &path("registry/root.pub"),
+        &path("private/repository.seed"),
+        &path("site"),
+    ]);
+    succeeds(&[
+        "registry",
+        "verify-signed",
+        &path("site"),
+        &path("registry/root.pub"),
+    ]);
+    let published_signature = path(&format!("site/{rotations}/2.json.sig"));
+    assert_eq!(
+        fs::read(&published_signature).unwrap(),
+        fs::read(&signature_path).unwrap()
+    );
+    fs::write(&published_signature, [0; 64]).unwrap();
+    rejects(
+        &[
+            "registry",
+            "verify-signed",
+            &path("site"),
+            &path("registry/root.pub"),
+        ],
+        "signature not made by a trusted key",
+    );
 }

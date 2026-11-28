@@ -39,8 +39,8 @@ network.
 | `file_inventory` | `FileHasher`, `Inventory`, `verify_bytes`, digest decoding |
 | `signature_key` | `PublicKey::from_slice` / `verify_slice`, `decode_sha256` |
 | `registry_entry` | `decode_registry_entry` round-trip |
-| `developer_key` | `decode_developer_key`, base64 key decoding, authorization |
-| `namespace` | `decode_namespace` round-trip, `Namespace::authorizes` |
+| `rotation` | `decode_rotation` round-trip and public key decoding |
+| `namespace` | `decode_namespace` round-trip, `Namespace::matches_identifier` |
 | `trust_root` | `decode_root` round-trip, named-key decoding |
 | `trust_index` | `decode_index` round-trip, `Index::file`, index listings |
 | `repository_origin` | `decode_repository` / `decode_origin` round-trips |

@@ -52,8 +52,8 @@ name = "registry_entry"
 path = "fuzz_targets/registry_entry.rs"
 
 [[bin]]
-name = "developer_key"
-path = "fuzz_targets/developer_key.rs"
+name = "rotation"
+path = "fuzz_targets/rotation.rs"
 
 [[bin]]
 name = "namespace"

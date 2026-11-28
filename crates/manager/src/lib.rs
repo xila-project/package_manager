@@ -6,7 +6,7 @@
 //! and repository operations.
 //!
 //! - [`trust`]: verify registry metadata from a pinned root key down to the
-//!   developer key that may publish a package (`no_std + alloc`).
+//!   package key pinned in the signed entry (`no_std + alloc`).
 //! - [`installation`]: crash-consistent install, upgrade, removal and
 //!   recovery of verified bundles over a small [`installation::Storage`]
 //!   trait, with a transaction journal (`no_std + alloc`).

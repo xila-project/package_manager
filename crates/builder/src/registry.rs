@@ -9,28 +9,31 @@ use std::{
     collections::BTreeMap,
     fmt::Write as _,
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 use xila_package_manager::trust::{self, TrustedRoot};
 use xila_package_manifest::{
-    Archive, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH,
-    INDEX_SCHEMA_URL, Index, IndexFile, Manifest, NAMESPACE_DOMAIN, NAMESPACES_DIRECTORY, NamedKey,
-    Namespace, PackageKind, ROOT_DOMAIN, ROOT_PATH, ROOT_SCHEMA_URL, RegistryEntry, Root,
-    SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_developer_key, decode_namespace,
-    decode_registry_entry, encode_index, encode_registry_entry, encode_root, is_legacy_identifier,
-    namespace_covers, namespace_path, signed_message,
+    Archive, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_FORMAT_VERSION, INDEX_PATH, INDEX_SCHEMA_URL, Index,
+    IndexFile, MAX_MANIFEST_BYTES, MAX_ROTATION_BYTES, NamedKey, PackageKey, ROOT_DOMAIN,
+    ROOT_PATH, ROOT_SCHEMA_URL, ROTATION_DOMAIN, ROTATION_FORMAT_VERSION, ROTATION_SCHEMA_URL,
+    RegistryEntry, Root, Rotation, SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_namespace,
+    decode_registry_entry, decode_rotation, encode_index, encode_public_key, encode_registry_entry,
+    encode_root, encode_rotation, signed_message,
 };
 use xila_package_verification::PublicKey;
 
 use crate::{Result, invalid, manifest_error, package_verification_error};
 
-fn read_public_key(path: &Path) -> Result<PublicKey> {
-    let raw: [u8; 32] = fs::read(path)?
-        .try_into()
-        .map_err(|_| invalid("public key must be exactly 32 raw bytes"))?;
-    Ok(PublicKey::from_bytes(&raw).map_err(|_| invalid("invalid Ed25519 public key"))?)
+fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(failure(path, "file exceeds its size limit"));
+    }
+    Ok(bytes)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -42,56 +45,73 @@ fn sha256_hex(bytes: &[u8]) -> String {
         })
 }
 
-fn verified_manifest(archive: &[u8], public_key: &Path) -> Result<Manifest> {
-    Ok(
-        xila_package_reader::verify_signed(archive, &read_public_key(public_key)?)
-            .map_err(package_verification_error)?,
-    )
-}
-
-/// Write the registry entry for `archive`, published by `publisher` at `url`.
+/// Write the registry entry for `archive`, at `url`, and pin its signing key.
 pub fn entry(
     archive: &Path,
     public_key: &Path,
-    publisher: &str,
+    generation: u32,
     url: &str,
     output: &Path,
 ) -> Result<()> {
     let bytes = fs::read(archive)?;
-    let manifest = verified_manifest(&bytes, public_key)?;
+    let raw_key = read_raw_public_key(public_key)?;
+    let key = PublicKey::from_bytes(&raw_key).map_err(|_| invalid("invalid Ed25519 public key"))?;
+    let manifest =
+        xila_package_reader::verify_signed(&bytes, &key).map_err(package_verification_error)?;
     let location = Archive {
         url: url.into(),
         sha256: sha256_hex(&bytes),
         size: bytes.len() as u64,
     };
-    let entry = RegistryEntry::from_manifest(&manifest, publisher, location)
-        .map_err(|_| invalid("invalid registry entry (publisher, URL or metadata)"))?;
+    let pin = PackageKey::new(generation, &raw_key)
+        .map_err(|error| manifest_error("invalid package key", error))?;
+    let entry = RegistryEntry::from_manifest(&manifest, pin, location)
+        .map_err(|error| manifest_error("invalid registry entry", error))?;
     let text = encode_registry_entry(&entry).map_err(|_| invalid("invalid registry entry"))?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)?;
-    file.write_all(text.as_bytes())?;
-    Ok(())
+    write_new_file(output, text.as_bytes())
 }
 
-fn verify_archive(entry: &RegistryEntry, bytes: &[u8], key: &PublicKey) -> Result<()> {
+fn verify_archive(entry: &RegistryEntry, bytes: &[u8]) -> Result<()> {
+    let key = trust::package_key(entry).map_err(|error| invalid(&error.to_string()))?;
     if bytes.len() as u64 != entry.archive.size || sha256_hex(bytes) != entry.archive.sha256 {
         return Err(invalid("archive size or SHA-256 differs from the registry entry").into());
     }
     let manifest =
-        xila_package_reader::verify_signed(bytes, key).map_err(package_verification_error)?;
+        xila_package_reader::verify_signed(bytes, &key).map_err(package_verification_error)?;
     entry
         .check_manifest(&manifest)
         .map_err(|_| invalid("registry entry differs from the signed package manifest"))?;
     Ok(())
 }
 
-/// Check that `entry` describes exactly `archive`, signed by `public_key`.
-pub fn verify(entry: &Path, archive: &Path, public_key: &Path) -> Result<()> {
-    let entry = decode_registry_entry(&fs::read(entry)?)
-        .map_err(|error| manifest_error("invalid registry entry", error))?;
-    verify_archive(&entry, &fs::read(archive)?, &read_public_key(public_key)?)
+fn read_entry(path: &Path) -> Result<RegistryEntry> {
+    let bytes = read_bounded(path, MAX_MANIFEST_BYTES)?;
+    decode_registry_entry(&bytes).map_err(|error| {
+        failure(
+            path,
+            &manifest_error("invalid registry entry", error).to_string(),
+        )
+    })
+}
+
+/// Check that `entry` describes exactly `archive`, signed by the pinned key.
+pub fn verify(entry: &Path, archive: &Path) -> Result<()> {
+    verify_archive(&read_entry(entry)?, &fs::read(archive)?)
+}
+
+/// Check the shape of the ownership claim for a first publication. Registry
+/// submission must verify control of the domain or account independently.
+pub fn check_owner(entry: &Path, claim: &Path) -> Result<()> {
+    let entry = read_entry(entry)?;
+    let claim = decode_namespace(&read_bounded(claim, MAX_MANIFEST_BYTES)?)
+        .map_err(|error| manifest_error("invalid namespace ownership claim", error))?;
+    if entry.package_key.generation != 1 || !claim.matches_identifier(&entry.name) {
+        return Err(invalid(
+            "first publication needs generation 1 and a claim for its exact namespace",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn sorted_entries(directory: &Path) -> Result<Vec<PathBuf>> {
@@ -102,17 +122,27 @@ fn sorted_entries(directory: &Path) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn collect_json(directory: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_json(directory: &Path, output: &mut Vec<PathBuf>, rotations: bool) -> Result<()> {
     for path in sorted_entries(directory)? {
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.is_dir() {
-            collect_json(&path, output)?;
+            collect_json(&path, output, rotations)?;
         } else if metadata.is_file()
             && path
                 .extension()
                 .is_some_and(|extension| extension == "json")
         {
             output.push(path);
+        } else if rotations
+            && metadata.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".json.sig"))
+        {
+            if !fs::symlink_metadata(path.with_extension(""))?.is_file() {
+                return Err(failure(&path, "rotation signature has no record"));
+            }
         } else if !(metadata.is_file() && path.file_name().is_some_and(|name| name == ".gitkeep")) {
             return Err(invalid(&format!("unexpected registry file: {}", path.display())).into());
         }
@@ -124,158 +154,177 @@ fn failure(path: &Path, message: &str) -> Box<dyn std::error::Error> {
     invalid(&format!("{}: {message}", path.display())).into()
 }
 
-/// The namespace file covering `name`, if any (they never overlap).
-fn covering<'a>(namespaces: &'a BTreeMap<String, Namespace>, name: &str) -> Option<&'a Namespace> {
-    namespaces
-        .values()
-        .find(|namespace| namespace_covers(&namespace.namespace, name))
+struct RotationFile {
+    record: Rotation,
+    bytes: Vec<u8>,
+    signature: Vec<u8>,
 }
 
-/// Check that a new namespace file overlaps no other one and lists only known
-/// developer keys.
-fn check_namespace(
-    namespace: &Namespace,
-    namespaces: &BTreeMap<String, Namespace>,
-    keys: &BTreeMap<String, DeveloperKey>,
-) -> std::result::Result<(), String> {
-    if let Some(other) = namespaces.keys().find(|other| {
-        xila_package_manifest::namespace::namespaces_overlap(other, &namespace.namespace)
-    }) {
-        return Err(format!(
-            "namespace {} overlaps namespace {other}; one owner per identifier",
-            namespace.namespace
-        ));
+impl RotationFile {
+    fn read(path: &Path) -> Result<Self> {
+        let bytes = read_bounded(path, MAX_ROTATION_BYTES)?;
+        let signature = read_bounded(&signature_path(path), 64)?;
+        let record = decode_rotation(&bytes).map_err(|error| {
+            failure(path, &manifest_error("invalid rotation", error).to_string())
+        })?;
+        if encode_rotation(&record).as_deref() != Ok(core::str::from_utf8(&bytes)?) {
+            return Err(failure(
+                path,
+                "rotation is not canonical; regenerate it with `xila-package registry rotate`",
+            ));
+        }
+        Ok(Self {
+            record,
+            bytes,
+            signature,
+        })
     }
-    if let Some(unknown) = namespace
-        .developer_keys
-        .iter()
-        .find(|key| !keys.contains_key(*key))
-    {
-        return Err(format!("unknown developer key {unknown}"));
+
+    fn signed(&self) -> trust::SignedRotation<'_> {
+        trust::SignedRotation {
+            bytes: &self.bytes,
+            signature: &self.signature,
+        }
+    }
+}
+
+#[derive(Default)]
+struct PackageHistory {
+    entries: Vec<RegistryEntry>,
+    rotations: BTreeMap<u32, RotationFile>,
+}
+
+#[derive(Default)]
+struct RegistryHistory {
+    packages: BTreeMap<String, PackageHistory>,
+}
+
+impl RegistryHistory {
+    fn add_entry(&mut self, relative: &str, entry: RegistryEntry) -> Result<()> {
+        if relative != trust::entry_path(&entry.name, &entry.version) {
+            return Err(invalid(&format!("{relative}: entry is not at its own path")).into());
+        }
+        self.packages
+            .entry(entry.name.clone())
+            .or_default()
+            .entries
+            .push(entry);
+        Ok(())
+    }
+
+    fn add_rotation(&mut self, relative: &str, rotation: RotationFile) -> Result<()> {
+        let record = &rotation.record;
+        if relative != trust::rotation_path(&record.name, record.generation) {
+            return Err(invalid(&format!("{relative}: rotation is not at its own path")).into());
+        }
+        self.packages
+            .entry(record.name.clone())
+            .or_default()
+            .rotations
+            .insert(record.generation, rotation);
+        Ok(())
+    }
+
+    fn verify(&self) -> Result<()> {
+        let mut key_owners = BTreeMap::new();
+        for (name, history) in &self.packages {
+            let fail = |message: &str| invalid(&format!("{name}: {message}"));
+            let first = history
+                .entries
+                .iter()
+                .find(|entry| entry.package_key.generation == 1)
+                .ok_or_else(|| fail("package history must include a generation 1 entry"))?;
+            trust::package_key(first).map_err(|error| fail(&error.to_string()))?;
+            let mut keys = vec![first.package_key.clone()];
+            for rotation in history.rotations.values() {
+                let next = trust::verify_rotation(
+                    name,
+                    keys.last().expect("initial key"),
+                    rotation.signed(),
+                )
+                .map_err(|error| {
+                    fail(&format!(
+                        "rotation to generation {}: {error}",
+                        rotation.record.generation
+                    ))
+                })?;
+                keys.push(next);
+            }
+            for key in &keys {
+                if let Some(owner) = key_owners.insert(key.public_key.clone(), name) {
+                    return Err(fail(&format!("package key already used by {owner}")).into());
+                }
+            }
+            for entry in &history.entries {
+                if keys.get(entry.package_key.generation as usize - 1) != Some(&entry.package_key) {
+                    return Err(fail(&format!(
+                        "version {} does not use the pinned package key",
+                        entry.version
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn relative_path<'a>(root: &Path, path: &'a Path) -> Result<&'a str> {
+    path.strip_prefix(root)
+        .ok()
+        .and_then(Path::to_str)
+        .ok_or_else(|| failure(path, "invalid registry path"))
+}
+
+fn registry_files(root: &Path, directory: &str) -> Result<Vec<PathBuf>> {
+    let rotations = directory == "rotations";
+    let directory = root.join(directory);
+    match fs::symlink_metadata(&directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err(failure(&directory, "expected a directory")),
+        Err(error) => return Err(error.into()),
+    }
+    let mut files = Vec::new();
+    collect_json(&directory, &mut files, rotations)?;
+    Ok(files)
+}
+
+fn reject_legacy_layout(root: &Path) -> Result<()> {
+    for name in ["keys", "namespaces"] {
+        let path = root.join(name);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => return Err(failure(&path, "obsolete registry directory")),
+            Err(error) => return Err(error.into()),
+        }
     }
     Ok(())
 }
 
-/// Why `key` may not publish `entry`, if it may not.
-fn authorization_failure(
-    entry: &RegistryEntry,
-    key: &DeveloperKey,
-    namespace: Option<&Namespace>,
-) -> Option<String> {
-    if !key.authorizes(&entry.name, namespace) {
-        return Some(match namespace {
-            None if !is_legacy_identifier(&entry.name) => format!(
-                "no namespace file covers {}; add {NAMESPACES_DIRECTORY}/<namespace>.json",
-                entry.name
-            ),
-            None => format!(
-                "publisher {} may not publish {} (legacy namespace not granted)",
-                key.id, entry.name
-            ),
-            Some(namespace) => format!(
-                "publisher {} may not publish {}: not listed in namespace {}",
-                key.id, entry.name, namespace.namespace
-            ),
-        });
+/// Check the canonical entries and the package key history in a registry
+/// checkout. With `archives`, verify the archives named by the entry URLs.
+pub fn check(root: &Path, archives: Option<&Path>, previous: Option<&Path>) -> Result<()> {
+    if !fs::metadata(root)?.is_dir() {
+        return Err(failure(root, "expected a registry directory"));
     }
-    let kind = PackageKind::of_target(&entry.target);
-    (!key.authorizes_kind(kind)).then(|| {
-        format!(
-            "publisher {} is not authorized for {} packages (target {})",
-            key.id,
-            kind.name(),
-            entry.target
-        )
-    })
-}
-
-/// Check a registry checkout: developer keys (`keys/developers/<id>.json`),
-/// namespace files (`namespaces/<namespace>.json`, optional) and entries
-/// (`packages/<name, dots as />/<version>.json`). Namespace files may not
-/// overlap and may list only known keys. Each entry must be canonical, sit at
-/// its own path, and name a publisher listed in the namespace file covering
-/// its identifier (or, for a legacy `xila.<name>` identifier, a key granted
-/// the legacy namespace) and authorized for its kind. With `archives`, a
-/// directory of the downloaded `.xpk` files (named after their URLs), each
-/// archive is also verified against its entry.
-pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
-    let mut keys: BTreeMap<String, DeveloperKey> = BTreeMap::new();
-    for path in sorted_entries(&root.join("keys/developers"))? {
-        let key = decode_developer_key(&fs::read(&path)?)
-            .map_err(|_| failure(&path, "invalid developer key"))?;
-        if path.file_name().and_then(|name| name.to_str()) != Some(&format!("{}.json", key.id)) {
-            return Err(failure(&path, "file name must be <id>.json"));
-        }
-        keys.insert(key.id.clone(), key);
-    }
-
-    let mut namespaces: BTreeMap<String, Namespace> = BTreeMap::new();
-    let directory = root.join(NAMESPACES_DIRECTORY);
-    if fs::symlink_metadata(&directory).is_ok() {
-        for path in sorted_entries(&directory)? {
-            if !fs::symlink_metadata(&path)?.is_file() {
-                return Err(failure(
-                    &path,
-                    "namespace files may not be in subdirectories",
-                ));
-            }
-            let namespace = decode_namespace(&fs::read(&path)?).map_err(|error| {
-                failure(
-                    &path,
-                    &manifest_error("invalid namespace file", error).to_string(),
-                )
-            })?;
-            if path.file_name().and_then(|name| name.to_str())
-                != Some(&format!("{}.json", namespace.namespace))
-            {
-                return Err(failure(&path, "file name must be <namespace>.json"));
-            }
-            check_namespace(&namespace, &namespaces, &keys)
-                .map_err(|message| failure(&path, &message))?;
-            namespaces.insert(namespace.namespace.clone(), namespace);
-        }
-    }
-
-    let packages = root.join("packages");
-    let mut files = Vec::new();
-    collect_json(&packages, &mut files)?;
-    for path in &files {
-        let bytes = fs::read(path)?;
+    reject_legacy_layout(root)?;
+    let mut history = RegistryHistory::default();
+    let entries = registry_files(root, "packages")?;
+    let rotations = registry_files(root, "rotations")?;
+    for path in &entries {
+        let bytes = read_bounded(path, MAX_MANIFEST_BYTES)?;
         let entry = decode_registry_entry(&bytes).map_err(|error| {
             failure(
                 path,
                 &manifest_error("invalid registry entry", error).to_string(),
             )
         })?;
-        let canonical =
-            encode_registry_entry(&entry).map_err(|_| failure(path, "invalid registry entry"))?;
-        if canonical.as_bytes() != bytes {
+        if encode_registry_entry(&entry).as_deref() != Ok(core::str::from_utf8(&bytes)?) {
             return Err(failure(
                 path,
                 "entry is not canonical; regenerate it with `xila-package registry entry`",
             ));
-        }
-        let mut expected = packages.clone();
-        expected.extend(entry.name.split('.'));
-        expected.push(format!("{}.json", entry.version));
-        if *path != expected {
-            return Err(failure(
-                path,
-                &format!(
-                    "entry for {} {} must be at {}",
-                    entry.name,
-                    entry.version,
-                    expected.display()
-                ),
-            ));
-        }
-        let key = keys
-            .get(&entry.publisher)
-            .ok_or_else(|| failure(path, &format!("unknown publisher {}", entry.publisher)))?;
-        if let Some(message) =
-            authorization_failure(&entry, key, covering(&namespaces, &entry.name))
-        {
-            return Err(failure(path, &message));
         }
         if let Some(archives) = archives {
             let name = entry
@@ -285,56 +334,135 @@ pub fn check(root: &Path, archives: Option<&Path>) -> Result<()> {
                 .next()
                 .filter(|name| !name.is_empty() && *name != "." && *name != "..")
                 .ok_or_else(|| failure(path, "archive URL has no file name"))?;
-            let raw = key
-                .public_key_bytes()
-                .map_err(|_| failure(path, "invalid publisher key"))?;
-            let public =
-                PublicKey::from_bytes(&raw).map_err(|_| failure(path, "invalid publisher key"))?;
-            verify_archive(&entry, &fs::read(archives.join(name))?, &public)
+            verify_archive(&entry, &fs::read(archives.join(name))?)
                 .map_err(|error| failure(path, &error.to_string()))?;
         }
+        history.add_entry(relative_path(root, path)?, entry)?;
+    }
+    for path in &rotations {
+        history.add_rotation(relative_path(root, path)?, RotationFile::read(path)?)?;
+    }
+    history.verify()?;
+    if let Some(previous) = previous {
+        check_publication(root, previous, &history)?;
     }
     println!(
-        "Checked {} developer key(s), {} namespace(s) and {} registry entr{}{}",
-        keys.len(),
-        namespaces.len(),
-        files.len(),
-        if files.len() == 1 { "y" } else { "ies" },
-        if archives.is_some() {
-            ", including their archives and signatures"
-        } else {
-            ""
-        }
+        "Checked {} package entries and {} key rotations",
+        entries.len(),
+        rotations.len()
     );
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Repository signatures: root.json, index.json and detached .sig files.
-// ---------------------------------------------------------------------------
-
-fn read_raw_public_key(path: &Path) -> Result<[u8; 32]> {
-    Ok(fs::read(path)?
-        .try_into()
-        .map_err(|_| invalid("public key must be exactly 32 raw bytes"))?)
-}
-
-fn base64(bytes: &[u8; 32]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut output = String::with_capacity(44);
-    for chunk in bytes.chunks(3) {
-        let mut block = [0u8; 3];
-        block[..chunk.len()].copy_from_slice(chunk);
-        let value = u32::from_be_bytes([0, block[0], block[1], block[2]]);
-        for index in 0..4 {
-            output.push(if index <= chunk.len() {
-                TABLE[(value >> (18 - 6 * index) & 63) as usize] as char
-            } else {
-                '='
-            });
+/// Compare with an approved checkout. A new version must use the current key,
+/// and existing entries and rotations must remain byte-for-byte identical.
+fn check_publication(root: &Path, previous: &Path, history: &RegistryHistory) -> Result<()> {
+    if !fs::metadata(previous)?.is_dir() {
+        return Err(failure(
+            previous,
+            "expected the approved registry directory",
+        ));
+    }
+    reject_legacy_layout(previous)?;
+    for (directory, limit) in [
+        ("packages", MAX_MANIFEST_BYTES),
+        ("rotations", MAX_ROTATION_BYTES),
+    ] {
+        for old in registry_files(previous, directory)? {
+            let relative = relative_path(previous, &old)?;
+            let new = root.join(relative);
+            let changed = |limit, old: &Path, new: &Path| -> Result<bool> {
+                Ok(read_bounded(old, limit)? != read_bounded(new, limit)?)
+            };
+            if changed(limit, &old, &new)?
+                || (directory == "rotations"
+                    && changed(64, &signature_path(&old), &signature_path(&new))?)
+            {
+                return Err(failure(&new, "published registry file changed"));
+            }
         }
     }
-    output
+    for (name, package) in &history.packages {
+        let latest_generation = package
+            .rotations
+            .last_key_value()
+            .map_or(1, |(generation, _)| *generation);
+        for entry in &package.entries {
+            let relative = trust::entry_path(name, &entry.version);
+            if entry.package_key.generation != latest_generation
+                && !previous.join(&relative).try_exists()?
+            {
+                return Err(failure(
+                    &root.join(relative),
+                    "new version must use the current package key",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write a rotation signed by the previous key and its detached signature.
+pub fn rotate(
+    name: &str,
+    generation: u32,
+    previous_seed: &Path,
+    new_public_key: &Path,
+    output: &Path,
+) -> Result<()> {
+    let previous = crate::key::read_seed(previous_seed)?;
+    let raw_key = read_raw_public_key(new_public_key)?;
+    PublicKey::from_bytes(&raw_key).map_err(|_| invalid("invalid new Ed25519 public key"))?;
+    let rotation = Rotation {
+        schema: Some(ROTATION_SCHEMA_URL.into()),
+        format_version: ROTATION_FORMAT_VERSION,
+        name: name.into(),
+        generation,
+        previous_key: encode_public_key(&previous.verifying_key().to_bytes()),
+        new_key: encode_public_key(&raw_key),
+    };
+    let text =
+        encode_rotation(&rotation).map_err(|error| manifest_error("invalid rotation", error))?;
+    let signature = sign_bytes(&previous, ROTATION_DOMAIN, text.as_bytes())?;
+    write_new_file(output, text.as_bytes())?;
+    if let Err(error) = write_new_file(&signature_path(output), &signature) {
+        fs::remove_file(output)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Check the chain of rotations between two entries of the same package.
+/// The previous entry must be the trusted pin.
+pub fn check_rotation(root: &Path, previous: &Path, offered: &Path) -> Result<()> {
+    let previous = read_entry(previous)?;
+    let offered = read_entry(offered)?;
+    if previous.name != offered.name {
+        return Err(invalid("entries refer to different package identifiers").into());
+    }
+    let start = previous.package_key.generation + 1;
+    let end = offered.package_key.generation;
+    let records = (start..=end)
+        .map(|generation| {
+            let path = trust::rotation_path(&previous.name, generation);
+            RotationFile::read(&root.join(path))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let rotations: Vec<_> = records.iter().map(RotationFile::signed).collect();
+    trust::verify_key_continuity(
+        &previous.name,
+        &previous.package_key,
+        &offered.package_key,
+        &rotations,
+    )
+    .map_err(|error| invalid(&error.to_string()))?;
+    Ok(())
+}
+
+fn read_raw_public_key(path: &Path) -> Result<[u8; 32]> {
+    Ok(read_bounded(path, 32)?
+        .try_into()
+        .map_err(|_| invalid("public key must be exactly 32 raw bytes"))?)
 }
 
 fn signature_path(path: &Path) -> PathBuf {
@@ -348,7 +476,11 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<()> {
         .write(true)
         .create_new(true)
         .open(path)?;
-    file.write_all(bytes)?;
+    if let Err(error) = file.write_all(bytes) {
+        drop(file);
+        fs::remove_file(path)?;
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -382,11 +514,11 @@ pub fn root(
         version,
         root_keys: vec![NamedKey {
             id: root_id.into(),
-            public_key: base64(&root_key.verifying_key().to_bytes()),
+            public_key: encode_public_key(&root_key.verifying_key().to_bytes()),
         }],
         repository_keys: vec![NamedKey {
             id: repository_id.into(),
-            public_key: base64(&read_raw_public_key(repository_public_key)?),
+            public_key: encode_public_key(&read_raw_public_key(repository_public_key)?),
         }],
     };
     let text = encode_root(&root).map_err(|_| {
@@ -403,9 +535,8 @@ pub fn root(
 }
 
 /// Sign a checked registry into the new directory `output`: copy `root.json`
-/// (already root-signed), sign every developer key, namespace file and
-/// entry, and write a
-/// signed `index.json` valid for `expires_in_days`. `version` defaults to the
+/// (already root-signed), sign every entry, copy the signed rotations and
+/// write a signed `index.json` valid for `expires_in_days`. `version` defaults to the
 /// current Unix time, so successive publications increase.
 pub fn sign(
     registry: &Path,
@@ -415,7 +546,7 @@ pub fn sign(
     version: Option<u64>,
     expires_in_days: u64,
 ) -> Result<()> {
-    check(registry, None)?;
+    check(registry, None, None)?;
     write_signed_site(
         registry,
         root_public_key,
@@ -426,8 +557,7 @@ pub fn sign(
     )
 }
 
-/// The part of [`sign`] after `check`. It ends with `verify_signed`, which
-/// enforces the same publisher rules, so tests can reach that check alone.
+/// Publish an already checked registry and verify the resulting files.
 fn write_signed_site(
     registry: &Path,
     root_public_key: &Path,
@@ -437,12 +567,12 @@ fn write_signed_site(
     expires_in_days: u64,
 ) -> Result<()> {
     let pinned = [read_raw_public_key(root_public_key)?];
-    let root_bytes = fs::read(registry.join(ROOT_PATH))?;
-    let root_signature = fs::read(signature_path(&registry.join(ROOT_PATH)))?;
+    let root_bytes = read_bounded(&registry.join(ROOT_PATH), MAX_MANIFEST_BYTES)?;
+    let root_signature = read_bounded(&signature_path(&registry.join(ROOT_PATH)), 64)?;
     let trusted = TrustedRoot::bootstrap(&root_bytes, &root_signature, &pinned, 0)
         .map_err(|error| invalid(&format!("{ROOT_PATH}: {error}")))?;
     let key = crate::key::read_seed(repository_seed)?;
-    let public = base64(&key.verifying_key().to_bytes());
+    let public = encode_public_key(&key.verifying_key().to_bytes());
     if !trusted
         .root()
         .repository_keys
@@ -466,46 +596,33 @@ fn write_signed_site(
     write_new_file(&output.join(ROOT_PATH), &root_bytes)?;
     write_new_file(&signature_path(&output.join(ROOT_PATH)), &root_signature)?;
 
-    let mut listed = Vec::new();
-    for (directory, domain) in [
-        ("keys/developers", DEVELOPER_KEY_DOMAIN),
-        (NAMESPACES_DIRECTORY, NAMESPACE_DOMAIN),
-        ("packages", ENTRY_DOMAIN),
-    ] {
-        let directory = registry.join(directory);
-        if domain == NAMESPACE_DOMAIN && fs::symlink_metadata(&directory).is_err() {
-            continue;
+    let mut files = Vec::new();
+    for (directory, is_rotation) in [("packages", false), ("rotations", true)] {
+        for path in registry_files(registry, directory)? {
+            let relative = relative_path(registry, &path)?;
+            let (bytes, signature) = if is_rotation {
+                let rotation = RotationFile::read(&path)?;
+                (rotation.bytes, rotation.signature)
+            } else {
+                let bytes = read_bounded(&path, MAX_MANIFEST_BYTES)?;
+                let signature = sign_bytes(&key, ENTRY_DOMAIN, &bytes)?.to_vec();
+                (bytes, signature)
+            };
+            let destination = output.join(relative);
+            fs::create_dir_all(destination.parent().expect("listed files have a parent"))?;
+            write_new_file(&destination, &bytes)?;
+            write_new_file(&signature_path(&destination), &signature)?;
+            files.push(IndexFile {
+                path: relative.into(),
+                sha256: sha256_hex(&bytes),
+                size: bytes.len() as u64,
+            });
         }
-        let mut paths = Vec::new();
-        collect_json(&directory, &mut paths)?;
-        listed.extend(paths.into_iter().map(|path| (path, domain)));
-    }
-    let mut files = Vec::with_capacity(listed.len());
-    for (path, domain) in &listed {
-        let relative = path
-            .strip_prefix(registry)
-            .ok()
-            .and_then(Path::to_str)
-            .ok_or_else(|| invalid("registry path is not UTF-8"))?
-            .to_owned();
-        let bytes = fs::read(path)?;
-        let destination = output.join(&relative);
-        fs::create_dir_all(destination.parent().expect("listed files have a parent"))?;
-        write_new_file(&destination, &bytes)?;
-        write_new_file(
-            &signature_path(&destination),
-            &sign_bytes(&key, domain, &bytes)?,
-        )?;
-        files.push(IndexFile {
-            path: relative,
-            sha256: sha256_hex(&bytes),
-            size: bytes.len() as u64,
-        });
     }
     files.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
     let index = encode_index(&Index {
         schema: Some(INDEX_SCHEMA_URL.into()),
-        format_version: TRUST_FORMAT_VERSION,
+        format_version: INDEX_FORMAT_VERSION,
         version,
         expires,
         files,
@@ -595,7 +712,7 @@ fn create_directories(
 
 /// Create a new registry in `directory` with the layout of
 /// `xila-project/registry`: a root-signed `root.json`, `root.pub`, an empty
-/// `keys/developers` and an empty `packages`. A root key and a repository key
+/// `rotations` and an empty `packages`. A root key and a repository key
 /// are generated; their private seeds go to `key_directory`, which must be
 /// outside the registry (it is never published). Every validation runs before
 /// anything is created, so a rejected run leaves no trace and can simply be
@@ -714,7 +831,7 @@ fn create_registry(
     crate::key::generate(&repository_seed, &repository_public)?;
     created.push(repository_seed.clone());
     created.push(repository_public.clone());
-    create_directories(&registry.join("keys/developers"), None, created)?;
+    create_directories(&registry.join("rotations"), None, created)?;
     create_directories(&registry.join("packages"), None, created)?;
     // root() writes these two files itself; record them beforehand so a
     // partial write is removed again (create_new guarantees this run made
@@ -757,32 +874,34 @@ pub fn fingerprint(public_key: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Verify a signed registry the way a device would, from the pinned
-/// `root_public_key`: root, index (and its expiry at `now`, if given), every
-/// listed file and its own signature, namespace files (no overlap, known
-/// keys), and each entry's publisher against the namespace file covering it.
-/// Rejects unlisted files.
+/// Verify a signed registry from the pinned root, including each entry and
+/// rotation, package key continuity and the exact index file listing.
 pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> Result<()> {
+    reject_legacy_layout(site)?;
     let pinned = [read_raw_public_key(root_public_key)?];
-    let read_signed = |relative: &str| -> Result<(Vec<u8>, Vec<u8>)> {
+    let read_signed = |relative: &str, limit| -> Result<(Vec<u8>, Vec<u8>)> {
         let path = site.join(relative);
-        let read = |path: &Path| {
-            fs::read(path).map_err(|error| invalid(&format!("{}: {error}", path.display())))
-        };
-        Ok((read(&path)?, read(&signature_path(&path))?))
+        Ok((
+            read_bounded(&path, limit)?,
+            read_bounded(&signature_path(&path), 64)?,
+        ))
     };
-    let (root, root_signature) = read_signed(ROOT_PATH)?;
+    let (root, root_signature) = read_signed(ROOT_PATH, MAX_MANIFEST_BYTES)?;
     let trusted = TrustedRoot::bootstrap(&root, &root_signature, &pinned, 0)
         .map_err(|error| invalid(&format!("{ROOT_PATH}: {error}")))?;
-    let (index, index_signature) = read_signed(INDEX_PATH)?;
+    let (index, index_signature) = read_signed(INDEX_PATH, xila_package_manifest::MAX_INDEX_BYTES)?;
     let index = trusted
         .verify_index(&index, &index_signature, 0, now)
         .map_err(|error| invalid(&format!("{INDEX_PATH}: {error}")))?;
 
     let mut present = Vec::new();
-    for directory in ["keys", NAMESPACES_DIRECTORY, "packages"] {
-        if site.join(directory).is_dir() {
-            collect_site(site, &site.join(directory), &mut present)?;
+    for directory in ["packages", "rotations"] {
+        let path = site.join(directory);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(metadata) if metadata.is_dir() => collect_site(site, &path, &mut present)?,
+            Ok(_) => return Err(failure(&path, "expected a directory")),
+            Err(error) => return Err(error.into()),
         }
     }
     for path in &present {
@@ -792,77 +911,28 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
         }
     }
 
-    let mut developers: BTreeMap<String, DeveloperKey> = BTreeMap::new();
-    for file in index
-        .files
-        .iter()
-        .filter(|file| file.path.starts_with("keys/"))
-    {
-        let (bytes, signature) = read_signed(&file.path)?;
+    let mut history = RegistryHistory::default();
+    for file in &index.files {
         let fail = |error: trust::Error| invalid(&format!("{}: {error}", file.path));
-        trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
-        let key = trusted
-            .verify_developer_key(&bytes, &signature)
-            .map_err(fail)?;
-        if file.path != trust::developer_key_path(&key.id) {
-            return Err(invalid(&format!("{}: file name must be <id>.json", file.path)).into());
+        if file.path.starts_with("rotations/") {
+            let rotation = RotationFile::read(&site.join(&file.path))?;
+            trust::check_listed(&index, &file.path, &rotation.bytes).map_err(fail)?;
+            history.add_rotation(&file.path, rotation)?;
+        } else {
+            let (bytes, signature) = read_signed(&file.path, MAX_MANIFEST_BYTES)?;
+            trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
+            let entry = trusted.verify_entry(&bytes, &signature).map_err(fail)?;
+            history.add_entry(&file.path, entry)?;
         }
-        developers.insert(key.id.clone(), key);
     }
-    let mut namespaces: BTreeMap<String, Namespace> = BTreeMap::new();
-    for file in index
-        .files
-        .iter()
-        .filter(|file| file.path.starts_with("namespaces/"))
-    {
-        let (bytes, signature) = read_signed(&file.path)?;
-        let fail = |error: trust::Error| invalid(&format!("{}: {error}", file.path));
-        trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
-        let namespace = trusted.verify_namespace(&bytes, &signature).map_err(fail)?;
-        if file.path != namespace_path(&namespace.namespace) {
-            return Err(invalid(&format!(
-                "{}: file name must be <namespace>.json",
-                file.path
-            ))
-            .into());
-        }
-        check_namespace(&namespace, &namespaces, &developers)
-            .map_err(|message| invalid(&format!("{}: {message}", file.path)))?;
-        namespaces.insert(namespace.namespace.clone(), namespace);
-    }
-    let mut entries = 0usize;
-    for file in index
-        .files
-        .iter()
-        .filter(|file| file.path.starts_with("packages/"))
-    {
-        let (bytes, signature) = read_signed(&file.path)?;
-        let fail = |error: trust::Error| invalid(&format!("{}: {error}", file.path));
-        trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
-        let entry = trusted.verify_entry(&bytes, &signature).map_err(fail)?;
-        if file.path != trust::entry_path(&entry.name, &entry.version) {
-            return Err(invalid(&format!("{}: entry is not at its own path", file.path)).into());
-        }
-        let developer = developers.get(&entry.publisher).ok_or_else(|| {
-            invalid(&format!(
-                "{}: unknown publisher {}",
-                file.path, entry.publisher
-            ))
-        })?;
-        trust::namespace_publisher_key(&entry, developer, covering(&namespaces, &entry.name))
-            .map_err(fail)?;
-        entries += 1;
-    }
+    history.verify()?;
     println!(
-        "Verified signed registry: root v{} (root key {}), index v{} (expires {}), {} developer key(s), {} namespace(s), {} entr{}",
+        "Verified signed registry: root v{} (root key {}), index v{} (expires {}), {} package entries and key rotations",
         trusted.version(),
         trust::fingerprint(&pinned[0]),
         index.version,
         index.expires,
-        developers.len(),
-        namespaces.len(),
-        entries,
-        if entries == 1 { "y" } else { "ies" }
+        index.files.len(),
     );
     Ok(())
 }
@@ -872,24 +942,24 @@ mod tests {
     use super::*;
 
     fn write_registry(directory: &Path) {
-        fs::create_dir_all(directory.join("keys/developers")).unwrap();
-        fs::create_dir_all(directory.join("packages/xila/clock")).unwrap();
-        fs::write(
-            directory.join("keys/developers/xila.json"),
-            r#"{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#,
-        )
-        .unwrap();
+        fs::create_dir_all(directory.join("packages/dev/xila/clock")).unwrap();
         let entry = RegistryEntry {
             schema: Some(xila_package_manifest::REGISTRY_ENTRY_SCHEMA_URL.into()),
-            format_version: xila_package_manifest::FORMAT_VERSION,
-            name: "xila.clock".into(),
+            format_version: xila_package_manifest::REGISTRY_FORMAT_VERSION,
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: xila_package_manifest::XilaVersion::new(0, 1),
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,
-            publisher: "xila".into(),
+            package_key: PackageKey::new(
+                1,
+                &ed25519_dalek::SigningKey::from_bytes(&[42; 32])
+                    .verifying_key()
+                    .to_bytes(),
+            )
+            .unwrap(),
             archive: Archive {
                 url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),
@@ -897,7 +967,7 @@ mod tests {
             },
         };
         fs::write(
-            directory.join("packages/xila/clock/0.1.0.json"),
+            directory.join("packages/dev/xila/clock/0.1.0.json"),
             encode_registry_entry(&entry).unwrap(),
         )
         .unwrap();
@@ -963,14 +1033,17 @@ mod tests {
             30,
         )
         .unwrap();
-        assert!(site.join("packages/xila/clock/0.1.0.json.sig").is_file());
-        assert!(site.join("keys/developers/xila.json.sig").is_file());
+        assert!(
+            site.join("packages/dev/xila/clock/0.1.0.json.sig")
+                .is_file()
+        );
+        assert!(!site.join("keys").exists());
         verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
         assert!(verify_signed(&site, &keys.root_public, Some(1_000 + 30 * 86_400)).is_err());
         // The repository key is not the root of trust.
         assert!(verify_signed(&site, &keys.repository_public, None).is_err());
 
-        let entry = site.join("packages/xila/clock/0.1.0.json");
+        let entry = site.join("packages/dev/xila/clock/0.1.0.json");
         let original = fs::read(&entry).unwrap();
         fs::write(
             &entry,
@@ -981,9 +1054,9 @@ mod tests {
         .unwrap();
         assert!(verify_signed(&site, &keys.root_public, None).is_err());
         fs::write(&entry, &original).unwrap();
-        fs::write(site.join("packages/xila/clock/0.2.0.json"), &original).unwrap();
+        fs::write(site.join("packages/dev/xila/clock/0.2.0.json"), &original).unwrap();
         assert!(verify_signed(&site, &keys.root_public, None).is_err());
-        fs::remove_file(site.join("packages/xila/clock/0.2.0.json")).unwrap();
+        fs::remove_file(site.join("packages/dev/xila/clock/0.2.0.json")).unwrap();
         verify_signed(&site, &keys.root_public, None).unwrap();
     }
 
@@ -1033,337 +1106,6 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn native_entries_need_a_developer_key_authorized_for_native() {
-        let keys = new_keys();
-        let temp = tempfile::tempdir().unwrap();
-        let registry = temp.path().join("registry");
-        write_registry(&registry);
-        let entry_path = registry.join("packages/xila/clock/0.1.0.json");
-        let entry = decode_registry_entry(fs::read(&entry_path).unwrap().as_slice()).unwrap();
-        let native = RegistryEntry {
-            target: "thumbv7em-none-eabi".into(),
-            ..entry
-        };
-        fs::write(&entry_path, encode_registry_entry(&native).unwrap()).unwrap();
-
-        // Without `kinds` a key may publish Wasm only.
-        let error = check(&registry, None).unwrap_err().to_string();
-        assert!(
-            error.contains("not authorized for native packages"),
-            "{error}"
-        );
-
-        let key_path = registry.join("keys/developers/xila.json");
-        let key = fs::read_to_string(&key_path).unwrap();
-        fs::write(
-            &key_path,
-            key.replace(
-                r#""namespaces":["xila"]"#,
-                r#""namespaces":["xila"],"kinds":["wasm"]"#,
-            ),
-        )
-        .unwrap();
-        assert!(check(&registry, None).is_err());
-
-        fs::write(
-            &key_path,
-            key.replace(
-                r#""namespaces":["xila"]"#,
-                r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
-            ),
-        )
-        .unwrap();
-        check(&registry, None).unwrap();
-
-        // Signed metadata is verified with the same rule: a key without the
-        // native grant cannot be used to sign or verify a native entry.
-        fs::write(&key_path, &key).unwrap();
-        root(
-            &keys.root_seed,
-            "root-test",
-            &keys.repository_public,
-            "repository-test",
-            1,
-            &registry.join(ROOT_PATH),
-        )
-        .unwrap();
-        let denied = temp.path().join("denied");
-        let error = sign(
-            &registry,
-            &keys.root_public,
-            &keys.repository_seed,
-            &denied,
-            Some(1_000),
-            30,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains("not authorized for native packages"),
-            "{error}"
-        );
-        let unchecked = temp.path().join("unchecked");
-        let error = write_signed_site(
-            &registry,
-            &keys.root_public,
-            &keys.repository_seed,
-            &unchecked,
-            Some(1_000),
-            30,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("may not publish this package"), "{error}");
-        fs::write(
-            &key_path,
-            key.replace(
-                r#""namespaces":["xila"]"#,
-                r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
-            ),
-        )
-        .unwrap();
-        let site = temp.path().join("site");
-        sign(
-            &registry,
-            &keys.root_public,
-            &keys.repository_seed,
-            &site,
-            Some(1_000),
-            30,
-        )
-        .unwrap();
-        verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
-    }
-
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila"]}"#;
-
-    /// A registry with one reverse-DNS entry, `example.xila.weather`, covered
-    /// by `namespaces/example.xila.json`.
-    fn write_namespaced_registry(directory: &Path) {
-        write_registry(directory);
-        let legacy = directory.join("packages/xila/clock/0.1.0.json");
-        let entry = decode_registry_entry(&fs::read(&legacy).unwrap()).unwrap();
-        let weather = RegistryEntry {
-            name: "example.xila.weather".into(),
-            ..entry
-        };
-        fs::create_dir_all(directory.join("packages/example/xila/weather")).unwrap();
-        fs::write(
-            directory.join("packages/example/xila/weather/0.1.0.json"),
-            encode_registry_entry(&weather).unwrap(),
-        )
-        .unwrap();
-        fs::create_dir_all(directory.join("namespaces")).unwrap();
-        fs::write(directory.join("namespaces/example.xila.json"), NAMESPACE).unwrap();
-    }
-
-    fn check_error(registry: &Path) -> String {
-        check(registry, None).unwrap_err().to_string()
-    }
-
-    #[test]
-    fn namespace_files_authorize_reverse_domain_entries() {
-        let temp = tempfile::tempdir().unwrap();
-        let registry = temp.path().join("registry");
-        write_namespaced_registry(&registry);
-        check(&registry, None).unwrap();
-        let namespace = registry.join("namespaces/example.xila.json");
-
-        // Denied: no namespace file covers the entry.
-        fs::remove_file(&namespace).unwrap();
-        let error = check_error(&registry);
-        assert!(
-            error.contains("no namespace file covers example.xila.weather"),
-            "{error}"
-        );
-
-        // Denied: the namespace file does not list the publisher.
-        let alice = registry.join("keys/developers/alice.json");
-        fs::write(
-            &alice,
-            r#"{"id":"alice","author":"Alice","algorithm":"ed25519","public_key":"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=","openssh":null}"#,
-        )
-        .unwrap();
-        fs::write(&namespace, NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#)).unwrap();
-        let error = check_error(&registry);
-        assert!(
-            error.contains("not listed in namespace example.xila"),
-            "{error}"
-        );
-
-        // Denied: a namespace file listing an unknown key.
-        fs::write(
-            &namespace,
-            NAMESPACE.replace(r#"["xila"]"#, r#"["mallory"]"#),
-        )
-        .unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("unknown developer key mallory"), "{error}");
-
-        // Denied: a file name that is not its namespace, and an owner that
-        // does not match the namespace.
-        fs::remove_file(&namespace).unwrap();
-        fs::write(registry.join("namespaces/example.other.json"), NAMESPACE).unwrap();
-        let error = check_error(&registry);
-        assert!(
-            error.contains("file name must be <namespace>.json"),
-            "{error}"
-        );
-        fs::remove_file(registry.join("namespaces/example.other.json")).unwrap();
-        fs::write(
-            &namespace,
-            NAMESPACE.replace("xila.example", "other.example"),
-        )
-        .unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("invalid namespace file"), "{error}");
-
-        // Denied: overlapping namespace files.
-        fs::write(&namespace, NAMESPACE).unwrap();
-        fs::write(
-            registry.join("namespaces/example.xila.tools.json"),
-            NAMESPACE
-                .replace(r#""example.xila""#, r#""example.xila.tools""#)
-                .replace("xila.example", "tools.xila.example"),
-        )
-        .unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("overlaps namespace example.xila"), "{error}");
-        fs::remove_file(registry.join("namespaces/example.xila.tools.json")).unwrap();
-
-        // Denied: a namespace file in a subdirectory.
-        fs::create_dir_all(registry.join("namespaces/example")).unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("may not be in subdirectories"), "{error}");
-        fs::remove_dir(registry.join("namespaces/example")).unwrap();
-        check(&registry, None).unwrap();
-
-        // The legacy grant never covers reverse-DNS identifiers: with the
-        // namespace file removed, the xila key's ["xila"] is not enough.
-        fs::remove_file(&namespace).unwrap();
-        assert!(check(&registry, None).is_err());
-    }
-
-    #[test]
-    fn legacy_entries_need_the_legacy_grant() {
-        let temp = tempfile::tempdir().unwrap();
-        let registry = temp.path().join("registry");
-        write_registry(&registry);
-        let key_path = registry.join("keys/developers/xila.json");
-        let key = fs::read_to_string(&key_path).unwrap();
-        fs::write(&key_path, key.replace(r#","namespaces":["xila"]"#, "")).unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("legacy namespace not granted"), "{error}");
-        // A namespace file cannot grant the legacy namespace.
-        fs::create_dir_all(registry.join("namespaces")).unwrap();
-        fs::write(
-            registry.join("namespaces/xila.json"),
-            NAMESPACE.replace(r#""example.xila""#, r#""xila""#),
-        )
-        .unwrap();
-        let error = check_error(&registry);
-        assert!(error.contains("invalid namespace file"), "{error}");
-    }
-
-    #[test]
-    fn signs_and_verifies_namespace_files() {
-        let keys = new_keys();
-        let temp = tempfile::tempdir().unwrap();
-        let registry = temp.path().join("registry");
-        write_namespaced_registry(&registry);
-        root(
-            &keys.root_seed,
-            "root-test",
-            &keys.repository_public,
-            "repository-test",
-            1,
-            &registry.join(ROOT_PATH),
-        )
-        .unwrap();
-        let site = temp.path().join("site");
-        sign(
-            &registry,
-            &keys.root_public,
-            &keys.repository_seed,
-            &site,
-            Some(1_000),
-            30,
-        )
-        .unwrap();
-        assert!(site.join("namespaces/example.xila.json.sig").is_file());
-        let index = fs::read_to_string(site.join(INDEX_PATH)).unwrap();
-        assert!(
-            index.contains(r#""path":"namespaces/example.xila.json""#),
-            "{index}"
-        );
-        verify_signed(&site, &keys.root_public, Some(1_000)).unwrap();
-
-        // Denied: a namespace file altered after signing (index hash and
-        // signature both break).
-        let namespace = site.join("namespaces/example.xila.json");
-        let original = fs::read(&namespace).unwrap();
-        fs::write(&namespace, NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#)).unwrap();
-        assert!(verify_signed(&site, &keys.root_public, None).is_err());
-        fs::write(&namespace, &original).unwrap();
-
-        // Denied: an entry signature replayed as the namespace signature.
-        let signature = signature_path(&namespace);
-        let original_signature = fs::read(&signature).unwrap();
-        fs::write(
-            &signature,
-            sign_bytes(
-                &crate::key::read_seed(&keys.repository_seed).unwrap(),
-                ENTRY_DOMAIN,
-                &original,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let error = verify_signed(&site, &keys.root_public, None)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            error.contains("signature not made by a trusted key"),
-            "{error}"
-        );
-        fs::write(&signature, &original_signature).unwrap();
-
-        // Denied: an unlisted namespace file.
-        fs::write(site.join("namespaces/example.other.json"), NAMESPACE).unwrap();
-        let error = verify_signed(&site, &keys.root_public, None)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("not listed"), "{error}");
-        fs::remove_file(site.join("namespaces/example.other.json")).unwrap();
-        verify_signed(&site, &keys.root_public, None).unwrap();
-
-        // Signed metadata follows the same rule as `check`: a namespace file
-        // that does not list the publisher fails verification even when
-        // signed (here bypassing `check`).
-        fs::write(
-            registry.join("keys/developers/alice.json"),
-            r#"{"id":"alice","author":"Alice","algorithm":"ed25519","public_key":"11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=","openssh":null}"#,
-        )
-        .unwrap();
-        fs::write(
-            registry.join("namespaces/example.xila.json"),
-            NAMESPACE.replace(r#"["xila"]"#, r#"["alice"]"#),
-        )
-        .unwrap();
-        let error = write_signed_site(
-            &registry,
-            &keys.root_public,
-            &keys.repository_seed,
-            &temp.path().join("unchecked"),
-            Some(1_000),
-            30,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("may not publish this package"), "{error}");
     }
 
     #[test]

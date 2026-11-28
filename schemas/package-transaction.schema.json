@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-transaction.schema.json",
-  "title": "Xila installation transaction journal (experimental v1)",
+  "title": "Xila installation transaction journal (experimental v2)",
   "description": "The package operation in flight on a device, so recovery can finish or undo it after an interruption. Directory names are single entries of the bundles directory.",
   "type": "object",
   "additionalProperties": false,
@@ -27,7 +27,7 @@
       ]
     },
     "format_version": {
-      "const": 1
+      "const": 2
     },
     "operation": {
       "enum": [
@@ -38,8 +38,9 @@
     },
     "name": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 128
+      "maxLength": 96,
+      "pattern": "^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?){2,}$",
+      "description": "Stable reverse-DNS package identifier with at least three lowercase components."
     },
     "staging": {
       "description": "Verified, sealed staging directory (install and upgrade).",

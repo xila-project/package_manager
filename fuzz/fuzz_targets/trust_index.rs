@@ -25,7 +25,7 @@ fuzz_target!(|data: &[u8]| {
         }
         assert!(index.file("root.json").is_none());
         let _ = index_packages(&index);
-        let _ = index_versions(&index, "xila.clock", true);
-        let _ = index_versions(&index, "xila.clock", false);
+        let _ = index_versions(&index, "dev.xila.clock", true);
+        let _ = index_versions(&index, "dev.xila.clock", false);
     }
 });

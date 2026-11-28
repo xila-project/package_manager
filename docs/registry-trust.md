@@ -1,144 +1,123 @@
 # Registry trust model
 
-How a device decides that registry metadata is authentic and current. Package
-archives keep their own developer signature; this document covers what sits
-above it. Registry entries use experimental format version 2. The root and
-index use format version 1.
+Each package has its own Ed25519 signing key. The repository key authenticates
+a registry entry that pins the package key for one identifier and version.
+The package key authenticates the manifest. The manifest authenticates each
+file by SHA-256.
 
-## Keys
+## Keys and files
 
-| Key | Kept | Signs | Trusted because |
-|---|---|---|---|
-| Root | offline | `root.json` | pinned on the device (first version), then listed in the previous `root.json` |
-| Repository | registry publication CI | `index.json`, every entry, every developer key file, every namespace file | listed in the trusted `root.json` |
-| Developer | the publisher | each `.xpk` manifest and its file inventory | its key file is signed by a repository key, the namespace file covering the package lists it (see [Identifiers and namespaces](#identifiers-and-namespaces)), and its `kinds` cover the package |
+| Key | Signs | Source of trust |
+|---|---|---|
+| Root | `root.json` | Pinned on the device or listed in the previous trusted root |
+| Repository | `index.json` and registry entries | Listed in the trusted root |
+| Package | Package manifests and rotations to the next generation | Pinned in a signed registry entry on first installation, then recorded in the installed origin |
 
-A key may not be both a root key and a repository key, so the online key can
-never sign a new root. Up to 4 keys per role.
+Use separate keys for these roles. Each package identifier uses distinct keys,
+including its retired keys.
 
-## Files
+Paths are relative to the registry root. Replace the dots in an identifier
+with directory separators. For example, the entry for
+`dev.xila.clock` version `1.0.0` is `packages/dev/xila/clock/1.0.0.json`.
 
-Published at the registry root (`registry.xila.dev`):
+| File | Format version | Signature domain |
+|---|---|---|
+| `root.json` | 1 | `XILA-REGISTRY-ROOT-V1\0` |
+| `index.json` | 2 | `XILA-REGISTRY-INDEX-V2\0` |
+| `packages/<identifier>/<version>.json` | 3 | `XILA-REGISTRY-ENTRY-V3\0` |
+| `rotations/<identifier>/<generation>.json` | 1 | `XILA-PACKAGE-KEY-ROTATION-V1\0` |
 
-```text
-root.json            + root.json.sig            root key
-index.json           + index.json.sig           repository key
-keys/developers/<id>.json            + .sig     repository key
-namespaces/<namespace>.json          + .sig     repository key
-packages/<labels…>/<version>.json    + .sig     repository key
-```
+Each detached `.sig` contains a raw 64-byte Ed25519 signature over the domain
+above, followed by the JSON length as a little-endian 32-bit integer, followed
+by the exact JSON bytes. The index lists each entry and rotation by path,
+SHA-256 and size, sorted by path. A rotation's detached signature comes from
+the previous package key and is copied to the published site.
 
-Every `.sig` is a raw 64-byte Ed25519 signature (strict verification) over
+The [entry schema](../schemas/registry-entry.schema.json) defines
+`package_key` as a generation and a canonical base64 encoding of the raw
+32-byte Ed25519 public key. The entry also pins the archive URL, SHA-256 and
+size. The [rotation schema](../schemas/registry-rotation.schema.json) defines
+the identifier, next generation, previous key and new key. The first key is
+generation 1. Generations increase by one, up to 33. Each rotation document can
+contain up to 1024 bytes.
 
-```text
-DOMAIN || u32_le(len(file)) || exact file bytes
-```
+## First publication
 
-with a distinct domain per document kind, so a signature for one kind never
-verifies as another:
+An identifier uses at least three lowercase components, such as
+`dev.xila.clock` or `io.github.alice.weather`. The namespace is every
+component except the last. Components contain lowercase ASCII letters, digits,
+hyphens and underscores. Each component starts and ends with a letter or a
+digit and has at most 63 bytes. The complete identifier has at most 96 bytes.
 
-| File | Domain |
-|---|---|
-| `root.json` | `XILA-REGISTRY-ROOT-V1\0` |
-| `index.json` | `XILA-REGISTRY-INDEX-V1\0` |
-| entry | `XILA-REGISTRY-ENTRY-V1\0` |
-| developer key | `XILA-REGISTRY-DEVELOPER-KEY-V1\0` |
-| namespace file | `XILA-REGISTRY-NAMESPACE-V1\0` |
+The first entry pins generation 1 after registry submission checks ownership of
+the exact namespace. The [claim schema](../schemas/registry-namespace.schema.json)
+accepts these owner kinds.
 
-Schemas: [registry-root](../schemas/registry-root.schema.json),
-[registry-index](../schemas/registry-index.schema.json),
-[registry-entry](../schemas/registry-entry.schema.json),
-[developer-key](../schemas/developer-key.schema.json),
-[registry-namespace](../schemas/registry-namespace.schema.json).
+- A `domain` owner proves control through a token at
+  `https://<domain>/.well-known/`. The namespace is the reversed domain,
+  with no underscores.
+- A `github` or `gitlab` owner proves control of the account named by
+  `io.github.<account>` or `io.gitlab.<account>`.
 
-- **`root.json`**: `version` (strictly increasing), `root_keys` (allowed to sign
-  the next version) and `repository_keys`.
-- **`index.json`**: `version` (signing time in Unix seconds, so it increases
-  between publications), `expires` (Unix seconds) and every developer key and
-  entry with its `path`, `sha256` and `size`, sorted by path.
-- **`namespaces/<namespace>.json`** (format version 1): the `namespace`, its
-  `owner` and the `developer_keys` allowed to publish in it.
+`registry check-owner` checks the claim against the entry. The registry
+submission process performs the external ownership check before acceptance.
+The manifest can carry an optional `metadata.author` for catalog display.
+
+## Later publications and rotation
+
+Keep approved entries and rotations immutable. Run `registry check` with
+`--previous` pointing to the approved checkout to enforce this rule and require
+new versions to use the current generation. Use `--archives` to check the
+archive digest, manifest signature and file hashes. The checker validates
+each generation in order and rejects reused keys.
+
+To transfer or rotate a key, create and sign the next rotation with the current
+seed. Add both the JSON and its detached signature to the checkout. Use the new
+key and generation for subsequent versions of the same identifier. Keep the
+rotation history available so a device can skip package versions.
+
+If the current seed is lost, the namespace owner must prove ownership again
+through the registry's recovery process. The regular rotation and installer
+paths require the previous key's signature. Recovery cannot upgrade an
+existing installation through those paths. Any registry recovery policy must
+address existing devices separately.
+
+The migration uses the new entry, index and origin formats and reverse-DNS
+identifiers for all packages. The old developer-key and namespace
+authorization formats are retired. Published releases and tags are preserved.
 
 ## Device verification
 
-`xila_package_manager::trust` (`no_std + alloc`) implements these steps;
-`xila-package registry verify-signed` runs them on a whole directory.
+1. Authenticate `root.json` with `TrustedRoot::bootstrap` from the pinned root.
+   Pass the highest accepted root version. Apply later root versions in order
+   with `TrustedRoot::update`.
+2. Authenticate the index with `verify_index`. Pass the highest accepted
+   index version and the current time if available. Persist the accepted
+   versions and check each entry and rotation with `check_listed`.
+3. Authenticate the selected entry with `verify_entry`. Check that the
+   requested identifier and version match the entry. Obtain its signing key
+   with `package_key`.
+4. Check the archive size and digest. Verify the manifest signature with the
+   entry's package key, check the manifest against the entry, and verify each
+   file hash. Seal the verified staging directory.
+5. Record the verified key in the new origin. For an upgrade, fetch the rotation
+   records and signatures from the generation after the installed origin
+   through the offered generation. Pass these records in order to
+   `installation::activate`. It checks continuity against the stored origin
+   before writing the installation journal. The journal commits the new
+   bundle and origin together or restores the previous origin on rollback.
 
-1. `TrustedRoot::bootstrap`: `root.json` signed by a pinned root key, version
-   at least the persisted one. Later versions go through `TrustedRoot::update`
-   one at a time, each signed by a root key of the previous one.
-2. `verify_index`: signed by a repository key; version at least the highest
-   persisted one (**rollback**); not expired when the device has a trustworthy
-   clock (**freeze**). Persist the accepted version.
-3. `verify_developer_key` / `verify_namespace` / `verify_entry`: the file's own signature, then
-   `check_listed` against the index (**mix-and-match**: every file must be the
-   one listed in this snapshot).
-4. `namespace_publisher_key`: the entry's `publisher` is the key file's `id`,
-   the namespace file covering the identifier (`namespace_candidates` lists
-   the listed path to fetch) names that key in `developer_keys`, or, for a
-   legacy `xila.<name>` identifier, the key's own `namespaces` is `["xila"]`,
-   and the key's `kinds` contain the package's kind (below). `publisher_key`
-   is the same check without a namespace file, so only the legacy rule. The
-   returned key verifies
-   the archive's manifest signature; the entry's SHA-256 and size pin the
-   archive bytes.
+With no index, the entry signature authenticates its origin. Index version and
+expiry checks require the index. Archive signatures authenticate content.
+The registry and device apply deployment policy separately, including
+permission to install native code.
 
-A device too small to hold the index may skip step 2 and the `check_listed`
-part of step 3: the per-file signatures still prove origin, but not freshness.
-
-## Identifiers and namespaces
-
-A package identifier is reverse-DNS with at least three components, such as
-`example.xila.weather` or `io.github.alice.weather`. Components use lowercase
-letters, digits, `-` and `_`, start and end with a letter or digit, and are at
-most 63 bytes; the identifier is at most 96 bytes. Mixed case is not allowed:
-identifiers become paths, and FAT file systems ignore case. The namespace is
-every component except the last.
-
-A namespace file `namespaces/<namespace>.json` records who owns a namespace
-and which developer keys may publish in it. A listed key may publish every
-identifier that starts with the namespace's components: `example.xila` covers
-`example.xila.weather` and `example.xila.tools.clock`, but not
-`example.xilas.weather`. A namespace has at least two components, so no file
-can claim a whole top-level domain. Namespace files may not overlap (one
-owner per identifier) and may list only existing developer keys. Adding a
-developer or rotating a key therefore edits the namespace file only, never an
-identifier or a key file.
-
-The `owner` must match the namespace: a `domain` owner is the namespace
-reversed (`xila.example` owns `example.xila`, and may not contain `_`), and a
-`github` or `gitlab` owner is the account of an `io.github.<account>` or
-`io.gitlab.<account>` namespace. Registry CI proves the ownership, a domain by
-a token file under `https://<domain>/.well-known/` and an account by the
-account itself, so namespaces are never allocated by hand.
-
-**Legacy rule**, until Xila's own packages migrate: the two-component
-identifiers `xila.<name>` stay valid, have no namespace file, and are granted
-by a developer key whose own `namespaces` field is `["xila"]`. That field
-accepts no other value and is optional; it is removed with the migration.
-
-`xila-package registry check` and `xila-package registry verify-signed`
-enforce all of the above; `registry sign` signs namespace files with their own
-domain and lists them in the index.
-
-## Package kinds
-
-A package is **Wasm** when its target starts with `wasm32-` or `wasm64-` and
-**native** otherwise (an unknown target counts as native). Wasm runs confined
-by the runtime; native code on a microcontroller without a memory protection
-unit runs fully trusted, so authorizing a key for it is a separate decision.
-
-A developer key lists the kinds it may publish in `kinds` (`"wasm"`,
-`"native"`). An absent or null `kinds` means Wasm only, so existing key files
-keep their meaning and native publication always needs an explicit grant. A key
-that is not authorized for the kind of an entry's target fails `publisher_key`,
-`xila-package registry check` and `xila-package registry verify-signed`.
 ## Installation planning
 
 `xila_package_manager::planner` (feature `planner`, `no_std + alloc`) chooses
 what to install. `IndexCatalog` lists the versions of a package from the
 authenticated index, newest first, and fetches only the entries it considers,
-running steps 3's `verify_entry` and `check_listed` on each. `plan` then:
+running `verify_entry` and `check_listed` on each. `plan` then:
 
 - keeps an installed version that satisfies every requirement, unless the
   package was requested with `Options::upgrade`;
@@ -154,7 +133,7 @@ running steps 3's `verify_entry` and `check_listed` on each. `plan` then:
 The result lists `Install`, `Upgrade` and `Downgrade` steps, each package after
 its dependencies, with the authenticated entry. For each step the caller
 downloads the archive, checks its size and SHA-256, verifies it with
-`publisher_key` (step 4) and hands it to the local installer, which owns every
+the entry's `package_key` and hands it to the local installer, which owns every
 change to the device.
 
 Dependency requirements are written `*`, `=VERSION`, `>=VERSION` or
@@ -180,10 +159,9 @@ A device can use several registries. Each configured repository
   keeps the first entry compatible with the device's target and running Xila
   version. A name found in
   several repositories is ambiguous: the user must choose the repository.
-- **Origin**: each installed package records its repository and archive hash
+- **Origin**: each installed package records its repository, archive hash and package key
   ([package-origin.schema.json](../schemas/package-origin.schema.json)). Updates
-  are only taken from that repository, so adding a repository cannot replace an
-  installed package.
+  require the same repository and package key continuity.
   Installing, upgrading and removing a package, and recording its origin, are
   crash-consistent transactions: see
   [installation transactions](installation-transactions.md).
@@ -209,7 +187,7 @@ provide every instruction the package may use:
   `thumbv7em` and `thumbv8m.main`, and `thumbv8m.base` on `thumbv8m.main`.
   `thumbv7em` needs `thumbv7em`, since the DSP extension is optional in
   `thumbv8m.main`.
-- Any other architecture (WebAssembly, Xtensa…) matches exactly.
+- Any other architecture (WebAssembly, Xtensa) matches exactly.
 
 `xila-package target compatible <package> <device>` applies the same rule.
 
@@ -223,7 +201,5 @@ each Xila release it supports.
   publishes only the current one so far.
 - Rollback protection depends on the device persisting versions; on unprotected
   flash this is best effort.
-- No developer-key revocation list yet: remove the key file and re-sign, which
-  devices with a fresh index will notice.
 - Signatures do not grant capabilities or permissions; installation policy is
   a separate decision.

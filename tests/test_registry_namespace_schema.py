@@ -29,9 +29,8 @@ VALID_IDENTIFIERS = [
     "example.xila.tools.clock",
     "example.xila.pixel-painter",
     "example.xila.pixel_painter",
-    # Legacy rule, until Xila's own packages are migrated.
-    "xila.calculator",
-    "xila.pixel-painter",
+    "dev.xila.calculator",
+    "dev.xila.pixel-painter",
 ]
 INVALID_IDENTIFIERS = [
     "weather",
@@ -45,6 +44,7 @@ INVALID_IDENTIFIERS = [
     "example.xila.-weather",
     "example.xila.weather_",
     "example.xila.wea/ther",
+    "xila.clock",
     "xila.Clock",
     "example.xila." + "a" * 96,
 ]
@@ -68,14 +68,12 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
 
     def test_rejects_invalid_namespace_files(self):
         for change in [
-            lambda n: n.update(format_version=2),
+            lambda n: n.update(format_version=1),
             lambda n: n.update(namespace="org"),
             lambda n: n.update(namespace="xila"),
             lambda n: n.update(namespace="Example.Xila"),
             lambda n: n.update(namespace="example.xila."),
             lambda n: n.update(developer_keys=[]),
-            lambda n: n.update(developer_keys=["alice", "alice"]),
-            lambda n: n.update(developer_keys=["Alice"]),
             lambda n: n.update(extra=True),
             lambda n: n.pop("owner"),
             lambda n: n["owner"].update(kind="email"),
@@ -94,7 +92,7 @@ class RegistryNamespaceSchemaTests(unittest.TestCase):
             with self.subTest(broken=broken):
                 self.assertFalse(VALIDATOR.is_valid(broken))
 
-    def test_package_identifiers_are_reverse_domain_or_legacy(self):
+    def test_package_identifiers_are_reverse_domain(self):
         for path in IDENTIFIER_SCHEMAS:
             name = Draft202012Validator(load(path)["properties"]["name"])
             for identifier in VALID_IDENTIFIERS:

@@ -1,5 +1,5 @@
-//! Registry entries: where a released archive lives and which developer key
-//! published it, for one package version.
+//! Registry entries: where a released archive lives and which package key
+//! signed it, for one package version.
 //!
 //! An entry is generated from a signed `.xpk` (never written by hand) and will
 //! be signed by the repository key. It pins the archive by SHA-256 and size, so
@@ -10,14 +10,14 @@ use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
 use crate::{
-    Error, MAX_MANIFEST_BYTES, Manifest, Metadata, XilaVersion, decode_versioned,
+    Error, MAX_MANIFEST_BYTES, Manifest, Metadata, PackageKey, XilaVersion, decode_versioned,
     metadata::is_https_url,
 };
 
 /// Editor-facing JSON Schema; a tooling hint, never a trust anchor.
 pub const REGISTRY_ENTRY_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json";
 /// Current experimental registry entry format version.
-pub const REGISTRY_FORMAT_VERSION: u32 = 2;
+pub const REGISTRY_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Archive {
@@ -43,12 +43,12 @@ pub struct RegistryEntry {
     /// Launcher name when the package is an application.
     pub display_name: Option<String>,
     pub metadata: Option<Metadata>,
-    /// Developer key identifier (`keys/developers/<publisher>.json` in xila-project/registry).
-    pub publisher: String,
+    /// Public key and generation pinned for this version of the package.
+    pub package_key: PackageKey,
     pub archive: Archive,
 }
 
-pub(crate) fn valid_publisher(value: &str) -> bool {
+pub(crate) fn valid_key_identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && !value.starts_with('-')
@@ -69,7 +69,7 @@ impl RegistryEntry {
     /// Describe `archive` from its already verified runtime manifest.
     pub fn from_manifest(
         manifest: &Manifest,
-        publisher: &str,
+        package_key: PackageKey,
         archive: Archive,
     ) -> Result<Self, Error> {
         crate::validate(manifest)?;
@@ -86,7 +86,7 @@ impl RegistryEntry {
                 .as_ref()
                 .map(|application| application.display_name.clone()),
             metadata: manifest.metadata.clone(),
-            publisher: publisher.into(),
+            package_key,
             archive,
         };
         entry.validate()?;
@@ -116,8 +116,8 @@ impl RegistryEntry {
         if let Some(metadata) = &self.metadata {
             metadata.validate()?;
         }
-        if !valid_publisher(&self.publisher)
-            || !is_https_url(&self.archive.url)
+        self.package_key.validate()?;
+        if !is_https_url(&self.archive.url)
             || !valid_digest(&self.archive.sha256)
             || self.archive.size == 0
         {
@@ -170,7 +170,7 @@ mod tests {
         Manifest {
             schema: Some(SCHEMA_URL.into()),
             format_version: FORMAT_VERSION,
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: XilaVersion::new(0, 1),
@@ -191,13 +191,18 @@ mod tests {
                 license: "MIT".into(),
                 source: "https://github.com/xila-project/applications".into(),
                 homepage: None,
+                author: Some("Xila Project".into()),
             }),
         }
     }
 
+    fn package_key() -> PackageKey {
+        PackageKey::new(1, &[42; 32]).unwrap()
+    }
+
     fn archive() -> Archive {
         Archive {
-            url: "https://github.com/xila-project/applications/releases/download/xila.clock-v0.1.0/xila.clock-0.1.0-wasm32-wasip1.xpk".into(),
+            url: "https://github.com/xila-project/applications/releases/download/dev.xila.clock-v0.1.0/dev.xila.clock-0.1.0-wasm32-wasip1.xpk".into(),
             sha256: "b".repeat(64),
             size: 1024,
         }
@@ -206,7 +211,7 @@ mod tests {
     #[test]
     fn entry_round_trips_and_matches_its_manifest() {
         let manifest = manifest();
-        let entry = RegistryEntry::from_manifest(&manifest, "xila", archive()).unwrap();
+        let entry = RegistryEntry::from_manifest(&manifest, package_key(), archive()).unwrap();
         assert_eq!(entry.display_name.as_deref(), Some("Clock"));
         let encoded = encode_registry_entry(&entry).unwrap();
         assert!(encoded.contains(r#""xila_version":"0.1""#));
@@ -217,7 +222,7 @@ mod tests {
 
     #[test]
     fn copied_fields_must_equal_the_signed_manifest() {
-        let entry = RegistryEntry::from_manifest(&manifest(), "xila", archive()).unwrap();
+        let entry = RegistryEntry::from_manifest(&manifest(), package_key(), archive()).unwrap();
         let mut other = manifest();
         other.version = "0.2.0".into();
         assert_eq!(entry.check_manifest(&other), Err(Error::RegistryMismatch));
@@ -230,13 +235,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_location_or_publisher() {
-        let base = RegistryEntry::from_manifest(&manifest(), "xila", archive()).unwrap();
+    fn rejects_invalid_location() {
+        let base = RegistryEntry::from_manifest(&manifest(), package_key(), archive()).unwrap();
         for change in [
             |e: &mut RegistryEntry| e.archive.url = "http://xila.example/a.xpk".into(),
             |e: &mut RegistryEntry| e.archive.sha256 = "B".repeat(64),
             |e: &mut RegistryEntry| e.archive.size = 0,
-            |e: &mut RegistryEntry| e.publisher = "Xila Project".into(),
         ] {
             let mut entry = base.clone();
             change(&mut entry);

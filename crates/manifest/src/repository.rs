@@ -11,13 +11,14 @@ use alloc::{string::String, vec::Vec};
 use miniserde::{Deserialize, Serialize};
 
 use crate::{
-    Error, MAX_MANIFEST_BYTES, developer_key::decode_key, metadata::is_https_url,
-    registry::valid_publisher, trust::valid_digest,
+    Error, MAX_MANIFEST_BYTES, PackageKey, metadata::is_https_url, public_key::decode_key,
+    registry::valid_key_identifier, trust::valid_digest,
 };
 
 pub const REPOSITORY_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/repository.schema.json";
 pub const ORIGIN_SCHEMA_URL: &str = "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/package-origin.schema.json";
 pub const REPOSITORY_FORMAT_VERSION: u32 = 1;
+pub const ORIGIN_FORMAT_VERSION: u32 = 2;
 
 /// One configured registry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,7 +64,7 @@ impl Repository {
         if self.format_version != REPOSITORY_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion);
         }
-        if !valid_publisher(&self.name)
+        if !valid_key_identifier(&self.name)
             || !is_https_url(&self.url)
             || self.url.ends_with('/')
             || decode_key(&self.root_key).is_none()
@@ -99,6 +100,8 @@ pub struct Origin {
     pub version: String,
     /// SHA-256 of the installed archive.
     pub archive_sha256: String,
+    /// The verified signing key. Required for repository installations.
+    pub package_key: Option<PackageKey>,
 }
 
 impl Origin {
@@ -110,14 +113,19 @@ impl Origin {
         {
             return Err(Error::InvalidSchema);
         }
-        if self.format_version != REPOSITORY_FORMAT_VERSION {
+        if self.format_version != ORIGIN_FORMAT_VERSION {
             return Err(Error::UnsupportedVersion);
+        }
+        if let Some(key) = &self.package_key {
+            key.validate()?;
+        } else if self.repository.is_some() {
+            return Err(Error::InvalidPackageKey);
         }
         crate::validate_identity(&self.name, &self.version, "origin")?;
         if self
             .repository
             .as_deref()
-            .is_some_and(|name| !valid_publisher(name))
+            .is_some_and(|name| !valid_key_identifier(name))
             || !valid_digest(&self.archive_sha256)
         {
             return Err(Error::InvalidRepository);
@@ -294,7 +302,7 @@ pub fn index_packages(index: &crate::Index) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{INDEX_SCHEMA_URL, Index, IndexFile, TRUST_FORMAT_VERSION};
+    use crate::{INDEX_FORMAT_VERSION, INDEX_SCHEMA_URL, Index, IndexFile};
     use alloc::vec;
 
     const KEY: &str = "AJEDFQ2MPtUO0vu/BnC7xX5Ag8sBuq6DF5+ShKfCQgU=";
@@ -326,11 +334,12 @@ mod tests {
     fn origin_round_trips() {
         let origin = Origin {
             schema: Some(ORIGIN_SCHEMA_URL.into()),
-            format_version: REPOSITORY_FORMAT_VERSION,
+            format_version: ORIGIN_FORMAT_VERSION,
             repository: Some("xila".into()),
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             archive_sha256: "a".repeat(64),
+            package_key: Some(crate::PackageKey::new(1, &[42; 32]).unwrap()),
         };
         assert_eq!(
             decode_origin(encode_origin(&origin).unwrap().as_bytes()).unwrap(),
@@ -382,32 +391,35 @@ mod tests {
             size: 1,
         };
         let mut files = vec![
-            file("packages/xila/clock/0.1.0.json"),
-            file("packages/xila/clock/0.10.0.json"),
-            file("packages/xila/clock/0.2.0.json"),
-            file("packages/xila/clock/1.0.0-rc.1.json"),
-            file("packages/xila/clock/nightly.json"),
-            file("packages/xila/clock/extra/1.0.0.json"),
-            file("packages/xila/clockwork/9.0.0.json"),
+            file("packages/dev/xila/clock/0.1.0.json"),
+            file("packages/dev/xila/clock/0.10.0.json"),
+            file("packages/dev/xila/clock/0.2.0.json"),
+            file("packages/dev/xila/clock/1.0.0-rc.1.json"),
+            file("packages/dev/xila/clock/nightly.json"),
+            file("packages/dev/xila/clock/extra/1.0.0.json"),
+            file("packages/dev/xila/clockwork/9.0.0.json"),
         ];
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let index = Index {
             schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
+            format_version: INDEX_FORMAT_VERSION,
             version: 1,
             expires: 2,
             files,
         };
         assert_eq!(
-            index_versions(&index, "xila.clock", false),
+            index_versions(&index, "dev.xila.clock", false),
             ["0.10.0", "0.2.0", "0.1.0"]
         );
         assert_eq!(
-            index_versions(&index, "xila.clock", true),
+            index_versions(&index, "dev.xila.clock", true),
             ["1.0.0-rc.1", "0.10.0", "0.2.0", "0.1.0"]
         );
-        assert!(index_versions(&index, "xila.weather", true).is_empty());
-        assert_eq!(index_versions(&index, "xila.clock.extra", false), ["1.0.0"]);
+        assert!(index_versions(&index, "dev.xila.weather", true).is_empty());
+        assert_eq!(
+            index_versions(&index, "dev.xila.clock.extra", false),
+            ["1.0.0"]
+        );
     }
 
     #[test]
@@ -418,14 +430,14 @@ mod tests {
             size: 1,
         };
         let mut files = vec![
-            file("keys/developers/xila.json"),
+            file("rotations/dev/xila/clock/2.json"),
             file("packages/1.0.0.json"),
-            file("packages/xila/clock/0.1.0.json"),
-            file("packages/xila/clock/0.2.0.json"),
-            file("packages/xila/clock/extra/1.0.0.json"),
-            file("packages/xila/clockwork/1.0.0-rc.1.json"),
-            file("packages/xila/nightly/latest.json"),
-            file("packages/xila/notes/0.1.0.json.sig"),
+            file("packages/dev/xila/clock/0.1.0.json"),
+            file("packages/dev/xila/clock/0.2.0.json"),
+            file("packages/dev/xila/clock/extra/1.0.0.json"),
+            file("packages/dev/xila/clockwork/1.0.0-rc.1.json"),
+            file("packages/dev/xila/nightly/latest.json"),
+            file("packages/dev/xila/notes/0.1.0.json.sig"),
             file("packages/example/xila/weather/2.0.0.json"),
             file("packages/example/xila.weather/1.0.0.json"),
             file("packages/example//weather/1.0.0.json"),
@@ -435,7 +447,7 @@ mod tests {
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let index = Index {
             schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
+            format_version: INDEX_FORMAT_VERSION,
             version: 1,
             expires: 2,
             files,
@@ -443,10 +455,10 @@ mod tests {
         assert_eq!(
             index_packages(&index),
             [
-                "example.xila.weather",
-                "xila.clock",
-                "xila.clock.extra",
-                "xila.clockwork"
+                "dev.xila.clock",
+                "dev.xila.clock.extra",
+                "dev.xila.clockwork",
+                "example.xila.weather"
             ]
         );
         let mut empty = index.clone();

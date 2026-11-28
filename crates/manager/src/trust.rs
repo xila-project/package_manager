@@ -1,23 +1,18 @@
-//! Registry trust chain: pinned root key → `root.json` → repository key →
-//! `index.json`, registry entries, developer keys and namespace files →
-//! developer key that the namespace file (or, for `xila.<name>`, the legacy
-//! rule) allows to publish a package.
+//! Registry trust from the pinned root to the package key in a signed entry.
 //!
-//! This module only authenticates metadata. Verifying the archive itself
-//! (size, SHA-256, manifest signature with [`publisher_key`], file hashes) and
-//! deciding what an installed package may do stay separate steps.
-//!
-//! Callers persist [`TrustedRoot::version`] and the highest accepted index
-//! version, and pass them back: without that state, rollback cannot be detected.
+//! Use [`package_key`] to verify the archive signature before checking file
+//! hashes. Upgrades must also pass [`verify_key_continuity`] against the
+//! installed key. Persist the highest root and index versions to detect
+//! metadata rollback.
 
 use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
+pub use xila_package_manifest::rotation::rotation_path;
 use xila_package_manifest::{
-    self as manifest, DEVELOPER_KEY_DOMAIN, DeveloperKey, ENTRY_DOMAIN, INDEX_DOMAIN, Index,
-    NAMESPACE_DOMAIN, NamedKey, Namespace, ROOT_DOMAIN, RegistryEntry, Root, XilaVersion,
-    decode_developer_key, decode_index, decode_namespace, decode_registry_entry, decode_root,
-    decode_sha256, signed_message,
+    self as manifest, ENTRY_DOMAIN, INDEX_DOMAIN, Index, MAX_KEY_GENERATION, NamedKey, PackageKey,
+    ROOT_DOMAIN, ROTATION_DOMAIN, RegistryEntry, Root, XilaVersion, decode_index,
+    decode_registry_entry, decode_root, decode_rotation, decode_sha256, signed_message,
 };
 use xila_package_verification::{PublicKey, Sha256Verifier};
 
@@ -34,8 +29,7 @@ pub enum Error {
     Expired,
     /// The file is absent from the index, or differs from its listed hash/size.
     NotListed,
-    /// The developer key does not match the entry's publisher, is not listed
-    /// in the namespace file covering the entry, or lacks the kind.
+    /// The package key is invalid or the rotation chain does not authorize it.
     Unauthorized,
 }
 
@@ -53,7 +47,9 @@ impl fmt::Display for Error {
             Self::Rollback => f.write_str("metadata version is older than an accepted one"),
             Self::Expired => f.write_str("registry index has expired"),
             Self::NotListed => f.write_str("file is not listed in the index with this hash"),
-            Self::Unauthorized => f.write_str("developer key may not publish this package"),
+            Self::Unauthorized => {
+                f.write_str("package key is invalid or is not authorized by the installed key")
+            }
         }
     }
 }
@@ -107,6 +103,9 @@ impl TrustedRoot {
         pinned: &[[u8; 32]],
         minimum_version: u64,
     ) -> Result<Self> {
+        if bytes.len() > manifest::MAX_MANIFEST_BYTES {
+            return Err(manifest::Error::TooLarge.into());
+        }
         let pinned = pinned
             .iter()
             .map(|key| PublicKey::from_bytes(key).map_err(|_| Error::InvalidSignature))
@@ -141,6 +140,9 @@ impl TrustedRoot {
     /// Move to the next `root.json`: it must have a higher version and be
     /// signed by a root key of **this** root. Apply each version in turn.
     pub fn update(&self, bytes: &[u8], sig: &[u8]) -> Result<Self> {
+        if bytes.len() > manifest::MAX_MANIFEST_BYTES {
+            return Err(manifest::Error::TooLarge.into());
+        }
         verify_any(&self.root_keys, ROOT_DOMAIN, bytes, sig)?;
         let root = decode_root(bytes)?;
         if root.version <= self.root.version {
@@ -167,6 +169,9 @@ impl TrustedRoot {
         minimum_version: u64,
         now: Option<u64>,
     ) -> Result<Index> {
+        if bytes.len() > manifest::MAX_INDEX_BYTES {
+            return Err(manifest::Error::TooLarge.into());
+        }
         verify_any(&self.repository_keys, INDEX_DOMAIN, bytes, sig)?;
         let index = decode_index(bytes)?;
         if index.version < minimum_version {
@@ -182,21 +187,22 @@ impl TrustedRoot {
     /// this proves origin, not freshness: also call [`check_listed`] when an
     /// index is available.
     pub fn verify_entry(&self, bytes: &[u8], sig: &[u8]) -> Result<RegistryEntry> {
+        if bytes.len() > manifest::MAX_MANIFEST_BYTES {
+            return Err(manifest::Error::TooLarge.into());
+        }
         verify_any(&self.repository_keys, ENTRY_DOMAIN, bytes, sig)?;
-        Ok(decode_registry_entry(bytes)?)
-    }
-
-    /// Authenticate one developer key file by its own signature.
-    pub fn verify_developer_key(&self, bytes: &[u8], sig: &[u8]) -> Result<DeveloperKey> {
-        verify_any(&self.repository_keys, DEVELOPER_KEY_DOMAIN, bytes, sig)?;
-        Ok(decode_developer_key(bytes)?)
-    }
-
-    /// Authenticate one namespace file (`namespaces/<namespace>.json`) by its
-    /// own signature. Also call [`check_listed`] when an index is available.
-    pub fn verify_namespace(&self, bytes: &[u8], sig: &[u8]) -> Result<Namespace> {
-        verify_any(&self.repository_keys, NAMESPACE_DOMAIN, bytes, sig)?;
-        Ok(decode_namespace(bytes)?)
+        let entry = decode_registry_entry(bytes)?;
+        package_key(&entry)?;
+        if self
+            .root
+            .root_keys
+            .iter()
+            .chain(&self.root.repository_keys)
+            .any(|key| key.public_key == entry.package_key.public_key)
+        {
+            return Err(Error::Unauthorized);
+        }
+        Ok(entry)
     }
 }
 
@@ -213,41 +219,87 @@ pub fn check_listed(index: &Index, path: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// The developer key that must have signed the archive described by `entry`.
-///
-/// The key must be the entry's publisher, be listed in `namespace`, the
-/// verified namespace file covering the entry's identifier (see
-/// [`namespace_candidates`]), and be authorized for the package's kind (Wasm
-/// or native, from the entry's target). Without a namespace file only the
-/// legacy rule applies: a `xila.<name>` entry and a key whose own `namespaces`
-/// list `xila`.
-pub fn namespace_publisher_key(
-    entry: &RegistryEntry,
-    key: &DeveloperKey,
-    namespace: Option<&Namespace>,
-) -> Result<PublicKey> {
-    if entry.publisher != key.id || !key.authorizes_package(&entry.name, &entry.target, namespace) {
-        return Err(Error::Unauthorized);
-    }
+/// The public key that must verify the package manifest described by `entry`.
+/// Obtain the entry from [`TrustedRoot::verify_entry`] before using this on a device.
+pub fn package_key(entry: &RegistryEntry) -> Result<PublicKey> {
+    parse_package_key(&entry.package_key)
+}
+
+fn parse_package_key(key: &PackageKey) -> Result<PublicKey> {
+    key.validate()?;
     PublicKey::from_bytes(&key.public_key_bytes()?).map_err(|_| Error::Unauthorized)
 }
 
-/// [`namespace_publisher_key`] without a namespace file: only the legacy
-/// `xila.<name>` rule can authorize the key.
-pub fn publisher_key(entry: &RegistryEntry, key: &DeveloperKey) -> Result<PublicKey> {
-    namespace_publisher_key(entry, key, None)
+/// The exact rotation JSON and its detached Ed25519 signature.
+#[derive(Clone, Copy)]
+pub struct SignedRotation<'a> {
+    pub bytes: &'a [u8],
+    pub signature: &'a [u8],
 }
 
-/// Registry-relative paths of the listed namespace files that may cover
-/// `name`. Namespace files never overlap, so at most one is returned: fetch
-/// it, authenticate it with [`TrustedRoot::verify_namespace`] and
-/// [`check_listed`], and pass it to [`namespace_publisher_key`]. Empty for a
-/// legacy `xila.<name>` identifier.
-pub fn namespace_candidates(index: &Index, name: &str) -> Vec<String> {
-    manifest::namespace_paths(name)
-        .into_iter()
-        .filter(|path| index.file(path).is_some())
-        .collect()
+/// Verify the next generation against the current key and the exact package
+/// identifier. A record cannot change the identifier or skip a generation.
+pub fn verify_rotation(
+    name: &str,
+    current: &PackageKey,
+    signed: SignedRotation<'_>,
+) -> Result<PackageKey> {
+    let rotation = decode_rotation(signed.bytes)?;
+    let current_key = parse_package_key(current)?;
+    if rotation.name != name
+        || rotation.generation != current.generation + 1
+        || rotation.previous_key != current.public_key
+    {
+        return Err(Error::Unauthorized);
+    }
+    let signature = signature(signed.signature)?;
+    let message = signed_message(ROTATION_DOMAIN, signed.bytes)?;
+    current_key
+        .verify(&message, &signature)
+        .map_err(|_| Error::InvalidSignature)?;
+    let next = PackageKey {
+        generation: rotation.generation,
+        public_key: rotation.new_key,
+    };
+    parse_package_key(&next)?;
+    Ok(next)
+}
+
+/// Require the offered key to equal the installed key or the end of a
+/// complete forward chain. Pass only the records after the installed generation
+/// up to the offered generation, in order. Both keys must have been obtained
+/// from verified package origins or entries.
+pub fn verify_key_continuity(
+    name: &str,
+    installed: &PackageKey,
+    offered: &PackageKey,
+    rotations: &[SignedRotation<'_>],
+) -> Result<()> {
+    parse_package_key(installed)?;
+    offered.validate()?;
+    if offered
+        .generation
+        .checked_sub(installed.generation)
+        .map(|count| count as usize)
+        != Some(rotations.len())
+    {
+        return Err(Error::Unauthorized);
+    }
+    let mut current = installed.clone();
+    let mut seen = [[0; 32]; MAX_KEY_GENERATION as usize];
+    seen[0] = installed.public_key_bytes()?;
+    for (index, signed) in rotations.iter().enumerate() {
+        current = verify_rotation(name, &current, *signed)?;
+        let raw = current.public_key_bytes()?;
+        if seen[..=index].contains(&raw) {
+            return Err(Error::Unauthorized);
+        }
+        seen[index + 1] = raw;
+    }
+    if &current != offered {
+        return Err(Error::Unauthorized);
+    }
+    Ok(())
 }
 
 /// Human-comparable fingerprint of a public key: the first 16 bytes of its
@@ -298,23 +350,15 @@ pub fn entry_path(name: &str, version: &str) -> String {
     format!("packages/{}/{version}.json", name.replace('.', "/"))
 }
 
-/// Registry-relative path of the developer key `id`.
-pub fn developer_key_path(id: &str) -> String {
-    format!("keys/developers/{id}.json")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{string::ToString, vec};
+    use alloc::vec;
     use ed25519_dalek::{Signer, SigningKey};
     use xila_package_manifest::{
-        Archive, INDEX_SCHEMA_URL, IndexFile, ROOT_SCHEMA_URL, TRUST_FORMAT_VERSION, encode_index,
-        encode_registry_entry, encode_root,
+        Archive, INDEX_FORMAT_VERSION, INDEX_SCHEMA_URL, IndexFile, ROOT_SCHEMA_URL,
+        TRUST_FORMAT_VERSION, encode_index, encode_registry_entry, encode_root,
     };
-
-    const DEVELOPER: &str = r#"{"id":"xila","author":"Xila Project","algorithm":"ed25519","public_key":"6D1cvlGzCAITQrmkWjJgn97DW1s6p3zvDNe8a87pcbc=","openssh":null,"namespaces":["xila"]}"#;
-    const NAMESPACE: &str = r#"{"$schema":null,"format_version":1,"namespace":"example.xila","owner":{"kind":"domain","name":"xila.example"},"developer_keys":["xila"]}"#;
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -367,14 +411,14 @@ mod tests {
         RegistryEntry {
             schema: None,
             format_version: manifest::REGISTRY_FORMAT_VERSION,
-            name: "xila.clock".into(),
+            name: "dev.xila.clock".into(),
             version: "0.1.0".into(),
             target: "wasm32-wasip1".into(),
             xila_version: XilaVersion::new(0, 1),
             capabilities: vec![],
             display_name: Some("Clock".into()),
             metadata: None,
-            publisher: "xila".into(),
+            package_key: PackageKey::new(1, &key(3).verifying_key().to_bytes()).unwrap(),
             archive: Archive {
                 url: "https://xila.example/clock.xpk".into(),
                 sha256: "c".repeat(64),
@@ -470,42 +514,45 @@ mod tests {
     }
 
     #[test]
-    fn entries_and_developer_keys_need_the_repository_key_and_their_domain() {
+    fn entries_need_the_repository_key_and_the_entry_domain() {
         let trusted = trusted();
-        let entry = encode_registry_entry(&entry()).unwrap();
-        let bytes = entry.as_bytes();
-        assert!(
-            trusted
-                .verify_entry(bytes, &sign(&key(2), ENTRY_DOMAIN, bytes))
-                .is_ok()
+        let entry = entry();
+        let encoded = encode_registry_entry(&entry).unwrap();
+        let bytes = encoded.as_bytes();
+        assert_eq!(
+            trusted.verify_entry(bytes, &sign(&key(2), ENTRY_DOMAIN, bytes)),
+            Ok(entry)
         );
-        for bad in [
-            sign(&key(1), ENTRY_DOMAIN, bytes),         // root key
-            sign(&key(2), DEVELOPER_KEY_DOMAIN, bytes), // wrong domain
-            sign(&key(2), ENTRY_DOMAIN, b"other"),      // other bytes
-            vec![0; 63],                                // truncated
+        for signature in [
+            sign(&key(3), ENTRY_DOMAIN, bytes),
+            sign(&key(2), INDEX_DOMAIN, bytes),
         ] {
             assert_eq!(
-                trusted.verify_entry(bytes, &bad).err(),
-                Some(Error::InvalidSignature)
+                trusted.verify_entry(bytes, &signature),
+                Err(Error::InvalidSignature)
             );
         }
-        let developer = DEVELOPER.as_bytes();
-        let key_file = trusted
-            .verify_developer_key(developer, &sign(&key(2), DEVELOPER_KEY_DOMAIN, developer))
-            .unwrap();
-        assert!(publisher_key(&self::entry(), &key_file).is_ok());
+        let repo_entry = RegistryEntry {
+            package_key: PackageKey::new(1, &key(2).verifying_key().to_bytes()).unwrap(),
+            ..self::entry()
+        };
+        let encoded = encode_registry_entry(&repo_entry).unwrap();
+        let bytes = encoded.as_bytes();
+        assert_eq!(
+            trusted.verify_entry(bytes, &sign(&key(2), ENTRY_DOMAIN, bytes)),
+            Err(Error::Unauthorized)
+        );
     }
 
     #[test]
     fn index_rejects_rollback_expiry_and_unlisted_files() {
         let trusted = trusted();
         let entry = encode_registry_entry(&entry()).unwrap();
-        let path = entry_path("xila.clock", "0.1.0");
-        assert_eq!(path, "packages/xila/clock/0.1.0.json");
+        let path = entry_path("dev.xila.clock", "0.1.0");
+        assert_eq!(path, "packages/dev/xila/clock/0.1.0.json");
         let index = encode_index(&Index {
             schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
+            format_version: INDEX_FORMAT_VERSION,
             version: 100,
             expires: 200,
             files: vec![IndexFile {
@@ -549,7 +596,12 @@ mod tests {
             Some(Error::NotListed)
         );
         assert_eq!(
-            check_listed(&accepted, &developer_key_path("other"), entry.as_bytes()).err(),
+            check_listed(
+                &accepted,
+                &rotation_path("example.xila.other", 2),
+                entry.as_bytes()
+            )
+            .err(),
             Some(Error::NotListed)
         );
     }
@@ -588,28 +640,28 @@ mod tests {
         };
         let index = Index {
             schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
+            format_version: INDEX_FORMAT_VERSION,
             version: 1,
             expires: 2,
             files: vec![
-                file("packages/xila/clock/0.1.0.json"),
-                file("packages/xila/clock/0.2.0.json"),
-                file("packages/xila/clock/nightly.json"),
+                file("packages/dev/xila/clock/0.1.0.json"),
+                file("packages/dev/xila/clock/0.2.0.json"),
+                file("packages/dev/xila/clock/nightly.json"),
             ],
         };
         assert_eq!(
-            candidates(&index, "xila.clock", None).unwrap(),
+            candidates(&index, "dev.xila.clock", None).unwrap(),
             [
-                "packages/xila/clock/0.2.0.json",
-                "packages/xila/clock/0.1.0.json"
+                "packages/dev/xila/clock/0.2.0.json",
+                "packages/dev/xila/clock/0.1.0.json"
             ]
         );
         assert_eq!(
-            candidates(&index, "xila.clock", Some("nightly")).unwrap(),
-            ["packages/xila/clock/nightly.json"]
+            candidates(&index, "dev.xila.clock", Some("nightly")).unwrap(),
+            ["packages/dev/xila/clock/nightly.json"]
         );
         assert_eq!(
-            candidates(&index, "xila.clock", Some("9.9.9")).err(),
+            candidates(&index, "dev.xila.clock", Some("9.9.9")).err(),
             Some(Error::NotListed)
         );
     }
@@ -638,176 +690,5 @@ mod tests {
             XilaVersion::new(2, 0)
         ));
         assert!(!compatible(&entry, "wasm32-wasip1", XilaVersion::new(1, 3)));
-    }
-
-    #[test]
-    fn publisher_must_match_and_cover_the_namespace() {
-        let developer = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
-        let mut other = entry();
-        other.publisher = "someone".into();
-        assert_eq!(
-            publisher_key(&other, &developer).err(),
-            Some(Error::Unauthorized)
-        );
-        let mut other = entry();
-        other.name = "example.xila.clock".into();
-        assert_eq!(
-            publisher_key(&other, &developer).err(),
-            Some(Error::Unauthorized)
-        );
-        assert_eq!(Error::Expired.to_string(), "registry index has expired");
-    }
-
-    fn namespaced_entry(name: &str) -> RegistryEntry {
-        RegistryEntry {
-            name: name.into(),
-            ..entry()
-        }
-    }
-
-    #[test]
-    fn namespace_files_authorize_reverse_domain_entries() {
-        let trusted = trusted();
-        let bytes = NAMESPACE.as_bytes();
-        let namespace = trusted
-            .verify_namespace(bytes, &sign(&key(2), NAMESPACE_DOMAIN, bytes))
-            .unwrap();
-        // Denied signatures: the root key, another domain, a truncated one.
-        for bad in [
-            sign(&key(1), NAMESPACE_DOMAIN, bytes),
-            sign(&key(2), DEVELOPER_KEY_DOMAIN, bytes),
-            sign(&key(2), ENTRY_DOMAIN, bytes),
-            vec![0; 63],
-        ] {
-            assert_eq!(
-                trusted.verify_namespace(bytes, &bad).err(),
-                Some(Error::InvalidSignature)
-            );
-        }
-
-        let developer = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
-        let weather = namespaced_entry("example.xila.weather");
-        assert!(namespace_publisher_key(&weather, &developer, Some(&namespace)).is_ok());
-        let nested = namespaced_entry("example.xila.tools.clock");
-        assert!(namespace_publisher_key(&nested, &developer, Some(&namespace)).is_ok());
-        // The legacy rule still applies with or without a namespace file.
-        assert!(namespace_publisher_key(&entry(), &developer, Some(&namespace)).is_ok());
-
-        // Denied: no namespace file, an identifier the file does not cover, a
-        // key the file does not list, and a publisher that is not the key.
-        for (entry, namespace) in [
-            (weather.clone(), None),
-            (namespaced_entry("example.xilas.weather"), Some(&namespace)),
-            (namespaced_entry("example.other.weather"), Some(&namespace)),
-        ] {
-            assert_eq!(
-                namespace_publisher_key(&entry, &developer, namespace).err(),
-                Some(Error::Unauthorized),
-                "{}",
-                entry.name
-            );
-        }
-        assert_eq!(
-            publisher_key(&weather, &developer).err(),
-            Some(Error::Unauthorized)
-        );
-        let mut other = namespace.clone();
-        other.developer_keys = vec!["alice".to_string()];
-        assert_eq!(
-            namespace_publisher_key(&weather, &developer, Some(&other)).err(),
-            Some(Error::Unauthorized)
-        );
-        let mut stranger = developer.clone();
-        stranger.id = "alice".into();
-        assert_eq!(
-            namespace_publisher_key(&weather, &stranger, Some(&namespace)).err(),
-            Some(Error::Unauthorized)
-        );
-        // A listed key still needs the native grant for native code.
-        let mut native = weather.clone();
-        native.target = "thumbv7em-none-eabi".into();
-        assert_eq!(
-            namespace_publisher_key(&native, &developer, Some(&namespace)).err(),
-            Some(Error::Unauthorized)
-        );
-        // A key without the legacy grant cannot publish xila.<name>.
-        let mut modern = developer.clone();
-        modern.namespaces = None;
-        assert!(namespace_publisher_key(&weather, &modern, Some(&namespace)).is_ok());
-        assert_eq!(
-            namespace_publisher_key(&entry(), &modern, Some(&namespace)).err(),
-            Some(Error::Unauthorized)
-        );
-    }
-
-    #[test]
-    fn namespace_candidates_are_the_listed_covering_files() {
-        let file = |path: &str| IndexFile {
-            path: path.into(),
-            sha256: "a".repeat(64),
-            size: 1,
-        };
-        let index = Index {
-            schema: Some(INDEX_SCHEMA_URL.into()),
-            format_version: TRUST_FORMAT_VERSION,
-            version: 1,
-            expires: 2,
-            files: vec![
-                file("namespaces/example.other.json"),
-                file("namespaces/example.xila.json"),
-            ],
-        };
-        assert_eq!(
-            namespace_candidates(&index, "example.xila.tools.clock"),
-            ["namespaces/example.xila.json"]
-        );
-        assert!(namespace_candidates(&index, "example.xilas.clock").is_empty());
-        assert!(namespace_candidates(&index, "xila.clock").is_empty());
-    }
-
-    #[test]
-    fn native_packages_need_a_native_authorization() {
-        let wasm_only = decode_developer_key(DEVELOPER.as_bytes()).unwrap();
-        let mut native = entry();
-        native.target = "thumbv7em-none-eabi".into();
-        assert!(publisher_key(&entry(), &wasm_only).is_ok());
-        assert_eq!(
-            publisher_key(&native, &wasm_only).err(),
-            Some(Error::Unauthorized)
-        );
-        // Unknown, empty and differently cased targets count as native too.
-        for target in ["", "unknown", "WASM32-wasip1", "wasm32"] {
-            let mut other = entry();
-            other.target = target.into();
-            assert_eq!(
-                publisher_key(&other, &wasm_only).err(),
-                Some(Error::Unauthorized),
-                "{target}"
-            );
-        }
-        let both = decode_developer_key(
-            DEVELOPER
-                .replace(
-                    r#""namespaces":["xila"]"#,
-                    r#""namespaces":["xila"],"kinds":["wasm","native"]"#,
-                )
-                .as_bytes(),
-        )
-        .unwrap();
-        assert!(publisher_key(&native, &both).is_ok());
-        let native_only = decode_developer_key(
-            DEVELOPER
-                .replace(
-                    r#""namespaces":["xila"]"#,
-                    r#""namespaces":["xila"],"kinds":["native"]"#,
-                )
-                .as_bytes(),
-        )
-        .unwrap();
-        assert!(publisher_key(&native, &native_only).is_ok());
-        assert_eq!(
-            publisher_key(&entry(), &native_only).err(),
-            Some(Error::Unauthorized)
-        );
     }
 }

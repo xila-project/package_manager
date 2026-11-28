@@ -5,11 +5,12 @@
 extern crate alloc;
 
 pub mod developer;
-pub mod developer_key;
 pub mod metadata;
 pub mod namespace;
+mod public_key;
 pub mod registry;
 pub mod repository;
+pub mod rotation;
 mod target;
 pub mod transaction;
 pub mod trust;
@@ -19,31 +20,31 @@ pub use developer::{
     DEVELOPER_MANIFEST_FILENAME, DEVELOPER_SCHEMA_URL, DeveloperManifest, decode_developer,
     encode_developer,
 };
-pub use developer_key::{
-    DEVELOPER_KEY_SCHEMA_URL, DeveloperKey, PackageKind, decode_developer_key,
-};
 pub use metadata::Metadata;
 use miniserde::{Deserialize, Serialize};
 pub use namespace::{
-    LEGACY_NAMESPACE, NAMESPACE_FORMAT_VERSION, NAMESPACE_SCHEMA_URL, NAMESPACES_DIRECTORY,
-    Namespace, NamespaceOwner, decode_namespace, encode_namespace, identifier_namespace,
-    is_legacy_identifier, namespace_covers, namespace_path, namespace_paths, valid_identifier,
-    valid_namespace,
+    NAMESPACE_FORMAT_VERSION, NAMESPACE_SCHEMA_URL, Namespace, NamespaceOwner, decode_namespace,
+    encode_namespace, identifier_namespace, valid_identifier, valid_namespace,
 };
+pub use public_key::encode_public_key;
 pub use registry::{
     Archive, REGISTRY_ENTRY_SCHEMA_URL, REGISTRY_FORMAT_VERSION, RegistryEntry,
     decode_registry_entry, encode_registry_entry,
 };
 pub use repository::{
-    ORIGIN_SCHEMA_URL, Origin, REPOSITORY_FORMAT_VERSION, REPOSITORY_SCHEMA_URL, Repository,
-    SemanticVersion, decode_origin, decode_repository, encode_origin, encode_repository,
-    index_packages, index_versions,
+    ORIGIN_FORMAT_VERSION, ORIGIN_SCHEMA_URL, Origin, REPOSITORY_FORMAT_VERSION,
+    REPOSITORY_SCHEMA_URL, Repository, SemanticVersion, decode_origin, decode_repository,
+    encode_origin, encode_repository, index_packages, index_versions,
+};
+pub use rotation::{
+    MAX_KEY_GENERATION, MAX_ROTATION_BYTES, PackageKey, ROTATION_DOMAIN, ROTATION_FORMAT_VERSION,
+    ROTATION_SCHEMA_URL, Rotation, decode_rotation, encode_rotation,
 };
 pub use trust::{
-    DEVELOPER_KEY_DOMAIN, ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_PATH, INDEX_SCHEMA_URL, Index,
-    IndexFile, MAX_INDEX_BYTES, NAMESPACE_DOMAIN, NamedKey, ROOT_DOMAIN, ROOT_PATH,
-    ROOT_SCHEMA_URL, Root, SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_index, decode_root,
-    encode_index, encode_root, signed_message,
+    ENTRY_DOMAIN, INDEX_DOMAIN, INDEX_FORMAT_VERSION, INDEX_PATH, INDEX_SCHEMA_URL, Index,
+    IndexFile, MAX_INDEX_BYTES, NamedKey, ROOT_DOMAIN, ROOT_PATH, ROOT_SCHEMA_URL, Root,
+    SIGNATURE_SUFFIX, TRUST_FORMAT_VERSION, decode_index, decode_root, encode_index, encode_root,
+    signed_message,
 };
 
 pub use target::target_compatible;
@@ -93,7 +94,8 @@ pub enum Error {
     InvalidRegistryEntry,
     /// A registry entry disagrees with the signed manifest of its archive.
     RegistryMismatch,
-    InvalidDeveloperKey,
+    InvalidPackageKey,
+    InvalidRotation,
     /// A namespace file is malformed, or its owner does not match its namespace.
     InvalidNamespace,
     /// `root.json` is malformed (version, keys or role separation).
@@ -451,7 +453,7 @@ mod tests {
         Manifest {
             schema: Some(SCHEMA_URL.to_string()),
             format_version: FORMAT_VERSION,
-            name: "xila.calculator".to_string(),
+            name: "dev.xila.calculator".to_string(),
             version: "1.0.0".to_string(),
             target: "wasm32-wasip1".to_string(),
             xila_version: XilaVersion::new(0, 1),
@@ -518,7 +520,7 @@ mod tests {
     }
     #[test]
     fn rejects_legacy_documents_with_an_unsupported_format_error() {
-        let legacy = br#"{"format_version":1,"name":"xila.calculator","version":"1.0.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"files":[{"path":"calculator.wasm","size":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+        let legacy = br#"{"format_version":1,"name":"dev.xila.calculator","version":"1.0.0","target":"wasm32-wasip1","minimum_xila_abi":1,"capabilities":[],"files":[{"path":"calculator.wasm","size":3,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
         assert_eq!(decode(legacy), Err(Error::UnsupportedVersion));
         assert_eq!(decode_developer(legacy), Err(Error::UnsupportedVersion));
         assert_eq!(

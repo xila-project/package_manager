@@ -11,6 +11,12 @@ checks. It verifies a package into a sealed staging directory, then hands it to
 `installation::activate`, which takes over through a small `Storage` trait
 (exists, rename, remove, read, write and list).
 
+Registry origins record the verified package signing key and generation.
+Activation checks upgrades against the previous origin before writing the
+journal. Pass the ordered rotation records for generations after the
+installed key through the offered key. Recovery restores the previous key
+with the previous origin when an upgrade rolls back.
+
 ## Layout
 
 | Path | Content |

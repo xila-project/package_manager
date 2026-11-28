@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/xila-project/package_manager/main/schemas/registry-entry.schema.json",
-  "title": "Xila package registry entry (experimental version 2)",
-  "description": "One released package version: where its signed .xpk lives and which developer key published it. Generated from the archive by `xila-package registry entry`, never written by hand; identity fields must equal the archive's signed manifest.",
+  "title": "Xila package registry entry (experimental version 3)",
+  "description": "One released package version. The entry pins the archive URL, size, SHA-256 and package key. Generate it with xila-package registry entry.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,7 +14,7 @@
     "capabilities",
     "display_name",
     "metadata",
-    "publisher",
+    "package_key",
     "archive"
   ],
   "properties": {
@@ -30,14 +30,13 @@
       ]
     },
     "format_version": {
-      "const": 2,
-      "description": "Experimental registry entry format version 2."
+      "const": 3
     },
     "name": {
       "type": "string",
       "maxLength": 96,
-      "pattern": "^(?:[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?){2,}|xila\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?)$",
-      "description": "Stable reverse-DNS-style package identity; also the application ID when application is not null. Reverse-DNS with at least three lowercase components (example.xila.weather); the namespace is every component but the last. Legacy rule until the migration of Xila's own packages: two-component xila.<name> identifiers stay valid."
+      "pattern": "^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?){2,}$",
+      "description": "Stable reverse-DNS package identifier with at least three lowercase components."
     },
     "version": {
       "type": "string",
@@ -88,12 +87,25 @@
         }
       ]
     },
-    "publisher": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 64,
-      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
-      "description": "Developer key identifier: keys/developers/<publisher>.json in xila-project/registry."
+    "package_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation",
+        "public_key"
+      ],
+      "properties": {
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 33
+        },
+        "public_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+          "description": "Canonical base64 encoding of a raw 32-byte Ed25519 public key."
+        }
+      }
     },
     "archive": {
       "type": "object",
@@ -164,6 +176,19 @@
               "maxLength": 256,
               "pattern": "^https://[^\\s\\u0000-\\u001f\\u007f-\\u009f]+$",
               "description": "Optional HTTPS project homepage. The maxLength limit counts UTF-8 bytes, and xila-package enforces it."
+            }
+          ]
+        },
+        "author": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+              "description": "Optional author shown in catalogs."
             }
           ]
         }
