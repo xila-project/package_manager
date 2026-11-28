@@ -608,7 +608,7 @@ fn registry_init_creates_a_registry_that_signs_and_verifies_end_to_end() {
             .contains("outside the registry")
     );
 
-    // Add a developer key and one entry for a test package.
+    // Add one entry for a test package with its own key.
     assert!(run(&["key", "generate", &path("dev.seed"), &path("dev.pub")]).0);
     fs::create_dir_all(temp.path().join("source/executables")).unwrap();
     fs::write(temp.path().join("source/executables/clock.wasm"), b"clock").unwrap();

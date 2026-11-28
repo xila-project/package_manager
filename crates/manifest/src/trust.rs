@@ -133,7 +133,7 @@ pub struct IndexFile {
     pub size: u64,
 }
 
-/// `index.json`: a snapshot of every developer key and entry, signed by a
+/// `index.json`: a snapshot of entries and rotations, signed by a
 /// repository key. Devices keep the highest version seen (rollback) and, when
 /// they have a trustworthy clock, refuse an expired index (freeze).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
