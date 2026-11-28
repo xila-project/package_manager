@@ -69,13 +69,17 @@ impl Rotation {
         }
         if !valid_identifier(&self.name)
             || !(2..=MAX_KEY_GENERATION).contains(&self.generation)
-            || self.previous_key == self.new_key
-            || decode_key(&self.previous_key).is_none()
-            || decode_key(&self.new_key).is_none()
+            || self.previous_key_bytes()?
+                == decode_key(&self.new_key).ok_or(Error::InvalidRotation)?
         {
             return Err(Error::InvalidRotation);
         }
         Ok(())
+    }
+
+    /// Decode the key that must authorize this rotation.
+    pub fn previous_key_bytes(&self) -> Result<[u8; 32], Error> {
+        decode_key(&self.previous_key).ok_or(Error::InvalidRotation)
     }
 }
 

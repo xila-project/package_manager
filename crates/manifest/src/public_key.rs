@@ -39,10 +39,10 @@ pub(crate) fn decode_key(encoded: &str) -> Option<[u8; 32]> {
         return None;
     }
     let mut output = [0u8; 33];
-    for (chunk, out) in bytes[..44].chunks(4).zip(output.chunks_mut(3)) {
+    for (chunk_index, (chunk, out)) in bytes.chunks_exact(4).zip(output.chunks_mut(3)).enumerate() {
         let mut accumulator = 0u32;
         for (index, &byte) in chunk.iter().enumerate() {
-            let value = if byte == b'=' && index == 3 {
+            let value = if chunk_index * 4 + index == 43 {
                 0
             } else {
                 base64_value(byte)?
@@ -58,4 +58,36 @@ pub(crate) fn decode_key(encoded: &str) -> Option<[u8; 32]> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&output[..32]);
     Some(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_public_key_round_trips() {
+        let key = core::array::from_fn(|index| index as u8);
+        let encoded = encode_public_key(&key);
+        assert_eq!(encoded, "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
+        assert_eq!(decode_key(&encoded), Some(key));
+    }
+
+    #[test]
+    fn rejects_padding_before_the_last_character() {
+        let encoded = encode_public_key(&[0; 32]);
+        for index in (3..43).step_by(4) {
+            let mut alias = encoded.clone();
+            alias.replace_range(index..=index, "=");
+            assert_eq!(decode_key(&alias), None, "padding at offset {index}");
+        }
+    }
+
+    #[test]
+    fn rejects_nonzero_padding_bits() {
+        let mut encoded = encode_public_key(&[0; 32]);
+        for character in ["B", "C", "D"] {
+            encoded.replace_range(42..43, character);
+            assert_eq!(decode_key(&encoded), None);
+        }
+    }
 }

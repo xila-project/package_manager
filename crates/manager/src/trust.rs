@@ -193,12 +193,13 @@ impl TrustedRoot {
         verify_any(&self.repository_keys, ENTRY_DOMAIN, bytes, sig)?;
         let entry = decode_registry_entry(bytes)?;
         package_key(&entry)?;
+        let package_key = entry.package_key.public_key_bytes()?;
         if self
             .root
             .root_keys
             .iter()
             .chain(&self.root.repository_keys)
-            .any(|key| key.public_key == entry.package_key.public_key)
+            .any(|key| key.public_key_bytes() == Ok(package_key))
         {
             return Err(Error::Unauthorized);
         }
@@ -225,7 +226,7 @@ pub fn package_key(entry: &RegistryEntry) -> Result<PublicKey> {
     parse_package_key(&entry.package_key)
 }
 
-fn parse_package_key(key: &PackageKey) -> Result<PublicKey> {
+pub(crate) fn parse_package_key(key: &PackageKey) -> Result<PublicKey> {
     key.validate()?;
     PublicKey::from_bytes(&key.public_key_bytes()?).map_err(|_| Error::Unauthorized)
 }
@@ -244,19 +245,23 @@ pub fn verify_rotation(
     current: &PackageKey,
     signed: SignedRotation<'_>,
 ) -> Result<PackageKey> {
-    let rotation = decode_rotation(signed.bytes)?;
+    if signed.bytes.len() > manifest::MAX_ROTATION_BYTES {
+        return Err(manifest::Error::TooLarge.into());
+    }
     let current_key = parse_package_key(current)?;
+    verify_any(
+        core::slice::from_ref(&current_key),
+        ROTATION_DOMAIN,
+        signed.bytes,
+        signed.signature,
+    )?;
+    let rotation = decode_rotation(signed.bytes)?;
     if rotation.name != name
         || rotation.generation != current.generation + 1
-        || rotation.previous_key != current.public_key
+        || rotation.previous_key_bytes()? != current.public_key_bytes()?
     {
         return Err(Error::Unauthorized);
     }
-    let signature = signature(signed.signature)?;
-    let message = signed_message(ROTATION_DOMAIN, signed.bytes)?;
-    current_key
-        .verify(&message, &signature)
-        .map_err(|_| Error::InvalidSignature)?;
     let next = PackageKey {
         generation: rotation.generation,
         public_key: rotation.new_key,
@@ -296,7 +301,7 @@ pub fn verify_key_continuity(
         }
         seen[index + 1] = raw;
     }
-    if &current != offered {
+    if seen[rotations.len()] != offered.public_key_bytes()? {
         return Err(Error::Unauthorized);
     }
     Ok(())
@@ -364,29 +369,10 @@ mod tests {
         SigningKey::from_bytes(&[seed; 32])
     }
 
-    fn base64(bytes: &[u8; 32]) -> String {
-        const TABLE: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut output = String::new();
-        for chunk in bytes.chunks(3) {
-            let mut block = [0u8; 3];
-            block[..chunk.len()].copy_from_slice(chunk);
-            let value = u32::from_be_bytes([0, block[0], block[1], block[2]]);
-            for index in 0..4 {
-                if index <= chunk.len() {
-                    output.push(TABLE[(value >> (18 - 6 * index) & 63) as usize] as char);
-                } else {
-                    output.push('=');
-                }
-            }
-        }
-        output
-    }
-
     fn named(id: &str, key: &SigningKey) -> NamedKey {
         NamedKey {
             id: id.into(),
-            public_key: base64(&key.verifying_key().to_bytes()),
+            public_key: manifest::encode_public_key(&key.verifying_key().to_bytes()),
         }
     }
 
@@ -532,11 +518,11 @@ mod tests {
                 Err(Error::InvalidSignature)
             );
         }
-        let repo_entry = RegistryEntry {
+        let repository_entry = RegistryEntry {
             package_key: PackageKey::new(1, &key(2).verifying_key().to_bytes()).unwrap(),
             ..self::entry()
         };
-        let encoded = encode_registry_entry(&repo_entry).unwrap();
+        let encoded = encode_registry_entry(&repository_entry).unwrap();
         let bytes = encoded.as_bytes();
         assert_eq!(
             trusted.verify_entry(bytes, &sign(&key(2), ENTRY_DOMAIN, bytes)),
@@ -690,5 +676,140 @@ mod tests {
             XilaVersion::new(2, 0)
         ));
         assert!(!compatible(&entry, "wasm32-wasip1", XilaVersion::new(1, 3)));
+    }
+    const PACKAGE_NAME: &str = "dev.xila.clock";
+
+    fn pin(generation: u32, seed: u8) -> PackageKey {
+        PackageKey::new(generation, &key(seed).verifying_key().to_bytes()).unwrap()
+    }
+
+    fn rotation(name: &str, generation: u32, previous: u8, next: u8) -> (String, Vec<u8>) {
+        let record = manifest::Rotation {
+            schema: None,
+            format_version: manifest::ROTATION_FORMAT_VERSION,
+            name: name.into(),
+            generation,
+            previous_key: pin(generation - 1, previous).public_key,
+            new_key: pin(generation, next).public_key,
+        };
+        let bytes = manifest::encode_rotation(&record).unwrap();
+        let signature = sign(&key(previous), ROTATION_DOMAIN, bytes.as_bytes());
+        (bytes, signature)
+    }
+
+    fn signed(record: &(String, Vec<u8>)) -> SignedRotation<'_> {
+        SignedRotation {
+            bytes: record.0.as_bytes(),
+            signature: &record.1,
+        }
+    }
+
+    #[test]
+    fn rotations_require_authentication_before_json_parsing() {
+        let current = pin(1, 3);
+        let rotation = rotation(PACKAGE_NAME, 2, 3, 4);
+        for bytes in [rotation.0.as_bytes(), b"{"] {
+            assert_eq!(
+                verify_rotation(
+                    PACKAGE_NAME,
+                    &current,
+                    SignedRotation {
+                        bytes,
+                        signature: &[],
+                    }
+                ),
+                Err(Error::InvalidSignature)
+            );
+        }
+        let invalid = ("{".into(), sign(&key(3), ROTATION_DOMAIN, b"{"));
+        assert_eq!(
+            verify_rotation(PACKAGE_NAME, &current, signed(&invalid)),
+            Err(Error::Metadata(manifest::Error::InvalidJson))
+        );
+        let oversized = [b' '; manifest::MAX_ROTATION_BYTES + 1];
+        assert_eq!(
+            verify_rotation(
+                PACKAGE_NAME,
+                &current,
+                SignedRotation {
+                    bytes: &oversized,
+                    signature: &[],
+                }
+            ),
+            Err(Error::Metadata(manifest::Error::TooLarge))
+        );
+    }
+
+    #[test]
+    fn rotation_chain_rejects_old_repeated_and_reordered_records() {
+        let first = rotation(PACKAGE_NAME, 2, 3, 4);
+        let second = rotation(PACKAGE_NAME, 3, 4, 5);
+        let first = signed(&first);
+        let second = signed(&second);
+        let generation_one = pin(1, 3);
+        let generation_three = pin(3, 5);
+        assert!(
+            verify_key_continuity(
+                PACKAGE_NAME,
+                &generation_one,
+                &generation_three,
+                &[first, second]
+            )
+            .is_ok()
+        );
+
+        for current in [pin(2, 4), generation_three.clone()] {
+            assert_eq!(
+                verify_rotation(PACKAGE_NAME, &current, first),
+                Err(Error::InvalidSignature)
+            );
+        }
+        for records in [[first, first], [second, first]] {
+            assert_eq!(
+                verify_key_continuity(PACKAGE_NAME, &generation_one, &generation_three, &records),
+                Err(Error::InvalidSignature)
+            );
+        }
+
+        // A signature made by the current key cannot change the generation in the record.
+        let signature = sign(&key(4), ROTATION_DOMAIN, first.bytes);
+        assert_eq!(
+            verify_rotation(
+                PACKAGE_NAME,
+                &pin(2, 4),
+                SignedRotation {
+                    bytes: first.bytes,
+                    signature: &signature,
+                }
+            ),
+            Err(Error::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn rotations_reject_key_loops_and_other_identifiers() {
+        let current = pin(1, 3);
+        let first = rotation(PACKAGE_NAME, 2, 3, 4);
+        let second = rotation(PACKAGE_NAME, 3, 4, 3);
+        assert_eq!(
+            verify_key_continuity(
+                PACKAGE_NAME,
+                &current,
+                &pin(3, 3),
+                &[signed(&first), signed(&second)]
+            ),
+            Err(Error::Unauthorized)
+        );
+        assert_eq!(
+            verify_rotation("dev.xila.weather", &current, signed(&first)),
+            Err(Error::Unauthorized)
+        );
+
+        let self_rotation = first.0.replace(&pin(2, 4).public_key, &current.public_key);
+        let signature = sign(&key(3), ROTATION_DOMAIN, self_rotation.as_bytes());
+        assert_eq!(
+            verify_rotation(PACKAGE_NAME, &current, signed(&(self_rotation, signature))),
+            Err(Error::Metadata(manifest::Error::InvalidRotation))
+        );
     }
 }

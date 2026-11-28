@@ -26,12 +26,15 @@ use xila_package_verification::PublicKey;
 
 use crate::{Result, invalid, manifest_error, package_verification_error};
 
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+fn read_bounded(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
     let file = fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err(failure(path, "file exceeds its size limit"));
+        return Err(invalid(&format!(
+            "{}: file exceeds its size limit",
+            path.display()
+        )));
     }
     Ok(bytes)
 }
@@ -140,8 +143,12 @@ fn collect_json(directory: &Path, output: &mut Vec<PathBuf>, rotations: bool) ->
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.ends_with(".json.sig"))
         {
-            if !fs::symlink_metadata(path.with_extension(""))?.is_file() {
-                return Err(failure(&path, "rotation signature has no record"));
+            match fs::symlink_metadata(path.with_extension("")) {
+                Ok(record) if record.is_file() => {}
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(error.into());
+                }
+                _ => return Err(failure(&path, "rotation signature has no record")),
             }
         } else if !(metadata.is_file() && path.file_name().is_some_and(|name| name == ".gitkeep")) {
             return Err(invalid(&format!("unexpected registry file: {}", path.display())).into());
@@ -163,7 +170,23 @@ struct RotationFile {
 impl RotationFile {
     fn read(path: &Path) -> Result<Self> {
         let bytes = read_bounded(path, MAX_ROTATION_BYTES)?;
-        let signature = read_bounded(&signature_path(path), 64)?;
+        Self::from_bytes(path, bytes)
+    }
+
+    fn from_bytes(path: &Path, bytes: Vec<u8>) -> Result<Self> {
+        let signature_file = signature_path(path);
+        let signature = match read_bounded(&signature_file, 64) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(failure(&signature_file, "rotation signature is missing"));
+            }
+            result => result?,
+        };
+        if signature.len() != 64 {
+            return Err(failure(
+                &signature_file,
+                "rotation signature must be 64 bytes",
+            ));
+        }
         let record = decode_rotation(&bytes).map_err(|error| {
             failure(path, &manifest_error("invalid rotation", error).to_string())
         })?;
@@ -251,12 +274,22 @@ impl RegistryHistory {
                 keys.push(next);
             }
             for key in &keys {
-                if let Some(owner) = key_owners.insert(key.public_key.clone(), name) {
+                let public_key = key
+                    .public_key_bytes()
+                    .map_err(|error| manifest_error("invalid package key", error))?;
+                if let Some(owner) = key_owners.insert(public_key, name) {
                     return Err(fail(&format!("package key already used by {owner}")).into());
                 }
             }
             for entry in &history.entries {
-                if keys.get(entry.package_key.generation as usize - 1) != Some(&entry.package_key) {
+                let public_key = entry
+                    .package_key
+                    .public_key_bytes()
+                    .map_err(|error| manifest_error("invalid package key", error))?;
+                if keys
+                    .get(entry.package_key.generation as usize - 1)
+                    .is_none_or(|key| key.public_key_bytes() != Ok(public_key))
+                {
                     return Err(fail(&format!(
                         "version {} does not use the pinned package key",
                         entry.version
@@ -572,12 +605,12 @@ fn write_signed_site(
     let trusted = TrustedRoot::bootstrap(&root_bytes, &root_signature, &pinned, 0)
         .map_err(|error| invalid(&format!("{ROOT_PATH}: {error}")))?;
     let key = crate::key::read_seed(repository_seed)?;
-    let public = encode_public_key(&key.verifying_key().to_bytes());
+    let public = key.verifying_key().to_bytes();
     if !trusted
         .root()
         .repository_keys
         .iter()
-        .any(|listed| listed.public_key == public)
+        .any(|listed| listed.public_key_bytes() == Ok(public))
     {
         return Err(invalid("the signing key is not a repository key of root.json").into());
     }
@@ -915,8 +948,10 @@ pub fn verify_signed(site: &Path, root_public_key: &Path, now: Option<u64>) -> R
     for file in &index.files {
         let fail = |error: trust::Error| invalid(&format!("{}: {error}", file.path));
         if file.path.starts_with("rotations/") {
-            let rotation = RotationFile::read(&site.join(&file.path))?;
-            trust::check_listed(&index, &file.path, &rotation.bytes).map_err(fail)?;
+            let path = site.join(&file.path);
+            let bytes = read_bounded(&path, MAX_ROTATION_BYTES)?;
+            trust::check_listed(&index, &file.path, &bytes).map_err(fail)?;
+            let rotation = RotationFile::from_bytes(&path, bytes)?;
             history.add_rotation(&file.path, rotation)?;
         } else {
             let (bytes, signature) = read_signed(&file.path, MAX_MANIFEST_BYTES)?;

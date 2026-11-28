@@ -86,10 +86,11 @@ fn valid_keys(keys: &[NamedKey]) -> bool {
         && keys.len() <= MAX_ROLE_KEYS
         && keys.iter().enumerate().all(|(index, key)| {
             valid_key_identifier(&key.id)
-                && decode_key(&key.public_key).is_some()
-                && keys[..index]
-                    .iter()
-                    .all(|other| other.id != key.id && other.public_key != key.public_key)
+                && key.public_key_bytes().is_ok_and(|public_key| {
+                    keys[..index].iter().all(|other| {
+                        other.id != key.id && other.public_key_bytes() != Ok(public_key)
+                    })
+                })
         })
 }
 
@@ -110,7 +111,7 @@ impl Root {
         let shared = self.root_keys.iter().any(|root| {
             self.repository_keys
                 .iter()
-                .any(|repository| repository.public_key == root.public_key)
+                .any(|repository| repository.public_key_bytes() == root.public_key_bytes())
         });
         if self.version == 0
             || !valid_keys(&self.root_keys)

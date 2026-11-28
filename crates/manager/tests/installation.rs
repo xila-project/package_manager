@@ -740,3 +740,25 @@ fn upgrade_persists_the_key_only_after_a_valid_rotation_chain() {
         Err(Error::PackageKey(trust::Error::Unauthorized))
     );
 }
+
+#[test]
+fn install_refuses_an_invalid_package_public_key() {
+    let mut memory = Memory::new();
+    memory.staged("0.1.0");
+    let mut offered = origin("0.1.0", Some("xila"));
+    offered.package_key = Some(xila_package_manifest::PackageKey::new(1, &[0; 32]).unwrap());
+    assert_eq!(
+        block_on(installation::activate(
+            &mut memory,
+            &LAYOUT,
+            STAGING,
+            offered,
+            Mode::Install,
+            &[]
+        )),
+        Err(Error::PackageKey(
+            xila_package_manager::trust::Error::Unauthorized
+        ))
+    );
+    assert!(installed_origin(&mut memory).is_none());
+}

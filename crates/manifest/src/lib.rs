@@ -629,16 +629,30 @@ mod tests {
         assert_eq!(decode_namespace(deep.as_bytes()), Err(Error::InvalidJson));
         // A valid manifest with an ignored field nested up to the limit still
         // decodes; one level more is rejected before parsing.
-        let json = encode(&example()).unwrap();
+        let rotation = include_str!("../../../tests/fixtures/registry-rotation.json");
+        let manifest = encode(&example()).unwrap();
         for (brackets, expected) in [
             (MAX_JSON_DEPTH - 1, Ok(())),
             (MAX_JSON_DEPTH, Err(Error::InvalidJson)),
         ] {
-            let mut input = alloc::format!("{{\"ignored\":{}", "[".repeat(brackets));
-            input.push_str(&"]".repeat(brackets));
-            input.push(',');
-            input.push_str(&json[1..]);
-            assert_eq!(decode(input.as_bytes()).map(|_| ()), expected, "{brackets}");
+            let nested = |json: &str| {
+                alloc::format!(
+                    "{{\"ignored\":{}{},{}",
+                    "[".repeat(brackets),
+                    "]".repeat(brackets),
+                    &json[1..]
+                )
+            };
+            assert_eq!(
+                decode(nested(&manifest).as_bytes()).map(|_| ()),
+                expected,
+                "{brackets}"
+            );
+            assert_eq!(
+                decode_rotation(nested(rotation).as_bytes()).map(|_| ()),
+                expected,
+                "{brackets}"
+            );
         }
         // Brackets inside strings do not count towards the depth, and the
         // limit itself is accepted by the depth check.

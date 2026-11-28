@@ -30,7 +30,7 @@
 use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
-use crate::trust::{SignedRotation, verify_key_continuity};
+use crate::trust::{SignedRotation, parse_package_key, verify_key_continuity};
 
 use xila_package_manifest::{
     self as manifest, MAX_MANIFEST_BYTES, Operation, Origin, PREVIOUS_PREFIX, REMOVING_PREFIX,
@@ -459,6 +459,9 @@ pub async fn activate<S: Storage>(
     rotations: &[SignedRotation<'_>],
 ) -> Result<Activated, S::Error> {
     origin.validate()?;
+    if let Some(key) = &origin.package_key {
+        parse_package_key(key).map_err(Error::PackageKey)?;
+    }
     if !is_temporary_name(staging, STAGING_PREFIX)
         || !storage
             .exists(&layout.bundle(staging))

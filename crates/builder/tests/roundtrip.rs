@@ -947,6 +947,24 @@ fn registry_publication_checks_ownership_and_key_rotations() {
     ]);
     let signature_path = format!("{second_rotation}.sig");
     let signature = fs::read(&signature_path).unwrap();
+    let record = fs::read(&second_rotation).unwrap();
+    fs::remove_file(&second_rotation).unwrap();
+    rejects(
+        &["registry", "check", &path("registry")],
+        "rotation signature has no record",
+    );
+    fs::write(&second_rotation, record).unwrap();
+
+    fs::remove_file(&signature_path).unwrap();
+    rejects(
+        &["registry", "check", &path("registry")],
+        "rotation signature is missing",
+    );
+    fs::write(&signature_path, []).unwrap();
+    rejects(
+        &["registry", "check", &path("registry")],
+        "rotation signature must be 64 bytes",
+    );
     fs::write(&signature_path, [0; 64]).unwrap();
     rejects(
         &["registry", "check", &path("registry")],
@@ -963,6 +981,34 @@ fn registry_publication_checks_ownership_and_key_rotations() {
         path(&format!("previous/{rotations}/2.json.sig")),
     )
     .unwrap();
+
+    succeeds(&[
+        "registry",
+        "rotate",
+        "dev.xila.clock",
+        "3",
+        &path("second.seed"),
+        &path("first.pub"),
+        &third_rotation,
+    ]);
+    rejects(
+        &["registry", "check", &path("registry")],
+        "package key already used by dev.xila.clock",
+    );
+    fs::remove_file(&third_rotation).unwrap();
+    fs::remove_file(format!("{third_rotation}.sig")).unwrap();
+
+    let mut other = entry.clone();
+    other.name = "dev.xila.weather".into();
+    other.package_key = pin(1, "second");
+    let other_path = path("registry/packages/dev/xila/weather/0.3.0.json");
+    fs::create_dir_all(path("registry/packages/dev/xila/weather")).unwrap();
+    write(&other, &other_path);
+    rejects(
+        &["registry", "check", &path("registry")],
+        "package key already used by dev.xila.clock",
+    );
+    fs::remove_file(other_path).unwrap();
 
     succeeds(&[
         "registry",
@@ -1015,6 +1061,19 @@ fn registry_publication_checks_ownership_and_key_rotations() {
         fs::read(&published_signature).unwrap(),
         fs::read(&signature_path).unwrap()
     );
+    let published_rotation = path(&format!("site/{rotations}/2.json"));
+    let original = fs::read(&published_rotation).unwrap();
+    fs::write(&published_rotation, vec![b'['; original.len()]).unwrap();
+    rejects(
+        &[
+            "registry",
+            "verify-signed",
+            &path("site"),
+            &path("registry/root.pub"),
+        ],
+        "file is not listed in the index with this hash",
+    );
+    fs::write(&published_rotation, original).unwrap();
     fs::write(&published_signature, [0; 64]).unwrap();
     rejects(
         &[
